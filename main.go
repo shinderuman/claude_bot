@@ -70,17 +70,93 @@ func main() {
 	testMessage := flag.String("message", "Hello", "テストメッセージ")
 	flag.Parse()
 
-	if err := godotenv.Load(); err != nil {
-		log.Println(".envファイルが見つかりません（環境変数から読み込みます）")
-	}
-
+	loadEnvironment()
 	config := loadConfig()
 
 	if *testMode {
-		testClaudeConnection(config, *testMessage)
+		runTestMode(config, *testMessage)
 		return
 	}
 
+	history := initializeHistory()
+	logStartupInfo(config)
+	streamNotifications(config, history)
+}
+
+func loadEnvironment() {
+	if err := godotenv.Load(); err != nil {
+		log.Println(".envファイルが見つかりません（環境変数から読み込みます）")
+	}
+}
+
+func loadConfig() *Config {
+	return &Config{
+		MastodonServer:      os.Getenv("MASTODON_SERVER"),
+		MastodonAccessToken: os.Getenv("MASTODON_ACCESS_TOKEN"),
+		AnthropicAuthToken:  os.Getenv("ANTHROPIC_AUTH_TOKEN"),
+		AnthropicBaseURL:    os.Getenv("ANTHROPIC_BASE_URL"),
+		AnthropicModel:      os.Getenv("ANTHROPIC_DEFAULT_MODEL"),
+		BotUsername:         os.Getenv("BOT_USERNAME"),
+		CharacterPrompt:     os.Getenv("CHARACTER_PROMPT"),
+		AllowRemoteUsers:    parseAllowRemoteUsers(),
+	}
+}
+
+func parseAllowRemoteUsers() bool {
+	value := os.Getenv("ALLOW_REMOTE_USERS")
+	return value == "true" || value == "1"
+}
+
+func runTestMode(config *Config, message string) {
+	logTestModeInfo(config, message)
+	validateAuthToken(config)
+
+	session := createTestSession(message)
+	response := generateResponse(config, session)
+
+	if response == "" {
+		log.Fatal("エラー: Claudeからの応答がありません")
+	}
+
+	logTestResult(response)
+}
+
+func logTestModeInfo(config *Config, message string) {
+	log.Printf("Claude API疎通確認開始")
+	log.Printf("エンドポイント: %s", config.AnthropicBaseURL)
+	log.Printf("モデル: %s", config.AnthropicModel)
+	log.Printf("テストメッセージ: %s", message)
+	log.Println()
+}
+
+func validateAuthToken(config *Config) {
+	if config.AnthropicAuthToken == "" {
+		log.Fatal("エラー: ANTHROPIC_AUTH_TOKEN環境変数が設定されていません")
+	}
+
+	tokenPreview := config.AnthropicAuthToken
+	if len(tokenPreview) > 10 {
+		tokenPreview = tokenPreview[:10] + "..."
+	}
+	log.Printf("認証トークン: %s", tokenPreview)
+	log.Println()
+}
+
+func createTestSession(message string) *Session {
+	session := createNewSession()
+	session.addMessage("user", message)
+	return session
+}
+
+func logTestResult(response string) {
+	log.Println("成功: Claudeから応答を受信しました")
+	log.Println()
+	log.Println("--- Claude応答 ---")
+	log.Println(response)
+	log.Println("------------------")
+}
+
+func initializeHistory() *ConversationHistory {
 	history := &ConversationHistory{
 		sessions:     make(map[string]*Session),
 		saveFilePath: "sessions.json",
@@ -92,155 +168,145 @@ func main() {
 		log.Printf("履歴読み込み成功: %d件のセッション", len(history.sessions))
 	}
 
+	return history
+}
+
+func logStartupInfo(config *Config) {
 	log.Printf("Mastodon Bot起動: @%s", config.BotUsername)
 	log.Printf("Claude API: %s (model: %s)", config.AnthropicBaseURL, config.AnthropicModel)
-
-	streamNotifications(config, history)
 }
 
-func loadConfig() *Config {
-	allowRemote := os.Getenv("ALLOW_REMOTE_USERS")
-	return &Config{
-		MastodonServer:      os.Getenv("MASTODON_SERVER"),
-		MastodonAccessToken: os.Getenv("MASTODON_ACCESS_TOKEN"),
-		AnthropicAuthToken:  os.Getenv("ANTHROPIC_AUTH_TOKEN"),
-		AnthropicBaseURL:    os.Getenv("ANTHROPIC_BASE_URL"),
-		AnthropicModel:      os.Getenv("ANTHROPIC_DEFAULT_MODEL"),
-		BotUsername:         os.Getenv("BOT_USERNAME"),
-		CharacterPrompt:     os.Getenv("CHARACTER_PROMPT"),
-		AllowRemoteUsers:    allowRemote == "true" || allowRemote == "1",
-	}
-}
-
-func testClaudeConnection(config *Config, message string) {
-	log.Printf("Claude API疎通確認開始")
-	log.Printf("エンドポイント: %s", config.AnthropicBaseURL)
-	log.Printf("モデル: %s", config.AnthropicModel)
-	log.Printf("テストメッセージ: %s", message)
-	log.Println()
-
-	if config.AnthropicAuthToken == "" {
-		log.Fatal("エラー: ANTHROPIC_AUTH_TOKEN環境変数が設定されていません")
-	}
-
-	tokenPreview := config.AnthropicAuthToken
-	if len(tokenPreview) > 10 {
-		tokenPreview = tokenPreview[:10] + "..."
-	}
-	log.Printf("認証トークン: %s", tokenPreview)
-	log.Println()
-
-	session := &Session{
-		Messages:      []Message{},
-		Summaries:     []string{},
-		LastUpdated:   time.Now(),
-		DetailedStart: 0,
-		MaxSummaries:  maxSummaries,
-	}
-	session.addMessage("user", message)
-
-	response := generateResponse(config, session)
-
-	if response == "" {
-		log.Fatal("エラー: Claudeからの応答がありません")
-	}
-
-	log.Println("成功: Claudeから応答を受信しました")
-	log.Println()
-	log.Println("--- Claude応答 ---")
-	log.Println(response)
-	log.Println("------------------")
-}
-
-// streamNotifications はMastodonのストリーミングAPIに接続し、
-// メンション通知をリアルタイムで受信して処理する
 func streamNotifications(config *Config, history *ConversationHistory) {
-	c := mastodon.NewClient(&mastodon.Config{
-		Server:      config.MastodonServer,
-		AccessToken: config.MastodonAccessToken,
-	})
-
-	ctx := context.Background()
-	events, err := c.StreamingUser(ctx)
-	if err != nil {
-		log.Fatal(err)
-	}
+	client := createMastodonClient(config)
+	events := connectToStream(client)
 
 	log.Println("ストリーミング接続成功")
 
 	for event := range events {
-		notification, ok := event.(*mastodon.NotificationEvent)
-		if !ok {
-			continue
+		if notification := extractMentionNotification(event); notification != nil {
+			if shouldProcessNotification(config, notification) {
+				go processNotification(config, history, notification)
+			}
 		}
-
-		if notification.Notification.Type != "mention" || notification.Notification.Status == nil {
-			continue
-		}
-
-		if notification.Notification.Account.Username == config.BotUsername {
-			continue
-		}
-
-		if !config.AllowRemoteUsers && strings.Contains(string(notification.Notification.Account.Acct), "@") {
-			log.Printf("リモートユーザーからのメンションをスキップ: @%s", notification.Notification.Account.Acct)
-			continue
-		}
-
-		go processNotification(config, history, notification.Notification)
 	}
 }
 
-// processNotification はメンション通知を処理し、Claudeからの応答を生成して返信する
-// 会話履歴が20件を超えた場合は自動的に圧縮を実行する
-func processNotification(config *Config, history *ConversationHistory, notification *mastodon.Notification) {
-	userID := string(notification.Account.Acct)
-	content := stripHTML(string(notification.Status.Content))
-	content = removeMentions(content)
+func createMastodonClient(config *Config) *mastodon.Client {
+	return mastodon.NewClient(&mastodon.Config{
+		Server:      config.MastodonServer,
+		AccessToken: config.MastodonAccessToken,
+	})
+}
 
-	if strings.TrimSpace(content) == "" {
+func connectToStream(client *mastodon.Client) chan mastodon.Event {
+	ctx := context.Background()
+	events, err := client.StreamingUser(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return events
+}
+
+func extractMentionNotification(event mastodon.Event) *mastodon.Notification {
+	notification, ok := event.(*mastodon.NotificationEvent)
+	if !ok {
+		return nil
+	}
+
+	if notification.Notification.Type != "mention" || notification.Notification.Status == nil {
+		return nil
+	}
+
+	return notification.Notification
+}
+
+func shouldProcessNotification(config *Config, notification *mastodon.Notification) bool {
+	if notification.Account.Username == config.BotUsername {
+		return false
+	}
+
+	if !config.AllowRemoteUsers && isRemoteUser(notification.Account.Acct) {
+		log.Printf("リモートユーザーからのメンションをスキップ: @%s", notification.Account.Acct)
+		return false
+	}
+
+	return true
+}
+
+func isRemoteUser(acct string) bool {
+	return strings.Contains(acct, "@")
+}
+
+func processNotification(config *Config, history *ConversationHistory, notification *mastodon.Notification) {
+	userMessage := extractUserMessage(notification)
+	if userMessage == "" {
 		return
 	}
 
-	log.Printf("メンション受信: @%s: %s", userID, content)
+	userID := string(notification.Account.Acct)
+	log.Printf("メンション受信: @%s: %s", userID, userMessage)
 
 	session := history.getOrCreateSession(userID)
-	session.addMessage("user", content)
 
+	if processResponse(config, session, notification, userMessage) {
+		compressHistoryIfNeeded(config, session)
+		saveHistory(history)
+	}
+}
+
+func extractUserMessage(notification *mastodon.Notification) string {
+	content := stripHTML(string(notification.Status.Content))
+	content = removeMentions(content)
+	return strings.TrimSpace(content)
+}
+
+func processResponse(config *Config, session *Session, notification *mastodon.Notification, userMessage string) bool {
 	response := generateResponse(config, session)
-	mention := "@" + string(notification.Account.Acct) + " "
+	mention := buildMention(notification.Account.Acct)
+	statusID := string(notification.Status.ID)
+	visibility := string(notification.Status.Visibility)
 
 	if response == "" {
-		log.Printf("応答生成失敗: エラーメッセージを投稿します")
-		errorMsg := generateErrorResponse(config)
-		if errorMsg != "" {
-			postReply(config, string(notification.Status.ID), mention+errorMsg, string(notification.Status.Visibility))
-		}
-		return
+		postErrorMessage(config, statusID, mention, visibility)
+		return false
 	}
 
+	session.addMessage("user", userMessage)
 	session.addMessage("assistant", response)
-	err := postReply(config, string(notification.Status.ID), mention+response, string(notification.Status.Visibility))
+	err := postReply(config, statusID, mention+response, visibility)
 
 	if err != nil {
-		log.Printf("投稿失敗: エラーメッセージを生成します")
-		errorMsg := generateErrorResponse(config)
-		if errorMsg != "" {
-			postReply(config, string(notification.Status.ID), mention+errorMsg, string(notification.Status.Visibility))
-		}
+		postErrorMessage(config, statusID, mention, visibility)
+		return false
 	}
 
+	return true
+}
+
+func buildMention(acct string) string {
+	return "@" + acct + " "
+}
+
+func postErrorMessage(config *Config, statusID, mention, visibility string) {
+	log.Printf("応答生成失敗: エラーメッセージを投稿します")
+	errorMsg := generateErrorResponse(config)
+	if errorMsg != "" {
+		postReply(config, statusID, mention+errorMsg, visibility)
+	}
+}
+
+func compressHistoryIfNeeded(config *Config, session *Session) {
 	if len(session.Messages) > historyCompressThreshold {
 		compressHistory(config, session)
 	}
+}
 
+func saveHistory(history *ConversationHistory) {
 	if err := history.save(); err != nil {
 		log.Printf("履歴保存エラー: %v", err)
 	}
 }
 
-// getOrCreateSession はユーザーIDに対応するセッションを取得または新規作成する
-// 既存セッションの場合はLastUpdatedを更新する
 func (h *ConversationHistory) getOrCreateSession(userID string) *Session {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -250,15 +316,19 @@ func (h *ConversationHistory) getOrCreateSession(userID string) *Session {
 		return session
 	}
 
-	session := &Session{
+	session := createNewSession()
+	h.sessions[userID] = session
+	return session
+}
+
+func createNewSession() *Session {
+	return &Session{
 		Messages:      []Message{},
 		Summaries:     []string{},
 		LastUpdated:   time.Now(),
 		DetailedStart: 0,
 		MaxSummaries:  maxSummaries,
 	}
-	h.sessions[userID] = session
-	return session
 }
 
 // load はJSONファイルから会話履歴を読み込む
@@ -295,28 +365,32 @@ func (s *Session) addMessage(role, content string) {
 	s.LastUpdated = time.Now()
 }
 
-// generateResponse はセッションの会話履歴を元にClaude APIを呼び出して応答を生成する
-// システムプロンプトには要約された過去の会話履歴が含まれる
-// 文字数制限を超えた場合は最大リトライする
 func generateResponse(config *Config, session *Session) string {
-
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		response := callClaudeAPI(config, session)
 		if response == "" {
 			return ""
 		}
 
-		charCount := len([]rune(response))
-		if charCount <= maxResponseChars {
+		if isWithinCharLimit(response) {
 			return response
 		}
 
-		log.Printf("文字数超過（%d文字）: リトライ %d/%d", charCount, attempt, maxRetries)
-		log.Printf("超過した応答内容: %s", response)
+		logCharLimitExceeded(response, attempt)
 	}
 
 	log.Printf("リトライ上限到達: 応答を返さずスキップ")
 	return ""
+}
+
+func isWithinCharLimit(response string) bool {
+	return len([]rune(response)) <= maxResponseChars
+}
+
+func logCharLimitExceeded(response string, attempt int) {
+	charCount := len([]rune(response))
+	log.Printf("文字数超過（%d文字）: リトライ %d/%d", charCount, attempt, maxRetries)
+	log.Printf("超過した応答内容: %s", response)
 }
 
 func callClaudeAPI(config *Config, session *Session) string {
@@ -328,15 +402,29 @@ func callClaudeAPIForSummary(config *Config, session *Session) string {
 }
 
 func callClaudeAPIWithTokens(config *Config, session *Session, maxTokens int64) string {
-	systemPrompt := buildSystemPrompt(config, session)
-	messages := buildMessages(session)
+	client := createAnthropicClient(config)
+	params := buildAPIParams(config, session, maxTokens)
 
+	msg, err := client.Messages.New(context.Background(), params)
+	if err != nil {
+		log.Printf("API呼び出しエラー: %v", err)
+		return ""
+	}
+
+	return extractResponseText(msg)
+}
+
+func createAnthropicClient(config *Config) anthropic.Client {
 	opts := []option.RequestOption{option.WithAPIKey(config.AnthropicAuthToken)}
 	if config.AnthropicBaseURL != "" {
 		opts = append(opts, option.WithBaseURL(config.AnthropicBaseURL))
 	}
+	return anthropic.NewClient(opts...)
+}
 
-	client := anthropic.NewClient(opts...)
+func buildAPIParams(config *Config, session *Session, maxTokens int64) anthropic.MessageNewParams {
+	systemPrompt := buildSystemPrompt(config, session)
+	messages := buildMessages(session)
 
 	params := anthropic.MessageNewParams{
 		Model:     anthropic.Model(config.AnthropicModel),
@@ -350,16 +438,13 @@ func callClaudeAPIWithTokens(config *Config, session *Session, maxTokens int64) 
 		}
 	}
 
-	msg, err := client.Messages.New(context.Background(), params)
-	if err != nil {
-		log.Printf("API呼び出しエラー: %v", err)
-		return ""
-	}
+	return params
+}
 
+func extractResponseText(msg *anthropic.Message) string {
 	if len(msg.Content) > 0 {
 		return msg.Content[0].Text
 	}
-
 	return ""
 }
 
@@ -375,84 +460,107 @@ func convertMessages(messages []Message) []anthropic.MessageParam {
 	return result
 }
 
-// buildSystemPrompt はキャラクター設定と要約された会話履歴を組み合わせて
-// Claude APIに渡すシステムプロンプトを構築する
 func buildSystemPrompt(config *Config, session *Session) string {
-	prompt := fmt.Sprintf("【最重要约束】您的回答必须在%d字以内。这是绝对必须遵守的约束。\n\n", maxResponseChars)
-	prompt += fmt.Sprintf("CRITICAL CONSTRAINT: Your response MUST NOT exceed %d characters. This is a hard limit. Count carefully before responding.\n", maxResponseChars)
-	prompt += fmt.Sprintf("【最重要制約】あなたの回答は必ず%d文字以内に収めてください。これは絶対に守らなければならない制約です。\n", maxResponseChars)
-	prompt += "IMPORTANT: Always respond in Japanese (日本語で回答してください / 请用日语回答).\n\n"
-
+	prompt := buildCharLimitInstructions()
 	prompt += config.CharacterPrompt
-
-	if len(session.Summaries) > 0 {
-		prompt += "\n\n【過去の会話要約】\n"
-		for _, summary := range session.Summaries {
-			prompt += summary + "\n\n"
-		}
-	}
-
+	prompt += buildSummariesSection(session)
 	return prompt
 }
 
-// buildMessages はセッションから送信するメッセージリストを構築する
-// DetailedStartで指定された位置以降のメッセージのみを返す
-func buildMessages(session *Session) []Message {
-	start := session.DetailedStart
-	if start < 0 {
-		start = 0
-	}
-	if start >= len(session.Messages) {
-		start = 0
-	}
-
-	messages := make([]Message, 0)
-	for i := start; i < len(session.Messages); i++ {
-		messages = append(messages, session.Messages[i])
-	}
-
-	return messages
+func buildCharLimitInstructions() string {
+	var builder strings.Builder
+	builder.WriteString(fmt.Sprintf("【最重要约束】您的回答必须在%d字以内。这是绝对必须遵守的约束。\n\n", maxResponseChars))
+	builder.WriteString(fmt.Sprintf("CRITICAL CONSTRAINT: Your response MUST NOT exceed %d characters. This is a hard limit. Count carefully before responding.\n", maxResponseChars))
+	builder.WriteString(fmt.Sprintf("【最重要制約】あなたの回答は必ず%d文字以内に収めてください。これは絶対に守らなければならない制約です。\n", maxResponseChars))
+	builder.WriteString("IMPORTANT: Always respond in Japanese (日本語で回答してください / 请用日语回答).\n\n")
+	return builder.String()
 }
 
-// compressHistory は会話履歴が長くなった場合に古いメッセージを要約して圧縮する
-// 最新10件のメッセージは詳細を保持し、それ以前のメッセージをClaude APIで要約する
-// 要約結果はセッションのSummaryフィールドに追加され、システムプロンプトで使用される
-func compressHistory(config *Config, session *Session) {
-	if len(session.Messages) <= detailedMessageCount {
-		return
+func buildSummariesSection(session *Session) string {
+	if len(session.Summaries) == 0 {
+		return ""
 	}
 
-	compressCount := len(session.Messages) - detailedMessageCount
+	var builder strings.Builder
+	builder.WriteString("\n\n【過去の会話要約】\n")
+	for _, summary := range session.Summaries {
+		builder.WriteString(summary)
+		builder.WriteString("\n\n")
+	}
+	return builder.String()
+}
+
+func buildMessages(session *Session) []Message {
+	start := calculateMessageStart(session)
+	return session.Messages[start:]
+}
+
+func calculateMessageStart(session *Session) int {
+	start := session.DetailedStart
+	if start < 0 || start >= len(session.Messages) {
+		return 0
+	}
+	return start
+}
+
+func compressHistory(config *Config, session *Session) {
+	compressCount := calculateCompressCount(session)
 	if compressCount <= 0 {
 		return
 	}
 
 	messagesToCompress := session.Messages[:compressCount]
+	summary := generateSummary(config, messagesToCompress)
 
-	conversationText := ""
-	for _, msg := range messagesToCompress {
-		role := "ユーザー"
-		if msg.Role == "assistant" {
-			role = "アシスタント"
-		}
-		conversationText += role + ": " + msg.Content + "\n"
-	}
-
-	summaryPrompt := "以下の会話を簡潔に要約してください:\n\n" + conversationText
-
-	summarySession := &Session{
-		Messages:     []Message{{Role: "user", Content: summaryPrompt}},
-		Summaries:    []string{},
-		LastUpdated:  time.Now(),
-		MaxSummaries: maxSummaries,
-	}
-
-	summary := callClaudeAPIForSummary(config, summarySession)
 	if summary == "" {
 		log.Printf("要約生成エラー: 応答が空です")
 		return
 	}
 
+	updateSessionWithSummary(session, summary, compressCount)
+	log.Printf("履歴圧縮完了: %d件のメッセージを要約（要約数: %d/%d）", compressCount, len(session.Summaries), session.MaxSummaries)
+}
+
+func calculateCompressCount(session *Session) int {
+	if len(session.Messages) <= detailedMessageCount {
+		return 0
+	}
+	return len(session.Messages) - detailedMessageCount
+}
+
+func generateSummary(config *Config, messages []Message) string {
+	conversationText := formatMessagesForSummary(messages)
+	summaryPrompt := "以下の会話を簡潔に要約してください:\n\n" + conversationText
+
+	summarySession := createSummarySession(summaryPrompt)
+	return callClaudeAPIForSummary(config, summarySession)
+}
+
+func formatMessagesForSummary(messages []Message) string {
+	var builder strings.Builder
+	for _, msg := range messages {
+		role := "ユーザー"
+		if msg.Role == "assistant" {
+			role = "アシスタント"
+		}
+		builder.WriteString(role)
+		builder.WriteString(": ")
+		builder.WriteString(msg.Content)
+		builder.WriteString("\n")
+	}
+	return builder.String()
+}
+
+func createSummarySession(prompt string) *Session {
+	return &Session{
+		Messages:     []Message{{Role: "user", Content: prompt}},
+		Summaries:    []string{},
+		LastUpdated:  time.Now(),
+		MaxSummaries: maxSummaries,
+	}
+}
+
+func updateSessionWithSummary(session *Session, summary string, compressCount int) {
 	session.Summaries = append(session.Summaries, summary)
 
 	if len(session.Summaries) > session.MaxSummaries {
@@ -460,25 +568,15 @@ func compressHistory(config *Config, session *Session) {
 	}
 
 	session.DetailedStart = compressCount
-	log.Printf("履歴圧縮完了: %d件のメッセージを要約（要約数: %d/%d）", compressCount, len(session.Summaries), session.MaxSummaries)
 }
 
 func postReply(config *Config, inReplyToID, content, visibility string) error {
-	c := mastodon.NewClient(&mastodon.Config{
-		Server:      config.MastodonServer,
-		AccessToken: config.MastodonAccessToken,
-	})
+	client := createMastodonClient(config)
+	toot := createToot(inReplyToID, content, visibility)
 
-	toot := &mastodon.Toot{
-		Status:      content,
-		InReplyToID: mastodon.ID(inReplyToID),
-		Visibility:  visibility,
-	}
-
-	_, err := c.PostStatus(context.Background(), toot)
+	_, err := client.PostStatus(context.Background(), toot)
 	if err != nil {
-		log.Printf("投稿エラー: %v", err)
-		log.Printf("投稿内容（%d文字）: %s", len([]rune(content)), content)
+		logPostError(err, content)
 		return err
 	}
 
@@ -486,16 +584,32 @@ func postReply(config *Config, inReplyToID, content, visibility string) error {
 	return nil
 }
 
-// generateErrorResponse は投稿失敗時のエラーメッセージをClaude APIで生成する
+func createToot(inReplyToID, content, visibility string) *mastodon.Toot {
+	return &mastodon.Toot{
+		Status:      content,
+		InReplyToID: mastodon.ID(inReplyToID),
+		Visibility:  visibility,
+	}
+}
+
+func logPostError(err error, content string) {
+	log.Printf("投稿エラー: %v", err)
+	log.Printf("投稿内容（%d文字）: %s", len([]rune(content)), content)
+}
+
 func generateErrorResponse(config *Config) string {
-	session := &Session{
-		Messages:     []Message{{Role: "user", Content: "「ごめん、うまく返事できなかった。もう一度送ってくれる？」というメッセージを、あなたのキャラクターの口調で言い換えてください。説明は不要です。変換後のメッセージのみを返してください。"}},
+	prompt := "「ごめんなさい、あなたに返事を送るのに失敗したのでいまのメッセージをもう一度送ってくれますか？」というメッセージを、あなたのキャラクターの口調で言い換えてください。説明は不要です。変換後のメッセージのみを返してください。"
+	session := createErrorSession(prompt)
+	return callClaudeAPI(config, session)
+}
+
+func createErrorSession(prompt string) *Session {
+	return &Session{
+		Messages:     []Message{{Role: "user", Content: prompt}},
 		Summaries:    []string{},
 		LastUpdated:  time.Now(),
 		MaxSummaries: maxSummaries,
 	}
-
-	return callClaudeAPI(config, session)
 }
 
 func stripHTML(s string) string {
@@ -505,27 +619,31 @@ func stripHTML(s string) string {
 	}
 
 	var buf strings.Builder
-	var extract func(*html.Node)
-	extract = func(n *html.Node) {
-		if n.Type == html.TextNode {
-			buf.WriteString(n.Data)
-		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			extract(c)
-		}
-	}
-	extract(doc)
-
+	extractText(doc, &buf)
 	return strings.TrimSpace(buf.String())
+}
+
+func extractText(n *html.Node, buf *strings.Builder) {
+	if n.Type == html.TextNode {
+		buf.WriteString(n.Data)
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		extractText(c, buf)
+	}
 }
 
 func removeMentions(text string) string {
 	words := strings.Fields(text)
+	filtered := filterMentions(words)
+	return strings.Join(filtered, " ")
+}
+
+func filterMentions(words []string) []string {
 	result := []string{}
 	for _, word := range words {
 		if !strings.HasPrefix(word, "@") {
 			result = append(result, word)
 		}
 	}
-	return strings.Join(result, " ")
+	return result
 }
