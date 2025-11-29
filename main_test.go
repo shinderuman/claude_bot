@@ -156,14 +156,14 @@ func TestBuildSystemPrompt(t *testing.T) {
 		Summaries: []string{},
 	}
 
-	prompt := buildSystemPrompt(config, session)
+	prompt := buildSystemPrompt(config, session, true)
 	expected := "IMPORTANT: Always respond in Japanese (日本語で回答してください / 请用日语回答).\n\nテストプロンプト"
 	if prompt != expected {
 		t.Errorf("要約なしの場合 = %q, want %q", prompt, expected)
 	}
 
 	session.Summaries = []string{"過去の会話内容"}
-	prompt = buildSystemPrompt(config, session)
+	prompt = buildSystemPrompt(config, session, true)
 	expected = "IMPORTANT: Always respond in Japanese (日本語で回答してください / 请用日语回答).\n\nテストプロンプト\n\n【過去の会話要約】\n過去の会話内容\n\n"
 	if prompt != expected {
 		t.Errorf("要約ありの場合 = %q, want %q", prompt, expected)

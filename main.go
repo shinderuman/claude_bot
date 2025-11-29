@@ -436,16 +436,16 @@ func generateResponse(config *Config, session *Session) string {
 }
 
 func callClaudeAPI(config *Config, session *Session) string {
-	return callClaudeAPIWithTokens(config, session, maxResponseTokens)
+	return callClaudeAPIWithTokens(config, session, maxResponseTokens, true)
 }
 
 func callClaudeAPIForSummary(config *Config, session *Session) string {
-	return callClaudeAPIWithTokens(config, session, maxSummaryTokens)
+	return callClaudeAPIWithTokens(config, session, maxSummaryTokens, false)
 }
 
-func callClaudeAPIWithTokens(config *Config, session *Session, maxTokens int64) string {
+func callClaudeAPIWithTokens(config *Config, session *Session, maxTokens int64, includeCharacterPrompt bool) string {
 	client := createAnthropicClient(config)
-	params := buildAPIParams(config, session, maxTokens)
+	params := buildAPIParams(config, session, maxTokens, includeCharacterPrompt)
 
 	msg, err := client.Messages.New(context.Background(), params)
 	if err != nil {
@@ -464,8 +464,8 @@ func createAnthropicClient(config *Config) anthropic.Client {
 	return anthropic.NewClient(opts...)
 }
 
-func buildAPIParams(config *Config, session *Session, maxTokens int64) anthropic.MessageNewParams {
-	systemPrompt := buildSystemPrompt(config, session)
+func buildAPIParams(config *Config, session *Session, maxTokens int64, includeCharacterPrompt bool) anthropic.MessageNewParams {
+	systemPrompt := buildSystemPrompt(config, session, includeCharacterPrompt)
 	messages := buildMessages(session)
 
 	params := anthropic.MessageNewParams{
@@ -502,9 +502,11 @@ func convertMessages(messages []Message) []anthropic.MessageParam {
 	return result
 }
 
-func buildSystemPrompt(config *Config, session *Session) string {
+func buildSystemPrompt(config *Config, session *Session, includeCharacterPrompt bool) string {
 	prompt := "IMPORTANT: Always respond in Japanese (日本語で回答してください / 请用日语回答).\n\n"
-	prompt += config.CharacterPrompt
+	if includeCharacterPrompt {
+		prompt += config.CharacterPrompt
+	}
 	prompt += buildSummariesSection(session)
 	return prompt
 }
@@ -659,6 +661,8 @@ func stripHTML(s string) string {
 func extractText(n *html.Node, buf *strings.Builder) {
 	if n.Type == html.TextNode {
 		buf.WriteString(n.Data)
+	} else if n.Type == html.ElementNode && n.Data == "br" {
+		buf.WriteString("\n")
 	}
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		extractText(c, buf)
