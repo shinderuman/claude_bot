@@ -21,15 +21,13 @@ const (
 	// Claude APIの最大トークン数（通常応答）
 	maxResponseTokens = 1024
 	// Claude APIの最大トークン数（要約生成）
-	maxSummaryTokens = 500
+	maxSummaryTokens = 1024
 	// 投稿の最大文字数（バッファ含む）
 	maxPostChars = 480
 	// 会話履歴の圧縮閾値
 	historyCompressThreshold = 20
 	// 詳細メッセージの保持件数
 	detailedMessageCount = 10
-	// 要約の最大保持件数
-	maxSummaries = 30
 )
 
 type Config struct {
@@ -50,11 +48,9 @@ type ConversationHistory struct {
 }
 
 type Session struct {
-	Messages      []Message
-	Summaries     []string
-	LastUpdated   time.Time
-	DetailedStart int
-	MaxSummaries  int
+	Messages    []Message
+	Summary     string
+	LastUpdated time.Time
 }
 
 type Message struct {
@@ -258,21 +254,24 @@ func extractUserMessage(notification *mastodon.Notification) string {
 }
 
 func processResponse(config *Config, session *Session, notification *mastodon.Notification, userMessage string) bool {
-	response := generateResponse(config, session)
 	mention := buildMention(notification.Account.Acct)
 	statusID := string(notification.Status.ID)
 	visibility := string(notification.Status.Visibility)
 
+	session.addMessage("user", userMessage)
+	response := generateResponse(config, session)
+
 	if response == "" {
+		rollbackLastMessage(session)
 		postErrorMessage(config, statusID, mention, visibility)
 		return false
 	}
 
-	session.addMessage("user", userMessage)
 	session.addMessage("assistant", response)
 	err := postResponseWithSplit(config, statusID, mention, response, visibility)
 
 	if err != nil {
+		rollbackLastMessages(session, 2)
 		postErrorMessage(config, statusID, mention, visibility)
 		return false
 	}
@@ -389,11 +388,9 @@ func (h *ConversationHistory) getOrCreateSession(userID string) *Session {
 
 func createNewSession() *Session {
 	return &Session{
-		Messages:      []Message{},
-		Summaries:     []string{},
-		LastUpdated:   time.Now(),
-		DetailedStart: 0,
-		MaxSummaries:  maxSummaries,
+		Messages:    []Message{},
+		Summary:     "",
+		LastUpdated: time.Now(),
 	}
 }
 
@@ -431,6 +428,20 @@ func (s *Session) addMessage(role, content string) {
 	s.LastUpdated = time.Now()
 }
 
+func rollbackLastMessage(session *Session) {
+	if len(session.Messages) > 0 {
+		session.Messages = session.Messages[:len(session.Messages)-1]
+		session.LastUpdated = time.Now()
+	}
+}
+
+func rollbackLastMessages(session *Session, count int) {
+	if len(session.Messages) >= count {
+		session.Messages = session.Messages[:len(session.Messages)-count]
+		session.LastUpdated = time.Now()
+	}
+}
+
 func generateResponse(config *Config, session *Session) string {
 	return callClaudeAPI(config, session)
 }
@@ -466,12 +477,11 @@ func createAnthropicClient(config *Config) anthropic.Client {
 
 func buildAPIParams(config *Config, session *Session, maxTokens int64, includeCharacterPrompt bool) anthropic.MessageNewParams {
 	systemPrompt := buildSystemPrompt(config, session, includeCharacterPrompt)
-	messages := buildMessages(session)
 
 	params := anthropic.MessageNewParams{
 		Model:     anthropic.Model(config.AnthropicModel),
 		MaxTokens: maxTokens,
-		Messages:  convertMessages(messages),
+		Messages:  convertMessages(session.Messages),
 	}
 
 	if systemPrompt != "" {
@@ -512,30 +522,11 @@ func buildSystemPrompt(config *Config, session *Session, includeCharacterPrompt 
 }
 
 func buildSummariesSection(session *Session) string {
-	if len(session.Summaries) == 0 {
+	if session.Summary == "" {
 		return ""
 	}
 
-	var builder strings.Builder
-	builder.WriteString("\n\n【過去の会話要約】\n")
-	for _, summary := range session.Summaries {
-		builder.WriteString(summary)
-		builder.WriteString("\n\n")
-	}
-	return builder.String()
-}
-
-func buildMessages(session *Session) []Message {
-	start := calculateMessageStart(session)
-	return session.Messages[start:]
-}
-
-func calculateMessageStart(session *Session) int {
-	start := session.DetailedStart
-	if start < 0 || start >= len(session.Messages) {
-		return 0
-	}
-	return start
+	return "\n\n【過去の会話要約】\n" + session.Summary + "\n\n"
 }
 
 func compressHistory(config *Config, session *Session) {
@@ -545,7 +536,7 @@ func compressHistory(config *Config, session *Session) {
 	}
 
 	messagesToCompress := session.Messages[:compressCount]
-	summary := generateSummary(config, messagesToCompress)
+	summary := generateSummary(config, session, messagesToCompress)
 
 	if summary == "" {
 		log.Printf("要約生成エラー: 応答が空です")
@@ -553,7 +544,7 @@ func compressHistory(config *Config, session *Session) {
 	}
 
 	updateSessionWithSummary(session, summary, compressCount)
-	log.Printf("履歴圧縮完了: %d件のメッセージを要約（要約数: %d/%d）", compressCount, len(session.Summaries), session.MaxSummaries)
+	log.Printf("履歴圧縮完了: %d件のメッセージを削除、%d件を保持", compressCount, len(session.Messages))
 }
 
 func calculateCompressCount(session *Session) int {
@@ -563,12 +554,25 @@ func calculateCompressCount(session *Session) int {
 	return len(session.Messages) - detailedMessageCount
 }
 
-func generateSummary(config *Config, messages []Message) string {
-	conversationText := formatMessagesForSummary(messages)
-	summaryPrompt := "以下の会話を簡潔に要約してください:\n\n" + conversationText
+func generateSummary(config *Config, session *Session, messages []Message) string {
+	conversationText := buildConversationTextForSummary(session, messages)
+	summaryPrompt := "以下の会話全体を簡潔に要約してください。重複を避け、重要な情報のみを残してください。説明は不要です。要約内容のみを返してください。\n\n" + conversationText
 
-	summarySession := createSummarySession(summaryPrompt)
+	summarySession := createSummarySession(summaryPrompt, session)
 	return callClaudeAPIForSummary(config, summarySession)
+}
+
+func buildConversationTextForSummary(session *Session, messages []Message) string {
+	var builder strings.Builder
+
+	if session.Summary != "" {
+		builder.WriteString("【これまでの会話要約】\n")
+		builder.WriteString(session.Summary)
+		builder.WriteString("\n\n【新しい会話】\n")
+	}
+
+	builder.WriteString(formatMessagesForSummary(messages))
+	return builder.String()
 }
 
 func formatMessagesForSummary(messages []Message) string {
@@ -586,23 +590,17 @@ func formatMessagesForSummary(messages []Message) string {
 	return builder.String()
 }
 
-func createSummarySession(prompt string) *Session {
+func createSummarySession(prompt string, originalSession *Session) *Session {
 	return &Session{
-		Messages:     []Message{{Role: "user", Content: prompt}},
-		Summaries:    []string{},
-		LastUpdated:  time.Now(),
-		MaxSummaries: maxSummaries,
+		Messages:    []Message{{Role: "user", Content: prompt}},
+		Summary:     originalSession.Summary,
+		LastUpdated: time.Now(),
 	}
 }
 
 func updateSessionWithSummary(session *Session, summary string, compressCount int) {
-	session.Summaries = append(session.Summaries, summary)
-
-	if len(session.Summaries) > session.MaxSummaries {
-		session.Summaries = session.Summaries[len(session.Summaries)-session.MaxSummaries:]
-	}
-
-	session.DetailedStart = compressCount
+	session.Summary = summary
+	session.Messages = session.Messages[compressCount:]
 }
 
 func postReply(config *Config, inReplyToID, content, visibility string) (*mastodon.Status, error) {
@@ -640,10 +638,9 @@ func generateErrorResponse(config *Config) string {
 
 func createErrorSession(prompt string) *Session {
 	return &Session{
-		Messages:     []Message{{Role: "user", Content: prompt}},
-		Summaries:    []string{},
-		LastUpdated:  time.Now(),
-		MaxSummaries: maxSummaries,
+		Messages:    []Message{{Role: "user", Content: prompt}},
+		Summary:     "",
+		LastUpdated: time.Now(),
 	}
 }
 

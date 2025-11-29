@@ -109,51 +109,13 @@ func TestSession_AddMessage(t *testing.T) {
 	}
 }
 
-func TestBuildMessages(t *testing.T) {
-	session := &Session{
-		Messages: []Message{
-			{Role: "user", Content: "msg1"},
-			{Role: "assistant", Content: "msg2"},
-			{Role: "user", Content: "msg3"},
-			{Role: "assistant", Content: "msg4"},
-		},
-		DetailedStart: 0,
-	}
-
-	messages := buildMessages(session)
-	if len(messages) != 4 {
-		t.Errorf("メッセージ数 = %d, want 4", len(messages))
-	}
-
-	session.DetailedStart = 2
-	messages = buildMessages(session)
-	if len(messages) != 2 {
-		t.Errorf("DetailedStart=2の場合のメッセージ数 = %d, want 2", len(messages))
-	}
-	if messages[0].Content != "msg3" {
-		t.Errorf("最初のメッセージ = %q, want %q", messages[0].Content, "msg3")
-	}
-
-	session.DetailedStart = -1
-	messages = buildMessages(session)
-	if len(messages) != 4 {
-		t.Errorf("DetailedStart=-1の場合のメッセージ数 = %d, want 4", len(messages))
-	}
-
-	session.DetailedStart = 100
-	messages = buildMessages(session)
-	if len(messages) != 4 {
-		t.Errorf("DetailedStart=100の場合のメッセージ数 = %d, want 4", len(messages))
-	}
-}
-
 func TestBuildSystemPrompt(t *testing.T) {
 	config := &Config{
 		CharacterPrompt: "テストプロンプト",
 	}
 
 	session := &Session{
-		Summaries: []string{},
+		Summary: "",
 	}
 
 	prompt := buildSystemPrompt(config, session, true)
@@ -162,7 +124,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 		t.Errorf("要約なしの場合 = %q, want %q", prompt, expected)
 	}
 
-	session.Summaries = []string{"過去の会話内容"}
+	session.Summary = "過去の会話内容"
 	prompt = buildSystemPrompt(config, session, true)
 	expected = "IMPORTANT: Always respond in Japanese (日本語で回答してください / 请用日语回答).\n\nテストプロンプト\n\n【過去の会話要約】\n過去の会話内容\n\n"
 	if prompt != expected {
@@ -255,5 +217,58 @@ func TestFindLastNewline(t *testing.T) {
 				t.Errorf("findLastNewline() = %d, want %d", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRollbackLastMessage(t *testing.T) {
+	session := &Session{
+		Messages: []Message{
+			{Role: "user", Content: "message1"},
+			{Role: "assistant", Content: "response1"},
+			{Role: "user", Content: "message2"},
+		},
+	}
+
+	rollbackLastMessage(session)
+
+	if len(session.Messages) != 2 {
+		t.Errorf("rollbackLastMessage() length = %d, want 2", len(session.Messages))
+	}
+
+	if session.Messages[1].Content != "response1" {
+		t.Errorf("rollbackLastMessage() last message = %q, want %q", session.Messages[1].Content, "response1")
+	}
+}
+
+func TestRollbackLastMessages(t *testing.T) {
+	session := &Session{
+		Messages: []Message{
+			{Role: "user", Content: "message1"},
+			{Role: "assistant", Content: "response1"},
+			{Role: "user", Content: "message2"},
+			{Role: "assistant", Content: "response2"},
+		},
+	}
+
+	rollbackLastMessages(session, 2)
+
+	if len(session.Messages) != 2 {
+		t.Errorf("rollbackLastMessages() length = %d, want 2", len(session.Messages))
+	}
+
+	if session.Messages[1].Content != "response1" {
+		t.Errorf("rollbackLastMessages() last message = %q, want %q", session.Messages[1].Content, "response1")
+	}
+}
+
+func TestRollbackEmptySession(t *testing.T) {
+	session := &Session{
+		Messages: []Message{},
+	}
+
+	rollbackLastMessage(session)
+
+	if len(session.Messages) != 0 {
+		t.Errorf("rollbackLastMessage() on empty session length = %d, want 0", len(session.Messages))
 	}
 }
