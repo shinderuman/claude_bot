@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
-	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -19,14 +18,12 @@ import (
 )
 
 const (
-	// 応答の文字数制限
-	maxResponseChars = 450
 	// Claude APIの最大トークン数（通常応答）
-	maxResponseTokens = 700
+	maxResponseTokens = 1024
 	// Claude APIの最大トークン数（要約生成）
 	maxSummaryTokens = 500
-	// 文字数超過時のリトライ回数
-	maxRetries = 3
+	// 投稿の最大文字数（バッファ含む）
+	maxPostChars = 480
 	// 会話履歴の圧縮閾値
 	historyCompressThreshold = 20
 	// 詳細メッセージの保持件数
@@ -273,7 +270,7 @@ func processResponse(config *Config, session *Session, notification *mastodon.No
 
 	session.addMessage("user", userMessage)
 	session.addMessage("assistant", response)
-	err := postReply(config, statusID, mention+response, visibility)
+	err := postResponseWithSplit(config, statusID, mention, response, visibility)
 
 	if err != nil {
 		postErrorMessage(config, statusID, mention, visibility)
@@ -291,8 +288,77 @@ func postErrorMessage(config *Config, statusID, mention, visibility string) {
 	log.Printf("応答生成失敗: エラーメッセージを投稿します")
 	errorMsg := generateErrorResponse(config)
 	if errorMsg != "" {
-		postReply(config, statusID, mention+errorMsg, visibility)
+		postResponseWithSplit(config, statusID, mention, errorMsg, visibility)
 	}
+}
+
+func postResponseWithSplit(config *Config, inReplyToID, mention, response, visibility string) error {
+	parts := splitResponse(response, mention)
+
+	currentReplyID := inReplyToID
+	for i, part := range parts {
+		content := mention + part
+		status, err := postReply(config, currentReplyID, content, visibility)
+		if err != nil {
+			log.Printf("分割投稿失敗 (%d/%d): %v", i+1, len(parts), err)
+			return err
+		}
+		log.Printf("分割投稿成功 (%d/%d): %d文字", i+1, len(parts), len([]rune(part)))
+		currentReplyID = string(status.ID)
+	}
+
+	return nil
+}
+
+func splitResponse(response, mention string) []string {
+	mentionLen := len([]rune(mention))
+	maxContentLen := maxPostChars - mentionLen
+
+	runes := []rune(response)
+	if len(runes) <= maxContentLen {
+		return []string{response}
+	}
+
+	return splitByNewline(runes, maxContentLen)
+}
+
+func splitByNewline(runes []rune, maxLen int) []string {
+	var parts []string
+	start := 0
+
+	for start < len(runes) {
+		end := start + maxLen
+		if end >= len(runes) {
+			parts = append(parts, string(runes[start:]))
+			break
+		}
+
+		splitPos := findLastNewline(runes, start, end)
+		if splitPos == -1 {
+			splitPos = end
+		}
+
+		parts = append(parts, string(runes[start:splitPos]))
+		start = skipLeadingNewlines(runes, splitPos)
+	}
+
+	return parts
+}
+
+func findLastNewline(runes []rune, start, end int) int {
+	for i := end - 1; i > start; i-- {
+		if runes[i] == '\n' {
+			return i
+		}
+	}
+	return -1
+}
+
+func skipLeadingNewlines(runes []rune, pos int) int {
+	for pos < len(runes) && runes[pos] == '\n' {
+		pos++
+	}
+	return pos
 }
 
 func compressHistoryIfNeeded(config *Config, session *Session) {
@@ -366,31 +432,7 @@ func (s *Session) addMessage(role, content string) {
 }
 
 func generateResponse(config *Config, session *Session) string {
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		response := callClaudeAPI(config, session)
-		if response == "" {
-			return ""
-		}
-
-		if isWithinCharLimit(response) {
-			return response
-		}
-
-		logCharLimitExceeded(response, attempt)
-	}
-
-	log.Printf("リトライ上限到達: 応答を返さずスキップ")
-	return ""
-}
-
-func isWithinCharLimit(response string) bool {
-	return len([]rune(response)) <= maxResponseChars
-}
-
-func logCharLimitExceeded(response string, attempt int) {
-	charCount := len([]rune(response))
-	log.Printf("文字数超過（%d文字）: リトライ %d/%d", charCount, attempt, maxRetries)
-	log.Printf("超過した応答内容: %s", response)
+	return callClaudeAPI(config, session)
 }
 
 func callClaudeAPI(config *Config, session *Session) string {
@@ -461,19 +503,10 @@ func convertMessages(messages []Message) []anthropic.MessageParam {
 }
 
 func buildSystemPrompt(config *Config, session *Session) string {
-	prompt := buildCharLimitInstructions()
+	prompt := "IMPORTANT: Always respond in Japanese (日本語で回答してください / 请用日语回答).\n\n"
 	prompt += config.CharacterPrompt
 	prompt += buildSummariesSection(session)
 	return prompt
-}
-
-func buildCharLimitInstructions() string {
-	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("【最重要约束】您的回答必须在%d字以内。这是绝对必须遵守的约束。\n\n", maxResponseChars))
-	builder.WriteString(fmt.Sprintf("CRITICAL CONSTRAINT: Your response MUST NOT exceed %d characters. This is a hard limit. Count carefully before responding.\n", maxResponseChars))
-	builder.WriteString(fmt.Sprintf("【最重要制約】あなたの回答は必ず%d文字以内に収めてください。これは絶対に守らなければならない制約です。\n", maxResponseChars))
-	builder.WriteString("IMPORTANT: Always respond in Japanese (日本語で回答してください / 请用日语回答).\n\n")
-	return builder.String()
 }
 
 func buildSummariesSection(session *Session) string {
@@ -570,18 +603,18 @@ func updateSessionWithSummary(session *Session, summary string, compressCount in
 	session.DetailedStart = compressCount
 }
 
-func postReply(config *Config, inReplyToID, content, visibility string) error {
+func postReply(config *Config, inReplyToID, content, visibility string) (*mastodon.Status, error) {
 	client := createMastodonClient(config)
 	toot := createToot(inReplyToID, content, visibility)
 
-	_, err := client.PostStatus(context.Background(), toot)
+	status, err := client.PostStatus(context.Background(), toot)
 	if err != nil {
 		logPostError(err, content)
-		return err
+		return nil, err
 	}
 
 	log.Println("返信投稿成功")
-	return nil
+	return status, nil
 }
 
 func createToot(inReplyToID, content, visibility string) *mastodon.Toot {

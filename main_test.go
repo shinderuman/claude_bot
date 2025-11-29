@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -156,15 +157,103 @@ func TestBuildSystemPrompt(t *testing.T) {
 	}
 
 	prompt := buildSystemPrompt(config, session)
-	expected := "【最重要约束】您的回答必须在450字以内。这是绝对必须遵守的约束。\n\nCRITICAL CONSTRAINT: Your response MUST NOT exceed 450 characters. This is a hard limit. Count carefully before responding.\n【最重要制約】あなたの回答は必ず450文字以内に収めてください。これは絶対に守らなければならない制約です。\nIMPORTANT: Always respond in Japanese (日本語で回答してください / 请用日语回答).\n\nテストプロンプト"
+	expected := "IMPORTANT: Always respond in Japanese (日本語で回答してください / 请用日语回答).\n\nテストプロンプト"
 	if prompt != expected {
 		t.Errorf("要約なしの場合 = %q, want %q", prompt, expected)
 	}
 
 	session.Summaries = []string{"過去の会話内容"}
 	prompt = buildSystemPrompt(config, session)
-	expected = "【最重要约束】您的回答必须在450字以内。这是绝对必须遵守的约束。\n\nCRITICAL CONSTRAINT: Your response MUST NOT exceed 450 characters. This is a hard limit. Count carefully before responding.\n【最重要制約】あなたの回答は必ず450文字以内に収めてください。これは絶対に守らなければならない制約です。\nIMPORTANT: Always respond in Japanese (日本語で回答してください / 请用日语回答).\n\nテストプロンプト\n\n【過去の会話要約】\n過去の会話内容\n\n"
+	expected = "IMPORTANT: Always respond in Japanese (日本語で回答してください / 请用日语回答).\n\nテストプロンプト\n\n【過去の会話要約】\n過去の会話内容\n\n"
 	if prompt != expected {
 		t.Errorf("要約ありの場合 = %q, want %q", prompt, expected)
+	}
+}
+
+func TestSplitResponse(t *testing.T) {
+	mention := "@user "
+
+	tests := []struct {
+		name     string
+		response string
+		want     int
+	}{
+		{
+			name:     "短い応答",
+			response: "こんにちは",
+			want:     1,
+		},
+		{
+			name:     "480文字以内",
+			response: strings.Repeat("あ", 470),
+			want:     1,
+		},
+		{
+			name:     "改行で分割可能",
+			response: strings.Repeat("あ", 470) + "\n" + strings.Repeat("い", 100),
+			want:     2,
+		},
+		{
+			name:     "改行なしで長い",
+			response: strings.Repeat("あ", 1000),
+			want:     3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parts := splitResponse(tt.response, mention)
+			if len(parts) != tt.want {
+				t.Errorf("splitResponse() = %d parts, want %d parts", len(parts), tt.want)
+			}
+
+			for i, part := range parts {
+				contentLen := len([]rune(mention + part))
+				if contentLen > 500 {
+					t.Errorf("part %d length = %d, exceeds 500 characters", i, contentLen)
+				}
+			}
+		})
+	}
+}
+
+func TestFindLastNewline(t *testing.T) {
+	tests := []struct {
+		name  string
+		runes []rune
+		start int
+		end   int
+		want  int
+	}{
+		{
+			name:  "改行あり",
+			runes: []rune("あいう\nえお"),
+			start: 0,
+			end:   5,
+			want:  3,
+		},
+		{
+			name:  "改行なし",
+			runes: []rune("あいうえお"),
+			start: 0,
+			end:   5,
+			want:  -1,
+		},
+		{
+			name:  "複数改行",
+			runes: []rune("あ\nい\nう"),
+			start: 0,
+			end:   5,
+			want:  3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := findLastNewline(tt.runes, tt.start, tt.end)
+			if got != tt.want {
+				t.Errorf("findLastNewline() = %d, want %d", got, tt.want)
+			}
+		})
 	}
 }
