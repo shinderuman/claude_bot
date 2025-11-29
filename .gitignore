@@ -1,0 +1,22 @@
+# 環境変数ファイル
+.env
+
+# 会話履歴
+sessions.json
+
+# ビルド成果物
+mastodon-bot
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# テストバイナリ
+*.test
+
+# 出力ファイル
+*.out
+
+# Go workspace file
+go.work
