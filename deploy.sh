@@ -4,6 +4,43 @@ set -e
 
 echo "=== Mastodon Claude Bot デプロイスクリプト ==="
 
+# 引数の解析
+COPY_ENV=false
+COPY_SESSIONS=false
+for arg in "$@"; do
+    case $arg in
+        --env)
+        COPY_ENV=true
+        shift
+        ;;
+        -e)
+        COPY_ENV=true
+        shift
+        ;;
+        --sessions)
+        COPY_SESSIONS=true
+        shift
+        ;;
+        -s)
+        COPY_SESSIONS=true
+        shift
+        ;;
+        --help|-h)
+        echo "使い方: $0 [オプション]"
+        echo "オプション:"
+        echo "  --env, -e       .envファイルをコピーする"
+        echo "  --sessions, -s  sessions.jsonファイルを同期する"
+        echo "  --help, -h      このヘルプを表示する"
+        exit 0
+        ;;
+        *)
+        echo "不明なオプション: $arg"
+        echo "--helpで使い方を確認してください"
+        exit 1
+        ;;
+    esac
+done
+
 # 設定
 REMOTE_HOST="kenji.asmodeus.jp"
 REMOTE_DIR="/home/ubuntu/claude_bot"
@@ -18,38 +55,86 @@ if [ ! -f "${APP_NAME}" ]; then
     exit 1
 fi
 
-echo "✓ ビルド完了"
+# 実行権限の付与
+chmod +x ${APP_NAME}
 
-# .envファイルの確認
-if [ ! -f ".env" ]; then
-    echo "エラー: .envファイルが見つかりません"
-    exit 1
+echo "✓ ビルド完了（実行権限付与済み）"
+
+# .envファイルの確認（--envオプション時のみ）
+if [ "$COPY_ENV" = true ]; then
+    if [ ! -f ".env" ]; then
+        echo "エラー: .envファイルが見つかりません"
+        exit 1
+    fi
+    echo "✓ .envファイル確認完了（コピー対象）"
+else
+    echo "ℹ .envファイルはスキップされます（--envオプションで有効化）"
 fi
 
-echo "✓ .envファイル確認完了"
+# sessions.jsonの確認（--sessionsオプション時のみ）
+if [ "$COPY_SESSIONS" = true ]; then
+    if [ -f "sessions.json" ]; then
+        echo "✓ sessions.json確認完了（同期対象）"
+    else
+        echo "ℹ sessions.jsonがありません（新規作成されます）"
+    fi
+else
+    echo "ℹ sessions.jsonはスキップされます（--sessionsオプションで有効化）"
+fi
 
 # リモートディレクトリの作成
 echo "2. リモートディレクトリを準備中..."
 ssh ${REMOTE_HOST} "mkdir -p ${REMOTE_DIR}"
 
-# ファイルの転送
-echo "3. ファイルを転送中..."
+# .envファイルの転送（--envオプション時のみ）
+if [ "$COPY_ENV" = true ]; then
+    echo "3. .envファイルを転送中..."
+    scp .env ${REMOTE_HOST}:${REMOTE_DIR}/
+    echo "✓ .envファイル転送完了"
+fi
+
+# sessions.jsonの同期（--sessionsオプション時のみ）
+if [ "$COPY_SESSIONS" = true ]; then
+    echo "   sessions.jsonを同期中..."
+
+    # リモートのファイルタイムスタンプを取得
+    REMOTE_TIMESTAMP=$(ssh ${REMOTE_HOST} "stat -c %Y ${REMOTE_DIR}/sessions.json 2>/dev/null || echo 0")
+    LOCAL_TIMESTAMP=0
+
+    if [ -f "sessions.json" ]; then
+        LOCAL_TIMESTAMP=$(stat -c %Y sessions.json 2>/dev/null || echo 0)
+    fi
+
+    if [ $LOCAL_TIMESTAMP -gt $REMOTE_TIMESTAMP ]; then
+        # ローカルの方が新しい場合は転送
+        if [ -f "sessions.json" ]; then
+            scp sessions.json ${REMOTE_HOST}:${REMOTE_DIR}/
+            echo "✓ sessions.json転送完了（ローカルの方が新しい）"
+        fi
+    elif [ $REMOTE_TIMESTAMP -gt 0 ]; then
+        # リモートの方が新しい場合はダウンロード
+        scp ${REMOTE_HOST}:${REMOTE_DIR}/sessions.json ./
+        echo "✓ sessions.jsonダウンロード完了（リモートの方が新しい）"
+    else
+        # どちらにも存在しない場合は何もしない
+        echo "ℹ sessions.jsonは存在しません"
+    fi
+fi
+
+# Supervisorの停止
+echo "4. Supervisorを停止中..."
+ssh ${REMOTE_HOST} "sudo supervisorctl stop ${APP_NAME}"
+
+
+# バイナリの転送（最後に転送）
+echo "5. バイナリを転送中..."
 scp ${APP_NAME} ${REMOTE_HOST}:${REMOTE_DIR}/
-scp .env ${REMOTE_HOST}:${REMOTE_DIR}/
 
-echo "✓ ファイル転送完了"
+# Supervisorの開始
+echo "6. Supervisorを開始中..."
+ssh ${REMOTE_HOST} "sudo supervisorctl start ${APP_NAME}"
 
-# 実行権限の付与
-echo "4. 実行権限を付与中..."
-ssh ${REMOTE_HOST} "chmod +x ${REMOTE_DIR}/${APP_NAME}"
-
-echo "✓ 実行権限付与完了"
-
-# Supervisorの再起動
-echo "5. Supervisorを再起動中..."
-ssh ${REMOTE_HOST} "sudo supervisorctl restart ${APP_NAME}"
-
-echo "✓ Supervisor再起動完了"
+echo "✓ Supervisor開始完了"
 
 # ローカルのバイナリを削除
 rm ${APP_NAME}
