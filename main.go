@@ -322,7 +322,6 @@ func postResponseWithSplit(config *Config, inReplyToID, mention, response, visib
 			log.Printf("分割投稿失敗 (%d/%d): %v", i+1, len(parts), err)
 			return err
 		}
-		log.Printf("分割投稿成功 (%d/%d): %d文字", i+1, len(parts), len([]rune(part)))
 		currentReplyID = string(status.ID)
 	}
 
@@ -633,7 +632,6 @@ func postReply(config *Config, inReplyToID, content, visibility string) (*mastod
 		return nil, err
 	}
 
-	log.Println("返信投稿成功")
 	return status, nil
 }
 
