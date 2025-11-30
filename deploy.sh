@@ -2,203 +2,198 @@
 
 set -e
 
-echo "=== Mastodon Claude Bot デプロイスクリプト ==="
-
-# 引数の解析
-COPY_ENV=false
-COPY_SESSIONS=false
-SYNC_ONLY=false
-for arg in "$@"; do
-    case $arg in
-        --env)
-        COPY_ENV=true
-        shift
-        ;;
-        -e)
-        COPY_ENV=true
-        shift
-        ;;
-        --sessions)
-        COPY_SESSIONS=true
-        shift
-        ;;
-        -s)
-        COPY_SESSIONS=true
-        shift
-        ;;
-        --sync-only)
-        SYNC_ONLY=true
-        COPY_ENV=true
-        COPY_SESSIONS=true
-        shift
-        ;;
-        --help|-h)
-        echo "使い方: $0 [オプション]"
-        echo "オプション:"
-        echo "  --env, -e       .envファイルを同期する"
-        echo "  --sessions, -s  sessions.jsonファイルを同期する"
-        echo "  --sync-only      同期のみ行い、デプロイはしない"
-        echo "  --help, -h      このヘルプを表示する"
-        exit 0
-        ;;
-        *)
-        echo "不明なオプション: $arg"
-        echo "--helpで使い方を確認してください"
-        exit 1
-        ;;
-    esac
-done
+# ========================================
+# 定数・グローバル変数
+# ========================================
 
 # 設定
 REMOTE_HOST="kenji.asmodeus.jp"
 REMOTE_DIR="/home/ubuntu/claude_bot"
 APP_NAME="claude_bot"
+SFTP_USER="ubuntu"
+SFTP_KEY_FILE="$HOME/.ssh/mastodon.pem"
 
-# ファイル同期関数
-sync_file() {
-    local filename="$1"
-    local filedesc="$2"
+# デフォルト値
+COPY_ENV=true
+COPY_SESSIONS=true
+DEPLOY_PROGRAM=true
 
-    echo "${filedesc}を同期中..."
+# ステップ番号管理
+STEP_NUM=1
 
-    # リモートのファイルタイムスタンプを取得
-    local remote_timestamp=$(ssh ${REMOTE_HOST} "stat -c %Y ${REMOTE_DIR}/${filename} 2>/dev/null || echo 0")
-    local local_timestamp=0
+# ========================================
+# 関数定義
+# ========================================
 
-    if [ -f "$filename" ]; then
-        # macOSとLinuxでstatコマンドのオプションが異なるため両方対応
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            local_timestamp=$(stat -f %m "$filename" 2>/dev/null || echo 0)
-        else
-            local_timestamp=$(stat -c %Y "$filename" 2>/dev/null || echo 0)
-        fi
-    fi
-
-    if [ $local_timestamp -gt $remote_timestamp ]; then
-        # ローカルの方が新しい場合は転送
-        if [ -f "$filename" ]; then
-            scp "$filename" ${REMOTE_HOST}:${REMOTE_DIR}/
-            echo "✓ ${filename}転送完了（ローカルの方が新しい）"
-        fi
-    elif [ $remote_timestamp -gt 0 ]; then
-        # リモートの方が新しい場合はダウンロード
-        scp ${REMOTE_HOST}:${REMOTE_DIR}/"$filename" ./
-        echo "✓ ${filename}ダウンロード完了（リモートの方が新しい）"
-    else
-        # どちらにも存在しない場合
-        echo "ℹ ${filename}は存在しません"
-        return 1
-    fi
-
-    return 0
+# ステップ表示ヘルパー
+show_step() {
+    echo "${STEP_NUM}. $1"
+    STEP_NUM=$((STEP_NUM + 1))
 }
 
-# 同期のみモードの場合
-if [ "$SYNC_ONLY" = true ]; then
-    echo "同期のみモード: ファイル同期を実行します"
-    echo ""
+# 共通質問処理
+ask_question() {
+    local question="$1"
+    local var_name="$2"
 
-    # リモートディレクトリの作成
-    echo "1. リモートディレクトリを準備中..."
-    ssh ${REMOTE_HOST} "mkdir -p ${REMOTE_DIR}"
+    echo -n "${question} [Y/n]: "
+    read -r response
+    case $response in
+        [nN][oO]|[nN])
+            printf -v "$var_name" '%s' false
+            echo "  → ${question%%しますか？}しません"
+            ;;
+        *)
+            printf -v "$var_name" '%s' true
+            ;;
+    esac
+}
 
-    # .envファイルの同期（--envオプション時のみ）
-    if [ "$COPY_ENV" = true ]; then
-        echo "2. .envファイルを同期中..."
-        sync_file ".env" "   .envファイル"
-        result=$?
-        if [ $result -eq 1 ] && [ ! -f ".env" ]; then
-            echo "エラー: .envファイルが見つかりません"
-            exit 1
-        fi
-    fi
+# 共通表示処理
+show_plan() {
+    local task="$1"
+    local var_name="${task%%:*}"
+    local description="${task##*:}"
 
-    # sessions.jsonの同期（--sessionsオプション時のみ）
-    if [ "$COPY_SESSIONS" = true ]; then
-        echo "3. sessions.jsonを同期中..."
-        sync_file "sessions.json" "   sessions.json"
-    fi
+    [ "${!var_name}" = true ] && echo "  ✓ ${description}" || echo "  ✗ ${description}（スキップ）"
+}
 
-    echo ""
-    echo "=== 同期完了 ==="
-    echo "注意: デプロイは実行されていません"
-    exit 0
-fi
+# rclone の共通オプション
+get_rclone_opts() {
+    echo "--sftp-host=${REMOTE_HOST}"
+    echo "--sftp-user=${SFTP_USER}"
+    echo "--sftp-key-file=${SFTP_KEY_FILE}"
+    echo "--quiet"
+}
 
-# ビルド
-echo "1. Linux向けバイナリをビルド中..."
-GOOS=linux GOARCH=amd64 go build -o ${APP_NAME} .
-
-if [ ! -f "${APP_NAME}" ]; then
-    echo "エラー: ビルドに失敗しました"
-    exit 1
-fi
-
-# 実行権限の付与
-chmod +x ${APP_NAME}
-
-echo "✓ ビルド完了（実行権限付与済み）"
-
-# .envファイルの確認（--envオプション時のみ）
-if [ "$COPY_ENV" = true ]; then
+# .env ファイルの同期（一方向: ローカル → リモート）
+sync_env_file() {
     if [ ! -f ".env" ]; then
         echo "エラー: .envファイルが見つかりません"
         exit 1
     fi
-    echo "✓ .envファイル確認完了（同期対象）"
-else
-    echo "ℹ .envファイルはスキップされます（--envオプションで有効化）"
-fi
 
-# sessions.jsonの確認（--sessionsオプション時のみ）
-if [ "$COPY_SESSIONS" = true ]; then
+    local remote_path=":sftp:${REMOTE_DIR}/"
+
+    rclone copy $(get_rclone_opts) .env "${remote_path}" 2>&1 | grep -v "^$" || true
+    echo "  ✓ .env同期完了"
+}
+
+# sessions.json の同期（双方向: 新しい方を優先）
+sync_sessions_file() {
+    local remote_path=":sftp:${REMOTE_DIR}/"
+    local rclone_opts=$(get_rclone_opts)
+
+    # リモート → ローカル（リモートの方が新しい場合のみ）
+    rclone copy $rclone_opts --update "${remote_path}sessions.json" ./ 2>&1 | grep -v "^$" || true
+
+    # ローカル → リモート（ローカルの方が新しい場合のみ）
     if [ -f "sessions.json" ]; then
-        echo "✓ sessions.json確認完了（同期対象）"
-    else
-        echo "ℹ sessions.jsonがありません（新規作成されます）"
+        rclone copy $rclone_opts --update sessions.json "${remote_path}" 2>&1 | grep -v "^$" || true
     fi
-else
-    echo "ℹ sessions.jsonはスキップされます（--sessionsオプションで有効化）"
-fi
 
-# リモートディレクトリの作成
-echo "2. リモートディレクトリを準備中..."
-ssh ${REMOTE_HOST} "mkdir -p ${REMOTE_DIR}"
+    echo "  ✓ sessions.json同期完了"
+}
 
-# .envファイルの同期（--envオプション時のみ）
-if [ "$COPY_ENV" = true ]; then
-    echo "3. .envファイルを同期中..."
-    sync_file ".env" "   .envファイル"
-    result=$?
-    if [ $result -eq 1 ] && [ ! -f ".env" ]; then
-        echo "エラー: .envファイルが見つかりません"
+# 設定ファイル同期処理
+sync_config_files() {
+    # .envファイルの同期
+    if [ "$COPY_ENV" = true ]; then
+        show_step ".envファイルを同期中..."
+        sync_env_file
+    fi
+
+    # sessions.jsonの同期
+    if [ "$COPY_SESSIONS" = true ]; then
+        show_step "sessions.jsonを同期中..."
+        sync_sessions_file
+    fi
+}
+
+# ========================================
+# メイン処理
+# ========================================
+
+main() {
+    # rclone の存在確認
+    if ! command -v rclone &> /dev/null; then
+        echo "エラー: rclone がインストールされていません"
+        echo "インストール方法: brew install rclone"
         exit 1
     fi
-fi
 
-# sessions.jsonの同期（--sessionsオプション時のみ）
-if [ "$COPY_SESSIONS" = true ]; then
-    sync_file "sessions.json" "   sessions.json"
-fi
+    echo "=== Mastodon Claude Bot デプロイスクリプト（対話式）==="
+    echo ""
 
-# Supervisorの停止
-echo "4. Supervisorを停止中..."
-ssh ${REMOTE_HOST} "sudo supervisorctl stop ${APP_NAME}"
+    # 質問と計画の実行
+    ask_question ".envファイルを同期しますか？" "COPY_ENV"
+    ask_question "sessions.jsonファイルを同期しますか？" "COPY_SESSIONS"
+    ask_question "プログラムをデプロイしますか？" "DEPLOY_PROGRAM"
 
+    show_plan "COPY_ENV:.envファイルの同期"
+    show_plan "COPY_SESSIONS:sessions.jsonファイルの同期"
+    show_plan "DEPLOY_PROGRAM:プログラムのビルドとデプロイ"
 
-# バイナリの転送（最後に転送）
-echo "5. バイナリを転送中..."
-scp ${APP_NAME} ${REMOTE_HOST}:${REMOTE_DIR}/
+    echo ""
 
-# Supervisorの開始
-echo "6. Supervisorを開始中..."
-ssh ${REMOTE_HOST} "sudo supervisorctl start ${APP_NAME}"
+    # 共通前処理: リモートディレクトリ作成
+    show_step "リモートディレクトリを準備中..."
+    ssh "${REMOTE_HOST}" "mkdir -p ${REMOTE_DIR}"
 
-echo "✓ Supervisor開始完了"
+    # ========================================
+    # フェーズ1: ビルド（プログラムデプロイ時のみ）
+    # ========================================
+    if [ "$DEPLOY_PROGRAM" = true ]; then
+        show_step "Linux向けバイナリをビルド中..."
+        GOOS=linux GOARCH=amd64 go build -o "${APP_NAME}" .
 
-# ローカルのバイナリを削除
-rm ${APP_NAME}
+        if [ ! -f "${APP_NAME}" ]; then
+            echo "エラー: ビルドに失敗しました"
+            exit 1
+        fi
 
-echo ""
-echo "=== デプロイ完了 ==="
-echo "ステータス確認: ssh ${REMOTE_HOST} 'supervisorctl status ${APP_NAME}'"
+        # 実行権限の付与
+        chmod +x "${APP_NAME}"
+        echo "  ✓ ビルド完了（実行権限付与済み）"
+    fi
+
+    # ========================================
+    # フェーズ2: ファイル同期（常に実行）
+    # ========================================
+    sync_config_files
+
+    # ========================================
+    # フェーズ3: デプロイ（プログラムデプロイ時のみ）
+    # ========================================
+    if [ "$DEPLOY_PROGRAM" = true ]; then
+        # Supervisorの停止
+        show_step "Supervisorを停止中..."
+        ssh "${REMOTE_HOST}" "sudo supervisorctl stop ${APP_NAME}"
+
+        # バイナリの転送
+        show_step "バイナリを転送中..."
+        scp "${APP_NAME}" "${REMOTE_HOST}:${REMOTE_DIR}/"
+
+        # Supervisorの開始
+        show_step "Supervisorを開始中..."
+        ssh "${REMOTE_HOST}" "sudo supervisorctl start ${APP_NAME}"
+        echo "  ✓ Supervisor開始完了"
+
+        # ローカルのバイナリを削除
+        rm "${APP_NAME}"
+
+        echo ""
+        echo "=== デプロイ完了 ==="
+        echo "ステータス確認: ssh ${REMOTE_HOST} 'supervisorctl status ${APP_NAME}'"
+    else
+        echo ""
+        echo "=== ファイル同期完了 ==="
+        echo "注意: プログラムのデプロイは実行されていません"
+    fi
+}
+
+# ========================================
+# スクリプト実行
+# ========================================
+
+main "$@"
