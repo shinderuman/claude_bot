@@ -6,6 +6,7 @@ MastodonでClaude APIを使用した会話ボットです。
 
 - Mastodonのメンション通知をリアルタイムで受信
 - Claude APIを使用して応答を生成（公式SDKを使用）
+- リプライツリーごとに独立した会話履歴を管理
 - ユーザーごとの会話履歴を保持（JSON形式で永続化）
 - 履歴が長くなると自動的に要約して圧縮（累積要約方式）
 - キャラクター設定によるBot人格のカスタマイズ
@@ -156,9 +157,19 @@ go run main.go -test -message "動作確認"
 
 ## 会話履歴の管理
 
-- ユーザーごとに会話履歴を`sessions.json`に保存
-- メッセージが20件を超えると自動的に古い履歴を要約
-- 最新10件のメッセージは詳細を保持、それ以前は要約
+### リプライツリーごとの会話管理
+
+- 各リプライツリー（会話スレッド）を独立して管理
+- リプライチェーンのルートを自動検出して会話を識別
+- 異なるリプライツリーの会話は互いに影響しない
+- ユーザーごとに複数の並行会話を保持可能
+
+### 会話履歴の保存と圧縮
+
+- ユーザーごとの全会話を`sessions.json`に保存
+- 各リプライツリー内でメッセージが20件を超えると自動圧縮
+- 圧縮後は最新10件のメッセージを保持、それ以前は要約
+- 24時間以上経過した会話は自動的に要約に移行（最低3つの会話は保持）
 - 要約は累積方式で1つに統合（過去の要約 + 新しいメッセージを再要約）
 - プログラム再起動後も履歴を保持
 - 応答生成失敗時や投稿失敗時は自動的にロールバック
@@ -186,11 +197,20 @@ CHARACTER_PROMPT="あなたは猫のような口調で話すアシスタント�
 
 ```go
 const (
-    maxResponseTokens = 1024            // Claude APIの最大トークン数（通常応答）
-    maxSummaryTokens = 1024             // Claude APIの最大トークン数（要約生成）
-    maxPostChars = 480                  // 投稿の最大文字数（バッファ含む）
-    historyCompressThreshold = 20       // 履歴圧縮の閾値
-    detailedMessageCount = 10           // 詳細保持するメッセージ数
+    // Claude API設定
+    maxResponseTokens = 1024 // 通常応答の最大トークン数
+    maxSummaryTokens  = 1024 // 要約生成の最大トークン数
+
+    // Mastodon投稿設定
+    maxPostChars = 480 // 投稿の最大文字数（バッファ含む）
+
+    // リプライツリー内のメッセージ圧縮設定
+    conversationMessageCompressThreshold = 20 // この件数を超えたら圧縮
+    conversationMessageKeepCount         = 10 // 圧縮後に保持するメッセージ件数
+
+    // リプライツリー全体の削除設定
+    conversationRetentionHours = 24 // この時間を超えた会話を削除
+    conversationMinKeepCount   = 3  // 最低限保持する会話数
 )
 ```
 
