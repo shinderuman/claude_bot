@@ -280,6 +280,14 @@ func processResponse(config *Config, session *Session, notification *mastodon.No
 	statusID := string(notification.Status.ID)
 	visibility := string(notification.Status.Visibility)
 
+	// リプライIDの有無で新規会話を判定
+	isNewConversation := notification.Status.InReplyToID == nil
+
+	if isNewConversation && len(session.Messages) > 0 {
+		// 過去の会話全体を要約してリセット
+		resetConversationWithSummary(config, session)
+	}
+
 	session.addMessage("user", userMessage)
 	response := generateResponse(config, session)
 
@@ -700,4 +708,45 @@ func filterMentions(words []string) []string {
 		}
 	}
 	return result
+}
+
+// resetConversationWithSummary 過去の会話全体を要約してリセットする
+func resetConversationWithSummary(config *Config, session *Session) {
+	// 現在のメッセージと既存の要約を含めて全体要約を作成
+	newSummary := generateFullConversationSummary(config, session)
+
+	// 新しい要約で更新
+	session.Summary = newSummary
+
+	// メッセージをクリア
+	session.Messages = []Message{}
+
+	log.Printf("新規会話開始: %d件のメッセージを要約し、セッションをリセットしました", len(session.Messages))
+}
+
+// generateFullConversationSummary 全会話の要約を生成
+func generateFullConversationSummary(config *Config, session *Session) string {
+	var prompt strings.Builder
+
+	// 既存の要約と現在のメッセージを統合
+	prompt.WriteString("以下の会話全体を簡潔に要約してください。重複を避け、重要な情報のみを残してください。説明は不要です。要約内容のみを返してください。\n\n")
+
+	// 現在のメッセージ履歴を追加（先に）
+	prompt.WriteString("最新の会話:\n")
+	prompt.WriteString(formatMessagesForSummary(session.Messages))
+	prompt.WriteString("\n\n")
+
+	// 既存の要約があれば含める（後に）
+	if session.Summary != "" {
+		prompt.WriteString("前の会話の要約:\n")
+		prompt.WriteString(session.Summary)
+		prompt.WriteString("\n\n")
+	}
+
+	summarySession := &Session{
+		Messages:    []Message{{Role: "user", Content: prompt.String()}},
+		LastUpdated: time.Now(),
+	}
+
+	return callClaudeAPIForSummary(config, summarySession)
 }
