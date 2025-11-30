@@ -6,49 +6,6 @@ import (
 	"time"
 )
 
-func TestRemoveMentions(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{
-			name:  "メンションを削除",
-			input: "@user1 Hello World",
-			want:  "Hello World",
-		},
-		{
-			name:  "複数のメンションを削除",
-			input: "@user1 @user2 Hello World",
-			want:  "Hello World",
-		},
-		{
-			name:  "メンションのみ",
-			input: "@user1 @user2",
-			want:  "",
-		},
-		{
-			name:  "メンションなし",
-			input: "Hello World",
-			want:  "Hello World",
-		},
-		{
-			name:  "空文字列",
-			input: "",
-			want:  "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := removeMentions(tt.input)
-			if got != tt.want {
-				t.Errorf("removeMentions() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestConversationHistory_GetOrCreateSession(t *testing.T) {
 	history := &ConversationHistory{
 		sessions: make(map[string]*Session),
@@ -61,8 +18,8 @@ func TestConversationHistory_GetOrCreateSession(t *testing.T) {
 		t.Fatal("getOrCreateSession() returned nil")
 	}
 
-	if len(session1.Messages) != 0 {
-		t.Errorf("新規セッションのメッセージ数 = %d, want 0", len(session1.Messages))
+	if len(session1.Conversations) != 0 {
+		t.Errorf("新規セッションの会話数 = %d, want 0", len(session1.Conversations))
 	}
 
 	session2 := history.getOrCreateSession(userID)
@@ -77,21 +34,20 @@ func TestConversationHistory_GetOrCreateSession(t *testing.T) {
 	}
 }
 
-func TestSession_AddMessage(t *testing.T) {
-	session := &Session{
-		Messages:    []Message{},
-		LastUpdated: time.Now().Add(-1 * time.Hour),
+func TestConversation_AddMessage(t *testing.T) {
+	conversation := &Conversation{
+		RootStatusID: "test123",
+		CreatedAt:    time.Now(),
+		Messages:     []Message{},
 	}
 
-	beforeTime := time.Now()
-	session.addMessage("user", "Hello")
-	afterTime := time.Now()
+	conversation.addMessage("user", "Hello")
 
-	if len(session.Messages) != 1 {
-		t.Errorf("メッセージ数 = %d, want 1", len(session.Messages))
+	if len(conversation.Messages) != 1 {
+		t.Errorf("メッセージ数 = %d, want 1", len(conversation.Messages))
 	}
 
-	msg := session.Messages[0]
+	msg := conversation.Messages[0]
 	if msg.Role != "user" {
 		t.Errorf("Role = %q, want %q", msg.Role, "user")
 	}
@@ -99,13 +55,9 @@ func TestSession_AddMessage(t *testing.T) {
 		t.Errorf("Content = %q, want %q", msg.Content, "Hello")
 	}
 
-	if session.LastUpdated.Before(beforeTime) || session.LastUpdated.After(afterTime) {
-		t.Error("LastUpdatedが更新されていない")
-	}
-
-	session.addMessage("assistant", "Hi there")
-	if len(session.Messages) != 2 {
-		t.Errorf("メッセージ数 = %d, want 2", len(session.Messages))
+	conversation.addMessage("assistant", "Hi there")
+	if len(conversation.Messages) != 2 {
+		t.Errorf("メッセージ数 = %d, want 2", len(conversation.Messages))
 	}
 }
 
@@ -115,7 +67,9 @@ func TestBuildSystemPrompt(t *testing.T) {
 	}
 
 	session := &Session{
-		Summary: "",
+		Conversations: []Conversation{},
+		Summary:       "",
+		LastUpdated:   time.Now(),
 	}
 
 	prompt := buildSystemPrompt(config, session, true)
@@ -220,8 +174,10 @@ func TestFindLastNewline(t *testing.T) {
 	}
 }
 
-func TestRollbackLastMessage(t *testing.T) {
-	session := &Session{
+func TestConversation_RollbackLastMessage(t *testing.T) {
+	conversation := &Conversation{
+		RootStatusID: "test123",
+		CreatedAt:    time.Now(),
 		Messages: []Message{
 			{Role: "user", Content: "message1"},
 			{Role: "assistant", Content: "response1"},
@@ -229,19 +185,21 @@ func TestRollbackLastMessage(t *testing.T) {
 		},
 	}
 
-	rollbackLastMessage(session)
+	conversation.rollbackLastMessages(1)
 
-	if len(session.Messages) != 2 {
-		t.Errorf("rollbackLastMessage() length = %d, want 2", len(session.Messages))
+	if len(conversation.Messages) != 2 {
+		t.Errorf("rollbackLastMessages(1) length = %d, want 2", len(conversation.Messages))
 	}
 
-	if session.Messages[1].Content != "response1" {
-		t.Errorf("rollbackLastMessage() last message = %q, want %q", session.Messages[1].Content, "response1")
+	if conversation.Messages[1].Content != "response1" {
+		t.Errorf("rollbackLastMessages(1) last message = %q, want %q", conversation.Messages[1].Content, "response1")
 	}
 }
 
-func TestRollbackLastMessages(t *testing.T) {
-	session := &Session{
+func TestConversation_RollbackLastMessages(t *testing.T) {
+	conversation := &Conversation{
+		RootStatusID: "test123",
+		CreatedAt:    time.Now(),
 		Messages: []Message{
 			{Role: "user", Content: "message1"},
 			{Role: "assistant", Content: "response1"},
@@ -250,25 +208,27 @@ func TestRollbackLastMessages(t *testing.T) {
 		},
 	}
 
-	rollbackLastMessages(session, 2)
+	conversation.rollbackLastMessages(2)
 
-	if len(session.Messages) != 2 {
-		t.Errorf("rollbackLastMessages() length = %d, want 2", len(session.Messages))
+	if len(conversation.Messages) != 2 {
+		t.Errorf("rollbackLastMessages() length = %d, want 2", len(conversation.Messages))
 	}
 
-	if session.Messages[1].Content != "response1" {
-		t.Errorf("rollbackLastMessages() last message = %q, want %q", session.Messages[1].Content, "response1")
+	if conversation.Messages[1].Content != "response1" {
+		t.Errorf("rollbackLastMessages() last message = %q, want %q", conversation.Messages[1].Content, "response1")
 	}
 }
 
-func TestRollbackEmptySession(t *testing.T) {
-	session := &Session{
-		Messages: []Message{},
+func TestConversation_RollbackEmptyConversation(t *testing.T) {
+	conversation := &Conversation{
+		RootStatusID: "test123",
+		CreatedAt:    time.Now(),
+		Messages:     []Message{},
 	}
 
-	rollbackLastMessage(session)
+	conversation.rollbackLastMessages(1)
 
-	if len(session.Messages) != 0 {
-		t.Errorf("rollbackLastMessage() on empty session length = %d, want 0", len(session.Messages))
+	if len(conversation.Messages) != 0 {
+		t.Errorf("rollbackLastMessages(1) on empty conversation length = %d, want 0", len(conversation.Messages))
 	}
 }

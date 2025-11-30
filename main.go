@@ -20,16 +20,20 @@ import (
 )
 
 const (
-	// Claude APIの最大トークン数（通常応答）
-	maxResponseTokens = 1024
-	// Claude APIの最大トークン数（要約生成）
-	maxSummaryTokens = 1024
-	// 投稿の最大文字数（バッファ含む）
-	maxPostChars = 480
-	// 会話履歴の圧縮閾値
-	historyCompressThreshold = 20
-	// 詳細メッセージの保持件数
-	detailedMessageCount = 10
+	// Claude API設定
+	maxResponseTokens = 1024 // 通常応答の最大トークン数
+	maxSummaryTokens  = 1024 // 要約生成の最大トークン数
+
+	// Mastodon投稿設定
+	maxPostChars = 480 // 投稿の最大文字数（バッファ含む）
+
+	// リプライツリー内のメッセージ圧縮設定
+	conversationMessageCompressThreshold = 20 // この件数を超えたら圧縮
+	conversationMessageKeepCount         = 10 // 圧縮後に保持するメッセージ件数
+
+	// リプライツリー全体の削除設定
+	conversationRetentionHours = 24 // この時間を超えた会話を削除
+	conversationMinKeepCount   = 3  // 最低限保持する会話数
 )
 
 type Config struct {
@@ -50,9 +54,15 @@ type ConversationHistory struct {
 }
 
 type Session struct {
-	Messages    []Message
-	Summary     string
-	LastUpdated time.Time
+	Conversations []Conversation
+	Summary       string
+	LastUpdated   time.Time
+}
+
+type Conversation struct {
+	RootStatusID string
+	CreatedAt    time.Time
+	Messages     []Message
 }
 
 type Message struct {
@@ -125,8 +135,8 @@ func runTestMode(config *Config, message string) {
 	logTestModeInfo(config, message)
 	validateAuthToken(config)
 
-	session := createTestSession(message)
-	response := generateResponse(config, session)
+	session, conversation := createTestSession(message)
+	response := generateResponse(config, session, conversation)
 
 	if response == "" {
 		log.Fatal("エラー: Claudeからの応答がありません")
@@ -156,10 +166,15 @@ func validateAuthToken(config *Config) {
 	log.Println()
 }
 
-func createTestSession(message string) *Session {
+func createTestSession(message string) (*Session, *Conversation) {
 	session := createNewSession()
-	session.addMessage("user", message)
-	return session
+	conversation := &Conversation{
+		RootStatusID: "test",
+		CreatedAt:    time.Now(),
+		Messages:     []Message{{Role: "user", Content: message}},
+	}
+	session.Conversations = append(session.Conversations, *conversation)
+	return session, &session.Conversations[0]
 }
 
 func logTestResult(response string) {
@@ -263,8 +278,9 @@ func processNotification(config *Config, history *ConversationHistory, notificat
 	log.Printf("@%s: %s", userID, userMessage)
 
 	session := history.getOrCreateSession(userID)
+	rootStatusID := getRootStatusID(notification, config)
 
-	if processResponse(config, session, notification, userMessage) {
+	if processResponse(config, session, notification, userMessage, rootStatusID) {
 		compressHistoryIfNeeded(config, session)
 		saveHistory(history)
 	}
@@ -272,38 +288,44 @@ func processNotification(config *Config, history *ConversationHistory, notificat
 
 func extractUserMessage(notification *mastodon.Notification) string {
 	content := stripHTML(string(notification.Status.Content))
-	content = removeMentions(content)
-	return strings.TrimSpace(content)
+	words := strings.Fields(content)
+
+	var filtered []string
+	for _, word := range words {
+		if !strings.HasPrefix(word, "@") {
+			filtered = append(filtered, word)
+		}
+	}
+
+	return strings.Join(filtered, " ")
 }
 
-func processResponse(config *Config, session *Session, notification *mastodon.Notification, userMessage string) bool {
+func processResponse(config *Config, session *Session, notification *mastodon.Notification, userMessage, rootStatusID string) bool {
 	mention := buildMention(notification.Account.Acct)
 	statusID := string(notification.Status.ID)
 	visibility := string(notification.Status.Visibility)
 
-	if len(session.Messages) > 0 && isNewConversation(notification, config) {
-		// 過去の会話全体を要約してリセット
-		resetConversationWithSummary(config, session)
-	}
+	conversation := session.getOrCreateConversation(rootStatusID)
+	conversation.addMessage("user", userMessage)
 
-	session.addMessage("user", userMessage)
-	response := generateResponse(config, session)
+	response := generateResponse(config, session, conversation)
 
 	if response == "" {
-		rollbackLastMessage(session)
+		conversation.rollbackLastMessages(1)
 		postErrorMessage(config, statusID, mention, visibility)
 		return false
 	}
 
-	session.addMessage("assistant", response)
+	conversation.addMessage("assistant", response)
 	err := postResponseWithSplit(config, statusID, mention, response, visibility)
 
 	if err != nil {
-		rollbackLastMessages(session, 2)
+		conversation.rollbackLastMessages(2)
 		postErrorMessage(config, statusID, mention, visibility)
 		return false
 	}
 
+	session.LastUpdated = time.Now()
 	return true
 }
 
@@ -311,55 +333,28 @@ func buildMention(acct string) string {
 	return "@" + acct + " "
 }
 
-// isNewConversation は通知が新規会話かどうかを判定する
-func isNewConversation(notification *mastodon.Notification, config *Config) bool {
-	// 1. リプライでなければ新規会話
-	if !isReply(notification) {
-		return true
+func getRootStatusID(notification *mastodon.Notification, config *Config) string {
+	if notification.Status.InReplyToID == nil {
+		return string(notification.Status.ID)
 	}
 
-	// 2. リプライ先の投稿を取得
 	client := createMastodonClient(config)
-	replyToStatus, err := convertToIDAndFetchStatus(notification.Status.InReplyToID, client)
-	if err != nil {
-		return true
+	currentStatus := notification.Status
+
+	for currentStatus.InReplyToID != nil {
+		parentStatus, err := convertToIDAndFetchStatus(currentStatus.InReplyToID, client)
+		if err != nil {
+			return string(notification.Status.ID)
+		}
+		currentStatus = parentStatus
 	}
 
-	// 3. 2つ前の投稿者を取得
-	previousPosterID, err := getPreviousPosterID(replyToStatus, client)
-	if err != nil {
-		return true
-	}
-
-	// 4. 2つ前の投稿がなければ新規会話
-	if previousPosterID == "" {
-		return true
-	}
-
-	// 5. 2つ前の投稿者と現在の投稿者が違えば新規会話（横入り検出）
-	return previousPosterID != notification.Account.ID
+	return string(currentStatus.ID)
 }
 
-func isReply(notification *mastodon.Notification) bool {
-	return notification.Status.InReplyToID != nil
-}
-
-func convertToIDAndFetchStatus(inReplyToID interface{}, client *mastodon.Client) (*mastodon.Status, error) {
+func convertToIDAndFetchStatus(inReplyToID any, client *mastodon.Client) (*mastodon.Status, error) {
 	id := mastodon.ID(fmt.Sprintf("%v", inReplyToID))
 	return client.GetStatus(context.Background(), id)
-}
-
-func getPreviousPosterID(status *mastodon.Status, client *mastodon.Client) (mastodon.ID, error) {
-	if status.InReplyToID == nil {
-		return "", nil
-	}
-
-	previousStatus, err := convertToIDAndFetchStatus(status.InReplyToID, client)
-	if err != nil {
-		return "", err
-	}
-
-	return previousStatus.Account.ID, nil
 }
 
 func postErrorMessage(config *Config, statusID, mention, visibility string) {
@@ -465,9 +460,11 @@ func skipLeadingNewlines(runes []rune, pos int) int {
 }
 
 func compressHistoryIfNeeded(config *Config, session *Session) {
-	if len(session.Messages) > historyCompressThreshold {
-		compressHistory(config, session)
+	for i := range session.Conversations {
+		compressConversationIfNeeded(config, session, &session.Conversations[i])
 	}
+
+	compressOldConversations(config, session)
 }
 
 func saveHistory(history *ConversationHistory) {
@@ -492,9 +489,9 @@ func (h *ConversationHistory) getOrCreateSession(userID string) *Session {
 
 func createNewSession() *Session {
 	return &Session{
-		Messages:    []Message{},
-		Summary:     "",
-		LastUpdated: time.Now(),
+		Conversations: []Conversation{},
+		Summary:       "",
+		LastUpdated:   time.Now(),
 	}
 }
 
@@ -524,43 +521,60 @@ func (h *ConversationHistory) save() error {
 	return os.WriteFile(h.saveFilePath, data, 0644)
 }
 
-func (s *Session) addMessage(role, content string) {
-	s.Messages = append(s.Messages, Message{
+func (s *Session) getOrCreateConversation(rootStatusID string) *Conversation {
+	for i := range s.Conversations {
+		if s.Conversations[i].RootStatusID == rootStatusID {
+			return &s.Conversations[i]
+		}
+	}
+
+	newConv := Conversation{
+		RootStatusID: rootStatusID,
+		CreatedAt:    time.Now(),
+		Messages:     []Message{},
+	}
+	s.Conversations = append(s.Conversations, newConv)
+	return &s.Conversations[len(s.Conversations)-1]
+}
+
+func (c *Conversation) addMessage(role, content string) {
+	c.Messages = append(c.Messages, Message{
 		Role:    role,
 		Content: content,
 	})
-	s.LastUpdated = time.Now()
 }
 
-func rollbackLastMessage(session *Session) {
-	if len(session.Messages) > 0 {
-		session.Messages = session.Messages[:len(session.Messages)-1]
-		session.LastUpdated = time.Now()
+func (c *Conversation) rollbackLastMessages(count int) {
+	if len(c.Messages) >= count {
+		c.Messages = c.Messages[:len(c.Messages)-count]
 	}
 }
 
-func rollbackLastMessages(session *Session, count int) {
-	if len(session.Messages) >= count {
-		session.Messages = session.Messages[:len(session.Messages)-count]
-		session.LastUpdated = time.Now()
-	}
+func generateResponse(config *Config, session *Session, conversation *Conversation) string {
+	systemPrompt := buildSystemPrompt(config, session, true)
+	return callClaudeAPI(config, conversation.Messages, systemPrompt, maxResponseTokens)
 }
 
-func generateResponse(config *Config, session *Session) string {
-	return callClaudeAPI(config, session)
+func callClaudeAPIForSummary(config *Config, messages []Message, summary string) string {
+	summarySession := &Session{Summary: summary}
+	systemPrompt := buildSystemPrompt(config, summarySession, false)
+	return callClaudeAPI(config, messages, systemPrompt, maxSummaryTokens)
 }
 
-func callClaudeAPI(config *Config, session *Session) string {
-	return callClaudeAPIWithTokens(config, session, maxResponseTokens, true)
-}
-
-func callClaudeAPIForSummary(config *Config, session *Session) string {
-	return callClaudeAPIWithTokens(config, session, maxSummaryTokens, false)
-}
-
-func callClaudeAPIWithTokens(config *Config, session *Session, maxTokens int64, includeCharacterPrompt bool) string {
+func callClaudeAPI(config *Config, messages []Message, systemPrompt string, maxTokens int64) string {
 	client := createAnthropicClient(config)
-	params := buildAPIParams(config, session, maxTokens, includeCharacterPrompt)
+
+	params := anthropic.MessageNewParams{
+		Model:     anthropic.Model(config.AnthropicModel),
+		MaxTokens: maxTokens,
+		Messages:  convertMessages(messages),
+	}
+
+	if systemPrompt != "" {
+		params.System = []anthropic.TextBlockParam{
+			{Type: "text", Text: systemPrompt},
+		}
+	}
 
 	msg, err := client.Messages.New(context.Background(), params)
 	if err != nil {
@@ -577,24 +591,6 @@ func createAnthropicClient(config *Config) anthropic.Client {
 		opts = append(opts, option.WithBaseURL(config.AnthropicBaseURL))
 	}
 	return anthropic.NewClient(opts...)
-}
-
-func buildAPIParams(config *Config, session *Session, maxTokens int64, includeCharacterPrompt bool) anthropic.MessageNewParams {
-	systemPrompt := buildSystemPrompt(config, session, includeCharacterPrompt)
-
-	params := anthropic.MessageNewParams{
-		Model:     anthropic.Model(config.AnthropicModel),
-		MaxTokens: maxTokens,
-		Messages:  convertMessages(session.Messages),
-	}
-
-	if systemPrompt != "" {
-		params.System = []anthropic.TextBlockParam{
-			{Type: "text", Text: systemPrompt},
-		}
-	}
-
-	return params
 }
 
 func extractResponseText(msg *anthropic.Message) string {
@@ -617,66 +613,99 @@ func convertMessages(messages []Message) []anthropic.MessageParam {
 }
 
 func buildSystemPrompt(config *Config, session *Session, includeCharacterPrompt bool) string {
-	prompt := "IMPORTANT: Always respond in Japanese (日本語で回答してください / 请用日语回答).\n\n"
+	var prompt strings.Builder
+	prompt.WriteString("IMPORTANT: Always respond in Japanese (日本語で回答してください / 请用日语回答).\n\n")
+
 	if includeCharacterPrompt {
-		prompt += config.CharacterPrompt
-	}
-	prompt += buildSummariesSection(session)
-	return prompt
-}
-
-func buildSummariesSection(session *Session) string {
-	if session.Summary == "" {
-		return ""
+		prompt.WriteString(config.CharacterPrompt)
 	}
 
-	return "\n\n【過去の会話要約】\n" + session.Summary + "\n\n"
+	if session != nil && session.Summary != "" {
+		prompt.WriteString("\n\n【過去の会話要約】\n")
+		prompt.WriteString(session.Summary)
+		prompt.WriteString("\n\n")
+	}
+
+	return prompt.String()
 }
 
-func compressHistory(config *Config, session *Session) {
-	compressCount := calculateCompressCount(session)
-	if compressCount <= 0 {
+func compressConversationIfNeeded(config *Config, session *Session, conversation *Conversation) {
+	if len(conversation.Messages) <= conversationMessageCompressThreshold {
 		return
 	}
 
-	messagesToCompress := session.Messages[:compressCount]
-	summary := generateSummary(config, session, messagesToCompress)
+	compressCount := len(conversation.Messages) - conversationMessageKeepCount
+	messagesToCompress := conversation.Messages[:compressCount]
 
+	summary := generateSummary(config, messagesToCompress, "")
+	if summary == "" {
+		log.Printf("会話内要約生成エラー: 応答が空です")
+		return
+	}
+
+	conversation.Messages = conversation.Messages[compressCount:]
+	if session.Summary == "" {
+		session.Summary = summary
+	} else {
+		session.Summary = session.Summary + "\n\n" + summary
+	}
+
+	log.Printf("会話内圧縮完了: %d件のメッセージを削除、%d件を保持", compressCount, len(conversation.Messages))
+}
+
+func compressOldConversations(config *Config, session *Session) {
+	oldConversations := findOldConversations(session)
+	if len(oldConversations) == 0 {
+		return
+	}
+
+	var allMessages []Message
+	for _, conv := range oldConversations {
+		allMessages = append(allMessages, conv.Messages...)
+	}
+
+	summary := generateSummary(config, allMessages, session.Summary)
 	if summary == "" {
 		log.Printf("要約生成エラー: 応答が空です")
 		return
 	}
 
-	updateSessionWithSummary(session, summary, compressCount)
-	log.Printf("履歴圧縮完了: %d件のメッセージを削除、%d件を保持", compressCount, len(session.Messages))
+	updateSessionWithSummary(session, summary, oldConversations)
+	log.Printf("履歴圧縮完了: %d件の会話を要約に移行", len(oldConversations))
 }
 
-func calculateCompressCount(session *Session) int {
-	if len(session.Messages) <= detailedMessageCount {
-		return 0
+func findOldConversations(session *Session) []Conversation {
+	if len(session.Conversations) <= conversationMinKeepCount {
+		return nil
 	}
-	return len(session.Messages) - detailedMessageCount
+
+	threshold := time.Now().Add(-conversationRetentionHours * time.Hour)
+	var oldConvs []Conversation
+
+	for _, conv := range session.Conversations {
+		if conv.CreatedAt.Before(threshold) {
+			oldConvs = append(oldConvs, conv)
+		}
+	}
+
+	return oldConvs
 }
 
-func generateSummary(config *Config, session *Session, messages []Message) string {
-	conversationText := buildConversationTextForSummary(session, messages)
-	summaryPrompt := "以下の会話全体を簡潔に要約してください。重複を避け、重要な情報のみを残してください。説明は不要です。要約内容のみを返してください。\n\n" + conversationText
-
-	summarySession := createSummarySession(summaryPrompt, session)
-	return callClaudeAPIForSummary(config, summarySession)
-}
-
-func buildConversationTextForSummary(session *Session, messages []Message) string {
+func generateSummary(config *Config, messages []Message, existingSummary string) string {
 	var builder strings.Builder
 
-	if session.Summary != "" {
+	if existingSummary != "" {
 		builder.WriteString("【これまでの会話要約】\n")
-		builder.WriteString(session.Summary)
-		builder.WriteString("\n\n【新しい会話】\n")
+		builder.WriteString(existingSummary)
+		builder.WriteString("\n\n")
 	}
 
+	builder.WriteString("【新しい会話】\n")
 	builder.WriteString(formatMessagesForSummary(messages))
-	return builder.String()
+
+	summaryPrompt := "以下の会話全体を簡潔に要約してください。重複を避け、重要な情報のみを残してください。説明は不要です。要約内容のみを返してください。\n\n" + builder.String()
+	summaryMessages := []Message{{Role: "user", Content: summaryPrompt}}
+	return callClaudeAPIForSummary(config, summaryMessages, existingSummary)
 }
 
 func formatMessagesForSummary(messages []Message) string {
@@ -694,31 +723,29 @@ func formatMessagesForSummary(messages []Message) string {
 	return builder.String()
 }
 
-func createSummarySession(prompt string, originalSession *Session) *Session {
-	return &Session{
-		Messages:    []Message{{Role: "user", Content: prompt}},
-		Summary:     originalSession.Summary,
-		LastUpdated: time.Now(),
-	}
-}
-
-func updateSessionWithSummary(session *Session, summary string, compressCount int) {
+func updateSessionWithSummary(session *Session, summary string, oldConversations []Conversation) {
 	session.Summary = summary
-	session.Messages = session.Messages[compressCount:]
+
+	oldIDs := make(map[string]bool)
+	for _, conv := range oldConversations {
+		oldIDs[conv.RootStatusID] = true
+	}
+
+	newConversations := []Conversation{}
+	for _, conv := range session.Conversations {
+		if !oldIDs[conv.RootStatusID] {
+			newConversations = append(newConversations, conv)
+		}
+	}
+
+	session.Conversations = newConversations
 }
 
 func generateErrorResponse(config *Config) string {
 	prompt := "「ごめんなさい、あなたに返事を送るのに失敗したのでいまのメッセージをもう一度送ってくれますか？」というメッセージを、あなたのキャラクターの口調で言い換えてください。説明は不要です。変換後のメッセージのみを返してください。"
-	session := createErrorSession(prompt)
-	return callClaudeAPI(config, session)
-}
-
-func createErrorSession(prompt string) *Session {
-	return &Session{
-		Messages:    []Message{{Role: "user", Content: prompt}},
-		Summary:     "",
-		LastUpdated: time.Now(),
-	}
+	messages := []Message{{Role: "user", Content: prompt}}
+	systemPrompt := buildSystemPrompt(config, nil, true)
+	return callClaudeAPI(config, messages, systemPrompt, maxResponseTokens)
 }
 
 func stripHTML(s string) string {
@@ -741,61 +768,4 @@ func extractText(n *html.Node, buf *strings.Builder) {
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		extractText(c, buf)
 	}
-}
-
-func removeMentions(text string) string {
-	words := strings.Fields(text)
-	filtered := filterMentions(words)
-	return strings.Join(filtered, " ")
-}
-
-func filterMentions(words []string) []string {
-	result := []string{}
-	for _, word := range words {
-		if !strings.HasPrefix(word, "@") {
-			result = append(result, word)
-		}
-	}
-	return result
-}
-
-// resetConversationWithSummary 過去の会話全体を要約してリセットする
-func resetConversationWithSummary(config *Config, session *Session) {
-	// 現在のメッセージと既存の要約を含めて全体要約を作成
-	newSummary := generateFullConversationSummary(config, session)
-
-	// 新しい要約で更新
-	session.Summary = newSummary
-
-	// メッセージをクリア
-	session.Messages = []Message{}
-
-	log.Printf("新規会話開始: %d件のメッセージを要約し、セッションをリセットしました", len(session.Messages))
-}
-
-// generateFullConversationSummary 全会話の要約を生成
-func generateFullConversationSummary(config *Config, session *Session) string {
-	var prompt strings.Builder
-
-	// 既存の要約と現在のメッセージを統合
-	prompt.WriteString("以下の会話全体を簡潔に要約してください。重複を避け、重要な情報のみを残してください。説明は不要です。要約内容のみを返してください。\n\n")
-
-	// 現在のメッセージ履歴を追加（先に）
-	prompt.WriteString("最新の会話:\n")
-	prompt.WriteString(formatMessagesForSummary(session.Messages))
-	prompt.WriteString("\n\n")
-
-	// 既存の要約があれば含める（後に）
-	if session.Summary != "" {
-		prompt.WriteString("前の会話の要約:\n")
-		prompt.WriteString(session.Summary)
-		prompt.WriteString("\n\n")
-	}
-
-	summarySession := &Session{
-		Messages:    []Message{{Role: "user", Content: prompt.String()}},
-		LastUpdated: time.Now(),
-	}
-
-	return callClaudeAPIForSummary(config, summarySession)
 }
