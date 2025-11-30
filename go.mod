@@ -1,4 +1,4 @@
-module mastodon-claude-bot
+module claude_bot
 
 go 1.24.0
 
