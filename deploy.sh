@@ -118,7 +118,13 @@ main() {
     # rclone の存在確認
     if ! command -v rclone &> /dev/null; then
         echo "エラー: rclone がインストールされていません"
-        echo "インストール方法: brew install rclone"
+        echo ""
+        echo "インストール方法:"
+        echo "  macOS: brew install rclone"
+        echo "  Ubuntu/Debian: sudo apt-get install rclone"
+        echo "  その他: https://rclone.org/install/"
+        echo ""
+        echo "rcloneはSFTP経由でのファイル転送に必要です"
         exit 1
     fi
 
