@@ -1,6 +1,9 @@
 # 環境変数ファイル
 .env
 
+# エディタ設定
+.cursorrules
+
 # 会話履歴
 sessions.json
 
