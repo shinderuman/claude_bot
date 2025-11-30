@@ -257,7 +257,7 @@ func processNotification(config *Config, history *ConversationHistory, notificat
 	}
 
 	userID := string(notification.Account.Acct)
-	log.Printf("メンション受信: @%s: %s", userID, userMessage)
+	log.Printf("@%s: %s", userID, userMessage)
 
 	session := history.getOrCreateSession(userID)
 
