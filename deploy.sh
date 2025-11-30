@@ -28,7 +28,7 @@ for arg in "$@"; do
         --help|-h)
         echo "使い方: $0 [オプション]"
         echo "オプション:"
-        echo "  --env, -e       .envファイルをコピーする"
+        echo "  --env, -e       .envファイルを同期する"
         echo "  --sessions, -s  sessions.jsonファイルを同期する"
         echo "  --help, -h      このヘルプを表示する"
         exit 0
@@ -66,7 +66,7 @@ if [ "$COPY_ENV" = true ]; then
         echo "エラー: .envファイルが見つかりません"
         exit 1
     fi
-    echo "✓ .envファイル確認完了（コピー対象）"
+    echo "✓ .envファイル確認完了（同期対象）"
 else
     echo "ℹ .envファイルはスキップされます（--envオプションで有効化）"
 fi
@@ -86,11 +86,38 @@ fi
 echo "2. リモートディレクトリを準備中..."
 ssh ${REMOTE_HOST} "mkdir -p ${REMOTE_DIR}"
 
-# .envファイルの転送（--envオプション時のみ）
+# .envファイルの同期（--envオプション時のみ）
 if [ "$COPY_ENV" = true ]; then
-    echo "3. .envファイルを転送中..."
-    scp .env ${REMOTE_HOST}:${REMOTE_DIR}/
-    echo "✓ .envファイル転送完了"
+    echo "3. .envファイルを同期中..."
+
+    # リモートのファイルタイムスタンプを取得
+    REMOTE_ENV_TIMESTAMP=$(ssh ${REMOTE_HOST} "stat -c %Y ${REMOTE_DIR}/.env 2>/dev/null || echo 0")
+    LOCAL_ENV_TIMESTAMP=0
+
+    if [ -f ".env" ]; then
+        # macOSとLinuxでstatコマンドのオプションが異なるため両方対応
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            LOCAL_ENV_TIMESTAMP=$(stat -f %m .env 2>/dev/null || echo 0)
+        else
+            LOCAL_ENV_TIMESTAMP=$(stat -c %Y .env 2>/dev/null || echo 0)
+        fi
+    fi
+
+    if [ $LOCAL_ENV_TIMESTAMP -gt $REMOTE_ENV_TIMESTAMP ]; then
+        # ローカルの方が新しい場合は転送
+        if [ -f ".env" ]; then
+            scp .env ${REMOTE_HOST}:${REMOTE_DIR}/
+            echo "✓ .envファイル転送完了（ローカルの方が新しい）"
+        fi
+    elif [ $REMOTE_ENV_TIMESTAMP -gt 0 ]; then
+        # リモートの方が新しい場合はダウンロード
+        scp ${REMOTE_HOST}:${REMOTE_DIR}/.env ./
+        echo "✓ .envファイルダウンロード完了（リモートの方が新しい）"
+    else
+        # どちらにも存在しない場合はエラー
+        echo "エラー: .envファイルが見つかりません"
+        exit 1
+    fi
 fi
 
 # sessions.jsonの同期（--sessionsオプション時のみ）
@@ -102,7 +129,12 @@ if [ "$COPY_SESSIONS" = true ]; then
     LOCAL_TIMESTAMP=0
 
     if [ -f "sessions.json" ]; then
-        LOCAL_TIMESTAMP=$(stat -c %Y sessions.json 2>/dev/null || echo 0)
+        # macOSとLinuxでstatコマンドのオプションが異なるため両方対応
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            LOCAL_TIMESTAMP=$(stat -f %m sessions.json 2>/dev/null || echo 0)
+        else
+            LOCAL_TIMESTAMP=$(stat -c %Y sessions.json 2>/dev/null || echo 0)
+        fi
     fi
 
     if [ $LOCAL_TIMESTAMP -gt $REMOTE_TIMESTAMP ]; then
