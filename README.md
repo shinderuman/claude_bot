@@ -46,33 +46,83 @@ cp .env.example .env
 # .envファイルを編集して適切な値を設定
 ```
 
-2. ビルド
-
-```bash
-go build -o mastodon-bot main.go
-```
-
-3. 依存関係のインストール
+2. 依存関係のインストール
 
 ```bash
 go mod tidy
 ```
 
-4. Claude APIとの疎通確認（オプション）
+3. ビルド（リリース用）
 
 ```bash
-# .envファイルが自動的に読み込まれます
-./mastodon-bot -test
-
-# カスタムメッセージで確認
-./mastodon-bot -test -message "こんにちは"
+go build -o claude_bot main.go
 ```
 
-5. 実行
+## デプロイ
+
+自動化されたデプロイスクリプトを使用して、リモートサーバーにアプリケーションをデプロイします。
+
+### デプロイコマンド
+
+```bash
+# 通常のデプロイ（同期なし）
+./deploy.sh
+
+# .envファイルを同期してデプロイ
+./deploy.sh --env
+./deploy.sh -e
+
+# sessions.jsonを同期してデプロイ
+./deploy.sh --sessions
+./deploy.sh -s
+
+# 両方のファイルを同期してデプロイ
+./deploy.sh --env --sessions
+./deploy.sh -e -s
+
+# 同期のみ（デプロイはしない）
+./deploy.sh --sync-only
+```
+
+### デプロイスクリプトの機能
+
+- **自動ビルド**: Linux向けバイナリを自動でビルド
+- **ファイル同期**: .envとsessions.jsonを双方向で同期（タイムスタンプ比較）
+- **Supervisor管理**: デプロイ前に停止し、後に自動で開始
+- **エラーハンドリング**: ビルド失敗やファイル存在チェック
+- **macOS対応**: statコマンドのプラットフォーム互換性
+
+### 同期の仕組み
+
+- ローカルとリモートのファイルタイムスタンプを比較
+- 新しい方のファイルを優先して転送
+- タイムスタンプが同じ場合は何もしない
+- macOSとLinuxの両方で動作
+
+### コマンドラインオプション
+
+- `--env, -e`: .envファイルを同期する
+- `--sessions, -s`: sessions.jsonファイルを同期する
+- `--sync-only`: 同期のみ行い、デプロイはしない（両ファイル対象）
+- `--help, -h`: ヘルプを表示する
+
+## ローカル実行
+
+### Claude APIとの疎通確認（オプション）
 
 ```bash
 # .envファイルが自動的に読み込まれます
-./mastodon-bot
+./claude_bot -test
+
+# カスタムメッセージで確認
+./claude_bot -test -message "こんにちは"
+```
+
+### 通常実行
+
+```bash
+# .envファイルが自動的に読み込まれます
+./claude_bot
 ```
 
 または直接環境変数を指定：
