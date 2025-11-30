@@ -46,6 +46,45 @@ REMOTE_HOST="kenji.asmodeus.jp"
 REMOTE_DIR="/home/ubuntu/claude_bot"
 APP_NAME="claude_bot"
 
+# ファイル同期関数
+sync_file() {
+    local filename="$1"
+    local filedesc="$2"
+
+    echo "${filedesc}を同期中..."
+
+    # リモートのファイルタイムスタンプを取得
+    local remote_timestamp=$(ssh ${REMOTE_HOST} "stat -c %Y ${REMOTE_DIR}/${filename} 2>/dev/null || echo 0")
+    local local_timestamp=0
+
+    if [ -f "$filename" ]; then
+        # macOSとLinuxでstatコマンドのオプションが異なるため両方対応
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            local_timestamp=$(stat -f %m "$filename" 2>/dev/null || echo 0)
+        else
+            local_timestamp=$(stat -c %Y "$filename" 2>/dev/null || echo 0)
+        fi
+    fi
+
+    if [ $local_timestamp -gt $remote_timestamp ]; then
+        # ローカルの方が新しい場合は転送
+        if [ -f "$filename" ]; then
+            scp "$filename" ${REMOTE_HOST}:${REMOTE_DIR}/
+            echo "✓ ${filename}転送完了（ローカルの方が新しい）"
+        fi
+    elif [ $remote_timestamp -gt 0 ]; then
+        # リモートの方が新しい場合はダウンロード
+        scp ${REMOTE_HOST}:${REMOTE_DIR}/"$filename" ./
+        echo "✓ ${filename}ダウンロード完了（リモートの方が新しい）"
+    else
+        # どちらにも存在しない場合
+        echo "ℹ ${filename}は存在しません"
+        return 1
+    fi
+
+    return 0
+}
+
 # ビルド
 echo "1. Linux向けバイナリをビルド中..."
 GOOS=linux GOARCH=amd64 go build -o ${APP_NAME} .
@@ -89,32 +128,9 @@ ssh ${REMOTE_HOST} "mkdir -p ${REMOTE_DIR}"
 # .envファイルの同期（--envオプション時のみ）
 if [ "$COPY_ENV" = true ]; then
     echo "3. .envファイルを同期中..."
-
-    # リモートのファイルタイムスタンプを取得
-    REMOTE_ENV_TIMESTAMP=$(ssh ${REMOTE_HOST} "stat -c %Y ${REMOTE_DIR}/.env 2>/dev/null || echo 0")
-    LOCAL_ENV_TIMESTAMP=0
-
-    if [ -f ".env" ]; then
-        # macOSとLinuxでstatコマンドのオプションが異なるため両方対応
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            LOCAL_ENV_TIMESTAMP=$(stat -f %m .env 2>/dev/null || echo 0)
-        else
-            LOCAL_ENV_TIMESTAMP=$(stat -c %Y .env 2>/dev/null || echo 0)
-        fi
-    fi
-
-    if [ $LOCAL_ENV_TIMESTAMP -gt $REMOTE_ENV_TIMESTAMP ]; then
-        # ローカルの方が新しい場合は転送
-        if [ -f ".env" ]; then
-            scp .env ${REMOTE_HOST}:${REMOTE_DIR}/
-            echo "✓ .envファイル転送完了（ローカルの方が新しい）"
-        fi
-    elif [ $REMOTE_ENV_TIMESTAMP -gt 0 ]; then
-        # リモートの方が新しい場合はダウンロード
-        scp ${REMOTE_HOST}:${REMOTE_DIR}/.env ./
-        echo "✓ .envファイルダウンロード完了（リモートの方が新しい）"
-    else
-        # どちらにも存在しない場合はエラー
+    sync_file ".env" "   .envファイル"
+    result=$?
+    if [ $result -eq 1 ] && [ ! -f ".env" ]; then
         echo "エラー: .envファイルが見つかりません"
         exit 1
     fi
@@ -122,35 +138,7 @@ fi
 
 # sessions.jsonの同期（--sessionsオプション時のみ）
 if [ "$COPY_SESSIONS" = true ]; then
-    echo "   sessions.jsonを同期中..."
-
-    # リモートのファイルタイムスタンプを取得
-    REMOTE_TIMESTAMP=$(ssh ${REMOTE_HOST} "stat -c %Y ${REMOTE_DIR}/sessions.json 2>/dev/null || echo 0")
-    LOCAL_TIMESTAMP=0
-
-    if [ -f "sessions.json" ]; then
-        # macOSとLinuxでstatコマンドのオプションが異なるため両方対応
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            LOCAL_TIMESTAMP=$(stat -f %m sessions.json 2>/dev/null || echo 0)
-        else
-            LOCAL_TIMESTAMP=$(stat -c %Y sessions.json 2>/dev/null || echo 0)
-        fi
-    fi
-
-    if [ $LOCAL_TIMESTAMP -gt $REMOTE_TIMESTAMP ]; then
-        # ローカルの方が新しい場合は転送
-        if [ -f "sessions.json" ]; then
-            scp sessions.json ${REMOTE_HOST}:${REMOTE_DIR}/
-            echo "✓ sessions.json転送完了（ローカルの方が新しい）"
-        fi
-    elif [ $REMOTE_TIMESTAMP -gt 0 ]; then
-        # リモートの方が新しい場合はダウンロード
-        scp ${REMOTE_HOST}:${REMOTE_DIR}/sessions.json ./
-        echo "✓ sessions.jsonダウンロード完了（リモートの方が新しい）"
-    else
-        # どちらにも存在しない場合は何もしない
-        echo "ℹ sessions.jsonは存在しません"
-    fi
+    sync_file "sessions.json" "   sessions.json"
 fi
 
 # Supervisorの停止
