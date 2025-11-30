@@ -6,6 +6,7 @@ import (
 	"flag"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -77,9 +78,19 @@ func main() {
 }
 
 func loadEnvironment() {
-	if err := godotenv.Load(); err != nil {
-		log.Println(".envファイルが見つかりません（環境変数から読み込みます）")
+	// 実行ファイルのあるディレクトリの.envを読み込む
+	exePath, err := os.Executable()
+	if err != nil {
+		log.Fatal("実行ファイルパス取得エラー: ", err)
 	}
+
+	exeDir := filepath.Dir(exePath)
+	envPath := filepath.Join(exeDir, ".env")
+
+	if err := godotenv.Load(envPath); err != nil {
+		log.Fatal(".envファイルが見つかりません: ", envPath)
+	}
+	log.Printf(".envファイルを読み込みました: %s", envPath)
 }
 
 func loadConfig() *Config {
@@ -150,15 +161,24 @@ func logTestResult(response string) {
 }
 
 func initializeHistory() *ConversationHistory {
+	// 実行ファイルのあるディレクトリのsessions.jsonを使う
+	exePath, err := os.Executable()
+	if err != nil {
+		log.Fatal("実行ファイルパス取得エラー: ", err)
+	}
+
+	exeDir := filepath.Dir(exePath)
+	sessionsPath := filepath.Join(exeDir, "sessions.json")
+
 	history := &ConversationHistory{
 		sessions:     make(map[string]*Session),
-		saveFilePath: "sessions.json",
+		saveFilePath: sessionsPath,
 	}
 
 	if err := history.load(); err != nil {
 		log.Printf("履歴読み込みエラー（新規作成します）: %v", err)
 	} else {
-		log.Printf("履歴読み込み成功: %d件のセッション", len(history.sessions))
+		log.Printf("履歴読み込み成功: %d件のセッション (ファイル: %s)", len(history.sessions), sessionsPath)
 	}
 
 	return history
