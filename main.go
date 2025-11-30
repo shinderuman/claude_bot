@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -280,10 +281,7 @@ func processResponse(config *Config, session *Session, notification *mastodon.No
 	statusID := string(notification.Status.ID)
 	visibility := string(notification.Status.Visibility)
 
-	// リプライIDの有無で新規会話を判定
-	isNewConversation := notification.Status.InReplyToID == nil
-
-	if isNewConversation && len(session.Messages) > 0 {
+	if len(session.Messages) > 0 && isNewConversation(notification, config) {
 		// 過去の会話全体を要約してリセット
 		resetConversationWithSummary(config, session)
 	}
@@ -311,6 +309,57 @@ func processResponse(config *Config, session *Session, notification *mastodon.No
 
 func buildMention(acct string) string {
 	return "@" + acct + " "
+}
+
+// isNewConversation は通知が新規会話かどうかを判定する
+func isNewConversation(notification *mastodon.Notification, config *Config) bool {
+	// 1. リプライでなければ新規会話
+	if !isReply(notification) {
+		return true
+	}
+
+	// 2. リプライ先の投稿を取得
+	client := createMastodonClient(config)
+	replyToStatus, err := convertToIDAndFetchStatus(notification.Status.InReplyToID, client)
+	if err != nil {
+		return true
+	}
+
+	// 3. 2つ前の投稿者を取得
+	previousPosterID, err := getPreviousPosterID(replyToStatus, client)
+	if err != nil {
+		return true
+	}
+
+	// 4. 2つ前の投稿がなければ新規会話
+	if previousPosterID == "" {
+		return true
+	}
+
+	// 5. 2つ前の投稿者と現在の投稿者が違えば新規会話（横入り検出）
+	return previousPosterID != notification.Account.ID
+}
+
+func isReply(notification *mastodon.Notification) bool {
+	return notification.Status.InReplyToID != nil
+}
+
+func convertToIDAndFetchStatus(inReplyToID interface{}, client *mastodon.Client) (*mastodon.Status, error) {
+	id := mastodon.ID(fmt.Sprintf("%v", inReplyToID))
+	return client.GetStatus(context.Background(), id)
+}
+
+func getPreviousPosterID(status *mastodon.Status, client *mastodon.Client) (mastodon.ID, error) {
+	if status.InReplyToID == nil {
+		return "", nil
+	}
+
+	previousStatus, err := convertToIDAndFetchStatus(status.InReplyToID, client)
+	if err != nil {
+		return "", err
+	}
+
+	return previousStatus.Account.ID, nil
 }
 
 func postErrorMessage(config *Config, statusID, mention, visibility string) {
