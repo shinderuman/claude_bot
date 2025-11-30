@@ -7,6 +7,7 @@ echo "=== Mastodon Claude Bot デプロイスクリプト ==="
 # 引数の解析
 COPY_ENV=false
 COPY_SESSIONS=false
+SYNC_ONLY=false
 for arg in "$@"; do
     case $arg in
         --env)
@@ -25,11 +26,18 @@ for arg in "$@"; do
         COPY_SESSIONS=true
         shift
         ;;
+        --sync-only)
+        SYNC_ONLY=true
+        COPY_ENV=true
+        COPY_SESSIONS=true
+        shift
+        ;;
         --help|-h)
         echo "使い方: $0 [オプション]"
         echo "オプション:"
         echo "  --env, -e       .envファイルを同期する"
         echo "  --sessions, -s  sessions.jsonファイルを同期する"
+        echo "  --sync-only      同期のみ行い、デプロイはしない"
         echo "  --help, -h      このヘルプを表示する"
         exit 0
         ;;
@@ -84,6 +92,38 @@ sync_file() {
 
     return 0
 }
+
+# 同期のみモードの場合
+if [ "$SYNC_ONLY" = true ]; then
+    echo "同期のみモード: ファイル同期を実行します"
+    echo ""
+
+    # リモートディレクトリの作成
+    echo "1. リモートディレクトリを準備中..."
+    ssh ${REMOTE_HOST} "mkdir -p ${REMOTE_DIR}"
+
+    # .envファイルの同期（--envオプション時のみ）
+    if [ "$COPY_ENV" = true ]; then
+        echo "2. .envファイルを同期中..."
+        sync_file ".env" "   .envファイル"
+        result=$?
+        if [ $result -eq 1 ] && [ ! -f ".env" ]; then
+            echo "エラー: .envファイルが見つかりません"
+            exit 1
+        fi
+    fi
+
+    # sessions.jsonの同期（--sessionsオプション時のみ）
+    if [ "$COPY_SESSIONS" = true ]; then
+        echo "3. sessions.jsonを同期中..."
+        sync_file "sessions.json" "   sessions.json"
+    fi
+
+    echo ""
+    echo "=== 同期完了 ==="
+    echo "注意: デプロイは実行されていません"
+    exit 0
+fi
 
 # ビルド
 echo "1. Linux向けバイナリをビルド中..."
