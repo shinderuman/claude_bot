@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,14 +27,6 @@ const (
 
 	// Mastodon投稿設定
 	maxPostChars = 480 // 投稿の最大文字数（バッファ含む）
-
-	// リプライツリー内のメッセージ圧縮設定
-	conversationMessageCompressThreshold = 20 // この件数を超えたら圧縮
-	conversationMessageKeepCount         = 10 // 圧縮後に保持するメッセージ件数
-
-	// リプライツリー全体の削除設定
-	conversationRetentionHours = 24 // この時間を超えた会話を削除
-	conversationMinKeepCount   = 3  // 最低限保持する会話数
 )
 
 type Config struct {
@@ -45,6 +38,12 @@ type Config struct {
 	BotUsername         string
 	CharacterPrompt     string
 	AllowRemoteUsers    bool
+
+	// 会話管理設定
+	ConversationMessageCompressThreshold int
+	ConversationMessageKeepCount         int
+	ConversationRetentionHours           int
+	ConversationMinKeepCount             int
 }
 
 type ConversationHistory struct {
@@ -123,12 +122,25 @@ func loadConfig() *Config {
 		BotUsername:         os.Getenv("BOT_USERNAME"),
 		CharacterPrompt:     os.Getenv("CHARACTER_PROMPT"),
 		AllowRemoteUsers:    parseAllowRemoteUsers(),
+
+		ConversationMessageCompressThreshold: parseIntRequired(os.Getenv("CONVERSATION_MESSAGE_COMPRESS_THRESHOLD")),
+		ConversationMessageKeepCount:         parseIntRequired(os.Getenv("CONVERSATION_MESSAGE_KEEP_COUNT")),
+		ConversationRetentionHours:           parseIntRequired(os.Getenv("CONVERSATION_RETENTION_HOURS")),
+		ConversationMinKeepCount:             parseIntRequired(os.Getenv("CONVERSATION_MIN_KEEP_COUNT")),
 	}
 }
 
 func parseAllowRemoteUsers() bool {
 	value := os.Getenv("ALLOW_REMOTE_USERS")
 	return value == "true" || value == "1"
+}
+
+func parseIntRequired(value string) int {
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		log.Fatal("エラー: 環境変数の値が無効です。数値を指定してください: ", value)
+	}
+	return parsed
 }
 
 func runTestMode(config *Config, message string) {
@@ -630,11 +642,11 @@ func buildSystemPrompt(config *Config, session *Session, includeCharacterPrompt 
 }
 
 func compressConversationIfNeeded(config *Config, session *Session, conversation *Conversation) {
-	if len(conversation.Messages) <= conversationMessageCompressThreshold {
+	if len(conversation.Messages) <= config.ConversationMessageCompressThreshold {
 		return
 	}
 
-	compressCount := len(conversation.Messages) - conversationMessageKeepCount
+	compressCount := len(conversation.Messages) - config.ConversationMessageKeepCount
 	messagesToCompress := conversation.Messages[:compressCount]
 
 	summary := generateSummary(config, messagesToCompress, "")
@@ -654,7 +666,7 @@ func compressConversationIfNeeded(config *Config, session *Session, conversation
 }
 
 func compressOldConversations(config *Config, session *Session) {
-	oldConversations := findOldConversations(session)
+	oldConversations := findOldConversations(config, session)
 	if len(oldConversations) == 0 {
 		return
 	}
@@ -674,12 +686,12 @@ func compressOldConversations(config *Config, session *Session) {
 	log.Printf("履歴圧縮完了: %d件の会話を要約に移行", len(oldConversations))
 }
 
-func findOldConversations(session *Session) []Conversation {
-	if len(session.Conversations) <= conversationMinKeepCount {
+func findOldConversations(config *Config, session *Session) []Conversation {
+	if len(session.Conversations) <= config.ConversationMinKeepCount {
 		return nil
 	}
 
-	threshold := time.Now().Add(-conversationRetentionHours * time.Hour)
+	threshold := time.Now().Add(-time.Duration(config.ConversationRetentionHours) * time.Hour)
 	var oldConvs []Conversation
 
 	for _, conv := range session.Conversations {

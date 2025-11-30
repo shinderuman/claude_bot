@@ -20,3 +20,5 @@ mastodon-bot
 
 # Go workspace file
 go.work
+
+claude_bot
