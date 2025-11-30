@@ -78,19 +78,28 @@ func main() {
 }
 
 func loadEnvironment() {
-	// 実行ファイルのあるディレクトリの.envを読み込む
-	exePath, err := os.Executable()
-	if err != nil {
-		log.Fatal("実行ファイルパス取得エラー: ", err)
-	}
-
-	exeDir := filepath.Dir(exePath)
-	envPath := filepath.Join(exeDir, ".env")
+	envPath := getFilePath(".env")
 
 	if err := godotenv.Load(envPath); err != nil {
 		log.Fatal(".envファイルが見つかりません: ", envPath)
 	}
 	log.Printf(".envファイルを読み込みました: %s", envPath)
+}
+
+func getFilePath(filename string) string {
+	// 作業ディレクトリを優先
+	localPath := filepath.Join(".", filename)
+	if _, err := os.Stat(localPath); err == nil {
+		return localPath
+	}
+
+	// 実行ファイルディレクトリを fallback
+	exePath, err := os.Executable()
+	if err != nil {
+		log.Fatal("実行ファイルパス取得エラー: ", err)
+	}
+	exeDir := filepath.Dir(exePath)
+	return filepath.Join(exeDir, filename)
 }
 
 func loadConfig() *Config {
@@ -161,14 +170,7 @@ func logTestResult(response string) {
 }
 
 func initializeHistory() *ConversationHistory {
-	// 実行ファイルのあるディレクトリのsessions.jsonを使う
-	exePath, err := os.Executable()
-	if err != nil {
-		log.Fatal("実行ファイルパス取得エラー: ", err)
-	}
-
-	exeDir := filepath.Dir(exePath)
-	sessionsPath := filepath.Join(exeDir, "sessions.json")
+	sessionsPath := getFilePath("sessions.json")
 
 	history := &ConversationHistory{
 		sessions:     make(map[string]*Session),
@@ -326,6 +328,32 @@ func postResponseWithSplit(config *Config, inReplyToID, mention, response, visib
 	}
 
 	return nil
+}
+
+func postReply(config *Config, inReplyToID, content, visibility string) (*mastodon.Status, error) {
+	client := createMastodonClient(config)
+	toot := createToot(inReplyToID, content, visibility)
+
+	status, err := client.PostStatus(context.Background(), toot)
+	if err != nil {
+		logPostError(err, content)
+		return nil, err
+	}
+
+	return status, nil
+}
+
+func createToot(inReplyToID, content, visibility string) *mastodon.Toot {
+	return &mastodon.Toot{
+		Status:      content,
+		InReplyToID: mastodon.ID(inReplyToID),
+		Visibility:  visibility,
+	}
+}
+
+func logPostError(err error, content string) {
+	log.Printf("投稿エラー: %v", err)
+	log.Printf("投稿内容（%d文字）: %s", len([]rune(content)), content)
 }
 
 func splitResponse(response, mention string) []string {
@@ -620,32 +648,6 @@ func createSummarySession(prompt string, originalSession *Session) *Session {
 func updateSessionWithSummary(session *Session, summary string, compressCount int) {
 	session.Summary = summary
 	session.Messages = session.Messages[compressCount:]
-}
-
-func postReply(config *Config, inReplyToID, content, visibility string) (*mastodon.Status, error) {
-	client := createMastodonClient(config)
-	toot := createToot(inReplyToID, content, visibility)
-
-	status, err := client.PostStatus(context.Background(), toot)
-	if err != nil {
-		logPostError(err, content)
-		return nil, err
-	}
-
-	return status, nil
-}
-
-func createToot(inReplyToID, content, visibility string) *mastodon.Toot {
-	return &mastodon.Toot{
-		Status:      content,
-		InReplyToID: mastodon.ID(inReplyToID),
-		Visibility:  visibility,
-	}
-}
-
-func logPostError(err error, content string) {
-	log.Printf("投稿エラー: %v", err)
-	log.Printf("投稿内容（%d文字）: %s", len([]rune(content)), content)
 }
 
 func generateErrorResponse(config *Config) string {
