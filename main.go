@@ -23,7 +23,7 @@ import (
 const (
 	// Claude API設定
 	maxResponseTokens = 1024 // 通常応答の最大トークン数
-	maxSummaryTokens  = 1024 // 要約生成の最大トークン数
+	maxSummaryTokens  = 2048 // 要約生成の最大トークン数
 
 	// Mastodon投稿設定
 	maxPostChars = 480 // 投稿の最大文字数（バッファ含む）
