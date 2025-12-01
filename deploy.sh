@@ -16,6 +16,7 @@ SFTP_KEY_FILE="$HOME/.ssh/mastodon.pem"
 # デフォルト値
 COPY_ENV=true
 COPY_SESSIONS=true
+COPY_FACTS=true
 DEPLOY_PROGRAM=true
 
 # ステップ番号管理
@@ -87,6 +88,12 @@ sync_config_files() {
         show_step "sessions.jsonを同期中..."
         sync_file "sessions.json"
     fi
+
+    # facts.jsonの同期
+    if [ "$COPY_FACTS" = true ]; then
+        show_step "facts.jsonを同期中..."
+        sync_file "facts.json"
+    fi
 }
 
 # ========================================
@@ -111,10 +118,12 @@ main() {
     # 質問と計画の実行
     ask_question ".envファイルを同期しますか？" "COPY_ENV"
     ask_question "sessions.jsonファイルを同期しますか？" "COPY_SESSIONS"
+    ask_question "facts.jsonファイルを同期しますか？" "COPY_FACTS"
     ask_question "プログラムをデプロイしますか？" "DEPLOY_PROGRAM"
 
     show_plan "COPY_ENV:.envファイルの同期"
     show_plan "COPY_SESSIONS:sessions.jsonファイルの同期"
+    show_plan "COPY_FACTS:facts.jsonファイルの同期"
     show_plan "DEPLOY_PROGRAM:プログラムのビルドとデプロイ"
 
     echo ""

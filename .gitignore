@@ -6,6 +6,7 @@
 
 # 会話履歴
 sessions.json
+facts.json
 
 # ビルド成果物
 mastodon-bot
