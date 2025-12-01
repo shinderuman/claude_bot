@@ -237,7 +237,10 @@ func initializeHistory() *ConversationHistory {
 
 func logStartupInfo(config *Config) {
 	log.Printf("Mastodon Bot起動: @%s", config.BotUsername)
-	log.Printf("Claude API: %s (model: %s)", config.AnthropicBaseURL, config.AnthropicModel)
+	log.Printf("Claude API: %s", config.AnthropicBaseURL)
+	log.Printf("使用モデル: %s", config.AnthropicModel)
+	log.Printf("最大応答トークン数: %d", maxResponseTokens)
+	log.Printf("要約トークン数: %d", maxSummaryTokens)
 }
 
 func streamNotifications(ctx context.Context, config *Config, history *ConversationHistory, factStore *FactStore) {
