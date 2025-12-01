@@ -636,6 +636,7 @@ func buildSystemPrompt(config *Config, session *Session, includeCharacterPrompt 
 
 	if session != nil && session.Summary != "" {
 		prompt.WriteString("\n\n【過去の会話要約】\n")
+		prompt.WriteString("以下は過去の会話の要約です。ユーザーとの継続的な会話のため、この内容を参照して応答してください。過去に話した内容に関連する質問や話題が出た場合は、この要約を踏まえて自然に会話を続けてください。\n\n")
 		prompt.WriteString(session.Summary)
 		prompt.WriteString("\n\n")
 	}
