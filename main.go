@@ -717,7 +717,38 @@ func generateSummary(ctx context.Context, config *Config, messages []Message, ex
 	builder.WriteString("【新しい会話】\n")
 	builder.WriteString(formatMessagesForSummary(messages))
 
-	summaryPrompt := "以下の会話全体を簡潔に要約してください。重複を避け、重要な情報のみを残してください。説明は不要です。要約内容のみを返してください。\n\n" + builder.String()
+	summaryPrompt := `以下の会話全体をトピック別に整理して要約してください。説明は不要です。要約内容のみを返してください。重複を避け、重要な情報を残し、関連する話題をグループ化してください。
+
+出力形式:
+# 会話要約
+
+## エンターテイメント・文化
+- 関連する話題(音楽、動画、本、映画など)
+
+## 技術・プログラミング
+- 関連する話題(言語、ツール、開発など)
+
+## 料理・飲食
+- 関連する話題(料理、飲み物、食文化など)
+
+## 購入・経済
+- 関連する話題(商品、サービス、セールなど)
+
+## 健康・生活
+- 関連する話題(健康、日常生活、趣味など)
+
+## その他
+- その他の話題
+
+重要:
+- 具体的な固有名詞や専門用語は正確に保持してください
+- 会話の流れや文脈を考慮して整理してください
+- 箇条書きで簡潔にまとめてください
+- 該当するトピックがない場合はその見出しを省略してください
+
+会話内容:
+
+` + builder.String()
 	summaryMessages := []Message{{Role: "user", Content: summaryPrompt}}
 	return callClaudeAPIForSummary(ctx, config, summaryMessages, existingSummary)
 }
