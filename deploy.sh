@@ -58,41 +58,20 @@ show_plan() {
     [ "${!var_name}" = true ] && echo "  ✓ ${description}" || echo "  ✗ ${description}（スキップ）"
 }
 
-# rclone の共通オプション
-get_rclone_opts() {
-    echo "--sftp-host=${REMOTE_HOST}"
-    echo "--sftp-user=${SFTP_USER}"
-    echo "--sftp-key-file=${SFTP_KEY_FILE}"
-    echo "--quiet"
-}
-
-# .env ファイルの同期（一方向: ローカル → リモート）
-sync_env_file() {
-    if [ ! -f ".env" ]; then
-        echo "エラー: .envファイルが見つかりません"
-        exit 1
-    fi
-
-    local remote_path=":sftp:${REMOTE_DIR}/"
-
-    rclone copy $(get_rclone_opts) .env "${remote_path}" 2>&1 | grep -v "^$" || true
-    echo "  ✓ .env同期完了"
-}
-
-# sessions.json の同期（双方向: 新しい方を優先）
-sync_sessions_file() {
-    local remote_path=":sftp:${REMOTE_DIR}/"
-    local rclone_opts=$(get_rclone_opts)
+# ファイルの双方向同期（新しい方を優先）
+sync_file() {
+    local filename="$1"
+    local remote_file="${SFTP_USER}@${REMOTE_HOST}:${REMOTE_DIR}/${filename}"
 
     # リモート → ローカル（リモートの方が新しい場合のみ）
-    rclone copy $rclone_opts --update "${remote_path}sessions.json" ./ 2>&1 | grep -v "^$" || true
+    rsync -avuz --quiet -e "ssh -i ${SFTP_KEY_FILE}" "${remote_file}" ./ 2>/dev/null || true
 
     # ローカル → リモート（ローカルの方が新しい場合のみ）
-    if [ -f "sessions.json" ]; then
-        rclone copy $rclone_opts --update sessions.json "${remote_path}" 2>&1 | grep -v "^$" || true
+    if [ -f "${filename}" ]; then
+        rsync -avuz --quiet -e "ssh -i ${SFTP_KEY_FILE}" "${filename}" "${remote_file}" 2>/dev/null || true
     fi
 
-    echo "  ✓ sessions.json同期完了"
+    echo "  ✓ ${filename}同期完了"
 }
 
 # 設定ファイル同期処理
@@ -100,13 +79,13 @@ sync_config_files() {
     # .envファイルの同期
     if [ "$COPY_ENV" = true ]; then
         show_step ".envファイルを同期中..."
-        sync_env_file
+        sync_file ".env"
     fi
 
     # sessions.jsonの同期
     if [ "$COPY_SESSIONS" = true ]; then
         show_step "sessions.jsonを同期中..."
-        sync_sessions_file
+        sync_file "sessions.json"
     fi
 }
 
@@ -115,16 +94,14 @@ sync_config_files() {
 # ========================================
 
 main() {
-    # rclone の存在確認
-    if ! command -v rclone &> /dev/null; then
-        echo "エラー: rclone がインストールされていません"
+    # rsync の存在確認
+    if ! command -v rsync &> /dev/null; then
+        echo "エラー: rsync がインストールされていません"
         echo ""
         echo "インストール方法:"
-        echo "  macOS: brew install rclone"
-        echo "  Ubuntu/Debian: sudo apt-get install rclone"
-        echo "  その他: https://rclone.org/install/"
+        echo "  Ubuntu/Debian: sudo apt-get install rsync"
         echo ""
-        echo "rcloneはSFTP経由でのファイル転送に必要です"
+        echo "注意: macOSには標準で含まれています"
         exit 1
     fi
 
