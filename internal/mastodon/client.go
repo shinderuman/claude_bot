@@ -34,6 +34,24 @@ func NewClient(cfg Config) *Client {
 	}
 }
 
+// StreamUser はホームタイムラインのストリーミングを開始し、イベントをチャネルに送信します
+func (c *Client) StreamUser(ctx context.Context, eventChan chan<- mastodon.Event) {
+	events, err := c.client.StreamingUser(ctx)
+	if err != nil {
+		log.Printf("ユーザーストリーミング接続エラー: %v", err)
+		return
+	}
+
+	log.Println("ユーザーストリーミング接続成功")
+
+	for event := range events {
+		eventChan <- event
+	}
+
+	log.Println("ユーザーストリーミング接続が切断されました")
+}
+
+// StreamNotifications はメンション通知を抽出してチャネルに送信します(後方互換性のため)
 func (c *Client) StreamNotifications(ctx context.Context, notificationChan chan<- *mastodon.Notification) {
 	events, err := c.client.StreamingUser(ctx)
 	if err != nil {

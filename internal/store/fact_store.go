@@ -49,21 +49,6 @@ func (s *FactStore) load() error {
 		return err
 	}
 
-	// データ移行: Targetが空の場合はAuthorをTargetとする
-	migrated := false
-	for i := range s.Facts {
-		if s.Facts[i].Target == "" {
-			s.Facts[i].Target = s.Facts[i].Author
-			migrated = true
-		}
-	}
-
-	if migrated {
-		log.Println("事実データの移行完了: Targetフィールドを補完しました")
-		// 保存して永続化
-		go s.Save()
-	}
-
 	return nil
 }
 
@@ -79,26 +64,9 @@ func (s *FactStore) Save() error {
 	return os.WriteFile(s.saveFilePath, data, 0644)
 }
 
+// Upsert は既存のメソッド(後方互換性のため)
 func (s *FactStore) Upsert(target, targetUserName, author, authorUserName, key string, value interface{}) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// 既存の事実を検索して更新
-	for i, fact := range s.Facts {
-		if fact.Target == target && fact.Key == key {
-			s.Facts[i].Value = value
-			s.Facts[i].Author = author // 情報提供者を更新
-			s.Facts[i].AuthorUserName = authorUserName
-			if targetUserName != "" {
-				s.Facts[i].TargetUserName = targetUserName
-			}
-			s.Facts[i].Timestamp = time.Now()
-			return
-		}
-	}
-
-	// 新規追加
-	s.Facts = append(s.Facts, model.Fact{
+	s.UpsertWithSource(model.Fact{
 		Target:         target,
 		TargetUserName: targetUserName,
 		Author:         author,
@@ -106,7 +74,47 @@ func (s *FactStore) Upsert(target, targetUserName, author, authorUserName, key s
 		Key:            key,
 		Value:          value,
 		Timestamp:      time.Now(),
+		SourceType:     "mention", // デフォルトはメンション
 	})
+}
+
+// UpsertWithSource はソース情報を含むFactを保存します
+func (s *FactStore) UpsertWithSource(fact model.Fact) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// 既存の事実を検索して更新
+	for i, existing := range s.Facts {
+		if existing.Target == fact.Target && existing.Key == fact.Key {
+			s.Facts[i].Value = fact.Value
+			s.Facts[i].Author = fact.Author
+			s.Facts[i].AuthorUserName = fact.AuthorUserName
+			if fact.TargetUserName != "" {
+				s.Facts[i].TargetUserName = fact.TargetUserName
+			}
+			s.Facts[i].Timestamp = time.Now()
+			// ソース情報も更新
+			if fact.SourceType != "" {
+				s.Facts[i].SourceType = fact.SourceType
+			}
+			if fact.SourceURL != "" {
+				s.Facts[i].SourceURL = fact.SourceURL
+			}
+			if fact.PostAuthor != "" {
+				s.Facts[i].PostAuthor = fact.PostAuthor
+			}
+			if fact.PostAuthorUserName != "" {
+				s.Facts[i].PostAuthorUserName = fact.PostAuthorUserName
+			}
+			return
+		}
+	}
+
+	// 新規追加
+	if fact.Timestamp.IsZero() {
+		fact.Timestamp = time.Now()
+	}
+	s.Facts = append(s.Facts, fact)
 }
 
 func (s *FactStore) Cleanup(retention time.Duration) int {

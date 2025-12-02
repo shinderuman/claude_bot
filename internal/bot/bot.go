@@ -24,6 +24,7 @@ type Bot struct {
 	factStore      *store.FactStore
 	llmClient      *llm.Client
 	mastodonClient *mastodon.Client
+	factCollector  *FactCollector
 }
 
 func New(cfg *config.Config, history *store.ConversationHistory, factStore *store.FactStore, llmClient *llm.Client) *Bot {
@@ -35,12 +36,15 @@ func New(cfg *config.Config, history *store.ConversationHistory, factStore *stor
 		MaxPostChars:     cfg.MaxPostChars,
 	}
 
+	mastodonClient := mastodon.NewClient(mastodonConfig)
+
 	return &Bot{
 		config:         cfg,
 		history:        history,
 		factStore:      factStore,
 		llmClient:      llmClient,
-		mastodonClient: mastodon.NewClient(mastodonConfig),
+		mastodonClient: mastodonClient,
+		factCollector:  NewFactCollector(cfg, factStore, llmClient, mastodonClient),
 	}
 }
 
@@ -49,6 +53,9 @@ func (b *Bot) Run(ctx context.Context) {
 
 	// バックグラウンドで定期的にクリーンアップを実行
 	go store.RunPeriodicCleanup(b.factStore)
+
+	// ファクト収集を開始
+	b.factCollector.Start(ctx)
 
 	notificationChan := make(chan *gomastodon.Notification)
 	go b.mastodonClient.StreamNotifications(ctx, notificationChan)
@@ -109,7 +116,8 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 	if displayName == "" {
 		displayName = notification.Account.Username
 	}
-	go b.extractAndSaveFacts(ctx, notification.Account.Acct, displayName, userMessage)
+	sourceURL := string(notification.Status.URL)
+	go b.extractAndSaveFacts(ctx, notification.Account.Acct, displayName, userMessage, "mention", sourceURL, notification.Account.Acct, displayName)
 
 	// 事実の検索と応答生成
 	relevantFacts := b.queryRelevantFacts(ctx, notification.Account.Acct, displayName, userMessage)

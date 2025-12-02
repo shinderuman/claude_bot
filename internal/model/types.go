@@ -30,6 +30,12 @@ type Fact struct {
 	Key            string      `json:"key"`
 	Value          interface{} `json:"value"`
 	Timestamp      time.Time   `json:"timestamp"`
+
+	// ソース情報
+	SourceType         string `json:"source_type,omitempty"`          // "mention", "federated", "home"
+	SourceURL          string `json:"source_url,omitempty"`           // 投稿のURL
+	PostAuthor         string `json:"post_author,omitempty"`          // 投稿者のAcct
+	PostAuthorUserName string `json:"post_author_username,omitempty"` // 投稿者の表示名
 }
 
 type SearchQuery struct {

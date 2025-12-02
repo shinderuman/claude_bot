@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"claude_bot/internal/llm"
 	"claude_bot/internal/model"
@@ -13,7 +14,7 @@ import (
 
 // Fact extraction and query logic
 
-func (b *Bot) extractAndSaveFacts(ctx context.Context, author, authorUserName, message string) {
+func (b *Bot) extractAndSaveFacts(ctx context.Context, author, authorUserName, message, sourceType, sourceURL, postAuthor, postAuthorUserName string) {
 	if !b.config.EnableFactStore {
 		return
 	}
@@ -43,8 +44,24 @@ func (b *Bot) extractAndSaveFacts(ctx context.Context, author, authorUserName, m
 				target = author
 				targetUserName = authorUserName
 			}
-			b.factStore.Upsert(target, targetUserName, author, authorUserName, item.Key, item.Value)
-			log.Printf("事実保存: [Target:%s(%s)] %s = %v (by %s)", target, targetUserName, item.Key, item.Value, author)
+
+			// ソース情報を設定
+			fact := model.Fact{
+				Target:             target,
+				TargetUserName:     targetUserName,
+				Author:             author,
+				AuthorUserName:     authorUserName,
+				Key:                item.Key,
+				Value:              item.Value,
+				Timestamp:          time.Now(),
+				SourceType:         sourceType,
+				SourceURL:          sourceURL,
+				PostAuthor:         postAuthor,
+				PostAuthorUserName: postAuthorUserName,
+			}
+
+			b.factStore.UpsertWithSource(fact)
+			log.Printf("事実保存: [Target:%s(%s)] %s = %v (by %s, source:%s)", target, targetUserName, item.Key, item.Value, author, sourceType)
 		}
 		b.factStore.Save()
 	}

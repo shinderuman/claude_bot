@@ -34,6 +34,14 @@ type Config struct {
 	MaxPostChars      int
 
 	URLBlacklist []string
+
+	// ファクト収集設定
+	FactCollectionEnabled         bool
+	FactCollectionFederated       bool
+	FactCollectionHome            bool
+	FactCollectionMaxWorkers      int
+	FactCollectionMaxPerHour      int
+	FactCollectionFromPostContent bool
 }
 
 func LoadEnvironment() {
@@ -68,6 +76,13 @@ func LoadConfig() *Config {
 		MaxPostChars:      parseIntRequired(os.Getenv("MAX_POST_CHARS")),
 
 		URLBlacklist: loadURLBlacklist(),
+
+		FactCollectionEnabled:         parseBool(os.Getenv("FACT_COLLECTION_ENABLED"), false),
+		FactCollectionFederated:       parseBool(os.Getenv("FACT_COLLECTION_FEDERATED"), true),
+		FactCollectionHome:            parseBool(os.Getenv("FACT_COLLECTION_HOME"), true),
+		FactCollectionMaxWorkers:      parseIntWithDefault(os.Getenv("FACT_COLLECTION_MAX_WORKERS"), 3),
+		FactCollectionMaxPerHour:      parseIntWithDefault(os.Getenv("FACT_COLLECTION_MAX_PER_HOUR"), 100),
+		FactCollectionFromPostContent: parseBool(os.Getenv("FACT_COLLECTION_FROM_POST_CONTENT"), false),
 	}
 }
 
