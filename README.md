@@ -57,9 +57,9 @@ CHARACTER_PROMPT=あなたは親切で丁寧なアシスタントです。
 ALLOW_REMOTE_USERS=false
 
 # LLM & 投稿設定
-MAX_RESPONSE_TOKENS=1024  # 通常応答の最大トークン数
-MAX_SUMMARY_TOKENS=1024   # 要約生成の最大トークン数
-MAX_POST_CHARS=480        # 投稿の最大文字数
+MAX_RESPONSE_TOKENS=512  # 通常応答の最大トークン数
+MAX_SUMMARY_TOKENS=256   # 要約生成の最大トークン数
+MAX_POST_CHARS=480       # 投稿の最大文字数
 ```
 
 ## セットアップ
@@ -249,7 +249,7 @@ MASTODON_SERVER=https://... MASTODON_ACCESS_TOKEN=... ./claude_bot
 - 長い応答は自動的に分割して複数の投稿として送信
 - 分割は480文字を基準に、可能な限り改行位置で実施
 - 分割された投稿はツリー状に連続投稿（前の投稿への返信として投稿）
-- MaxTokens: 1024トークンで生成
+- MaxTokens: 512トークンで生成
 
 ## カスタマイズ
 
@@ -276,8 +276,8 @@ CONVERSATION_MIN_KEEP_COUNT=3               # 最低限保持する会話数
 ENABLE_FACT_STORE=true                      # 事実保存機能の有効/無効
 
 # LLM & 投稿設定
-MAX_RESPONSE_TOKENS=1024                    # 通常応答の最大トークン数
-MAX_SUMMARY_TOKENS=1024                     # 要約生成の最大トークン数
+MAX_RESPONSE_TOKENS=512                     # 通常応答の最大トークン数
+MAX_SUMMARY_TOKENS=256                      # 要約生成の最大トークン数
 MAX_POST_CHARS=480                          # 投稿の最大文字数
 ```
 
