@@ -9,6 +9,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/mattn/go-mastodon v0.0.10
 	golang.org/x/net v0.47.0
+	mvdan.cc/xurls/v2 v2.6.0
 )
 
 require (

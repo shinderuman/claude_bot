@@ -244,3 +244,16 @@ func skipLeadingNewlines(runes []rune, pos int) int {
 	}
 	return pos
 }
+
+func (c *Client) FormatCard(card *mastodon.Card) string {
+	var sb strings.Builder
+	sb.WriteString("\n\n[参照URL情報]\n")
+	sb.WriteString(fmt.Sprintf("URL: %s\n", card.URL))
+	if card.Title != "" {
+		sb.WriteString(fmt.Sprintf("タイトル: %s\n", card.Title))
+	}
+	if card.Description != "" {
+		sb.WriteString(fmt.Sprintf("説明: %s\n", card.Description))
+	}
+	return sb.String()
+}

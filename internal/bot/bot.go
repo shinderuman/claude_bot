@@ -8,11 +8,15 @@ import (
 	"claude_bot/internal/config"
 	"claude_bot/internal/llm"
 	"claude_bot/internal/mastodon"
+	"claude_bot/internal/metadata"
 	"claude_bot/internal/model"
 	"claude_bot/internal/store"
 
 	gomastodon "github.com/mattn/go-mastodon"
+	"mvdan.cc/xurls/v2"
 )
+
+var urlRegex = xurls.Strict()
 
 type Bot struct {
 	config         *config.Config
@@ -92,6 +96,12 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 	visibility := string(notification.Status.Visibility)
 
 	conversation := b.history.GetOrCreateConversation(session, rootStatusID)
+
+	// URLメタデータの取得と追加
+	if urlContext := b.extractURLContext(ctx, notification, userMessage); urlContext != "" {
+		userMessage += urlContext
+	}
+
 	store.AddMessage(conversation, "user", userMessage)
 
 	// 事実の抽出（非同期）
@@ -122,4 +132,35 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 
 	session.LastUpdated = time.Now()
 	return true
+}
+
+func (b *Bot) extractURLContext(ctx context.Context, notification *gomastodon.Notification, content string) string {
+	// 1. Mastodon Card (優先)
+	if notification.Status.Card != nil {
+		return b.mastodonClient.FormatCard(notification.Status.Card)
+	}
+
+	// 2. 独自取得 (Cardがない場合)
+	urls := urlRegex.FindAllString(content, -1)
+	if len(urls) == 0 {
+		return ""
+	}
+
+	// 最初の有効なURLのみ処理
+	for _, u := range urls {
+		if err := metadata.IsValidURL(u, b.config.URLBlacklist); err != nil {
+			log.Printf("URLスキップ (%s): %v", u, err)
+			continue
+		}
+
+		meta, err := metadata.FetchMetadata(ctx, u)
+		if err != nil {
+			log.Printf("メタデータ取得失敗 (%s): %v", u, err)
+			continue
+		}
+
+		return metadata.FormatMetadata(meta)
+	}
+
+	return ""
 }

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -31,6 +32,8 @@ type Config struct {
 	MaxResponseTokens int64
 	MaxSummaryTokens  int64
 	MaxPostChars      int
+
+	URLBlacklist []string
 }
 
 func LoadEnvironment() {
@@ -63,7 +66,26 @@ func LoadConfig() *Config {
 		MaxResponseTokens: int64(parseIntRequired(os.Getenv("MAX_RESPONSE_TOKENS"))),
 		MaxSummaryTokens:  int64(parseIntRequired(os.Getenv("MAX_SUMMARY_TOKENS"))),
 		MaxPostChars:      parseIntRequired(os.Getenv("MAX_POST_CHARS")),
+
+		URLBlacklist: loadURLBlacklist(),
 	}
+}
+
+func loadURLBlacklist() []string {
+	var blacklist []string
+
+	// 環境変数から追加
+	if envList := os.Getenv("URL_BLACKLIST"); envList != "" {
+		parts := strings.Split(envList, ",")
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				blacklist = append(blacklist, part)
+			}
+		}
+	}
+
+	return blacklist
 }
 
 func parseBool(value string, defaultValue bool) bool {
