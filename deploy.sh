@@ -94,7 +94,7 @@ main() {
     # ========================================
     if [ "$DEPLOY_PROGRAM" = true ]; then
         echo "Linux向けバイナリをビルド中..."
-        GOOS=linux GOARCH=amd64 go build -o "${APP_NAME}" .
+        GOOS=linux GOARCH=amd64 go build -o "${APP_NAME}" ./cmd/claude_bot
 
         if [ ! -f "${APP_NAME}" ]; then
             echo "エラー: ビルドに失敗しました"

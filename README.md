@@ -75,7 +75,11 @@ go mod tidy
 3. ビルド（リリース用）
 
 ```bash
-go build -o claude_bot main.go
+# ボット本体
+go build -o claude_bot ./cmd/claude_bot
+
+# 疎通確認コマンド
+go build -o test_claude ./cmd/test_claude
 ```
 
 ## デプロイ
@@ -148,40 +152,58 @@ DEPLOY_PROGRAM=false  # 安全のためデフォルトで非デプロイ
 - **応答活用**: 保存された情報を基に、よりパーソナライズされた応答を生成
 - **30日間保持**: 30日経過したデータは自動的に削除され、鮮度を維持
 
+## プロジェクト構成
+
+```
+claude_bot/
+├── cmd/
+│   ├── claude_bot/     # ボット本体のエントリーポイント
+│   └── test_claude/    # 疎通確認コマンド
+├── internal/
+│   ├── bot/           # Mastodonボットロジック
+│   ├── config/        # 設定管理
+│   ├── llm/           # Claude API連携
+│   ├── model/         # データモデル
+│   └── store/         # データ永続化
+├── .env               # 環境変数設定
+├── sessions.json      # 会話履歴
+├── facts.json         # 事実データベース
+└── deploy.sh          # デプロイスクリプト
+```
+
 ## ローカル実行
 
-### Claude APIとの疎通確認（オプション）
+### Claude APIとの疎通確認
+
+専用の`test_claude`コマンドで疎通確認ができます：
 
 ```bash
-# .envファイルが自動的に読み込まれます
-./claude_bot -test
+# ビルドして実行
+go build -o test_claude ./cmd/test_claude
+./test_claude
 
 # カスタムメッセージで確認
-./claude_bot -test -message "こんにちは"
+./test_claude -message "こんにちは"
+
+# または直接実行
+go run ./cmd/test_claude -message "動作確認"
 ```
 
 ### 通常実行
 
 ```bash
-# .envファイルが自動的に読み込まれます
+# ビルドして実行
+go build -o claude_bot ./cmd/claude_bot
 ./claude_bot
+
+# または直接実行
+go run ./cmd/claude_bot
 ```
 
 または直接環境変数を指定：
 
 ```bash
-MASTODON_SERVER=https://... MASTODON_ACCESS_TOKEN=... ./mastodon-bot
-```
-
-## コマンドラインオプション
-
-- `-test`: Claude APIとの疎通確認モード（Mastodonに接続せずClaudeのみテスト）
-- `-message`: テストモードで送信するメッセージ（デフォルト: "Hello"）
-
-```bash
-# 使用例
-go run main.go -test
-go run main.go -test -message "動作確認"
+MASTODON_SERVER=https://... MASTODON_ACCESS_TOKEN=... ./claude_bot
 ```
 
 ## Mastodon Access Tokenの取得方法
@@ -234,25 +256,28 @@ CHARACTER_PROMPT="あなたは猫のような口調で話すアシスタント�
 
 ### 定数の変更
 
-`main.go`の定数を変更することで動作をカスタマイズできます：
+`.env`ファイルまたは環境変数で以下の設定をカスタマイズできます：
+
+```bash
+# 会話管理設定
+CONVERSATION_MESSAGE_COMPRESS_THRESHOLD=20  # この件数を超えたら圧縮
+CONVERSATION_MESSAGE_KEEP_COUNT=10          # 圧縮後に保持するメッセージ件数
+CONVERSATION_RETENTION_HOURS=24             # この時間を超えた会話を削除
+CONVERSATION_MIN_KEEP_COUNT=3               # 最低限保持する会話数
+
+# 事実データベース設定
+ENABLE_FACT_STORE=true                      # 事実保存機能の有効/無効
+```
+
+コード内の定数（`internal/llm/client.go`、`internal/bot/bot.go`）：
 
 ```go
-const (
-    // Claude API設定
-    maxResponseTokens = 1024 // 通常応答の最大トークン数
-    maxSummaryTokens  = 1024 // 要約生成の最大トークン数
+// Claude API設定
+MaxResponseTokens = 1024 // 通常応答の最大トークン数
+MaxSummaryTokens  = 2048 // 要約生成の最大トークン数
 
-    // Mastodon投稿設定
-    maxPostChars = 480 // 投稿の最大文字数（バッファ含む）
-
-    // リプライツリー内のメッセージ圧縮設定
-    conversationMessageCompressThreshold = 20 // この件数を超えたら圧縮
-    conversationMessageKeepCount         = 10 // 圧縮後に保持するメッセージ件数
-
-    // リプライツリー全体の削除設定
-    conversationRetentionHours = 24 // この時間を超えた会話を削除
-    conversationMinKeepCount   = 3  // 最低限保持する会話数
-)
+// Mastodon投稿設定
+maxPostChars = 480 // 投稿の最大文字数（バッファ含む）
 ```
 
 ## 注意事項
