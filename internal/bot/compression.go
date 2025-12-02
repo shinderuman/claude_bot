@@ -5,6 +5,7 @@ import (
 	"log"
 	"strings"
 
+	"claude_bot/internal/llm"
 	"claude_bot/internal/model"
 	"claude_bot/internal/store"
 )
@@ -66,7 +67,7 @@ func (b *Bot) compressOldConversations(ctx context.Context, session *model.Sessi
 
 func (b *Bot) generateSummary(ctx context.Context, messages []model.Message, existingSummary string) string {
 	formattedMessages := formatMessagesForSummary(messages)
-	summaryPrompt := buildSummaryPrompt(formattedMessages, existingSummary)
+	summaryPrompt := llm.BuildSummaryPrompt(formattedMessages, existingSummary)
 	summaryMessages := []model.Message{{Role: "user", Content: summaryPrompt}}
 	return b.llmClient.CallClaudeAPIForSummary(ctx, summaryMessages, existingSummary)
 }

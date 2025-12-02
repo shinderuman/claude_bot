@@ -1,4 +1,4 @@
-package bot
+package mastodon
 
 import (
 	"strings"
@@ -37,7 +37,7 @@ func TestSplitResponse(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			parts := splitResponse(tt.response, mention)
+			parts := splitResponse(tt.response, mention, 480)
 			if len(parts) != tt.want {
 				t.Errorf("splitResponse() = %d parts, want %d parts", len(parts), tt.want)
 			}

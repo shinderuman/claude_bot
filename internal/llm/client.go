@@ -12,11 +12,6 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 )
 
-const (
-	MaxResponseTokens = 1024 // 通常応答の最大トークン数
-	MaxSummaryTokens  = 2048 // 要約生成の最大トークン数
-)
-
 type Client struct {
 	client anthropic.Client
 	config *config.Config
@@ -33,29 +28,18 @@ func NewClient(cfg *config.Config) *Client {
 	}
 }
 
-// BuildSystemPrompt is a function type for building system prompts
-// This allows the bot package to inject its prompt builder
-type SystemPromptBuilder func(characterPrompt, sessionSummary, relevantFacts string, includeCharacterPrompt bool) string
-
-var systemPromptBuilder SystemPromptBuilder
-
-// SetSystemPromptBuilder sets the system prompt builder function
-func SetSystemPromptBuilder(builder SystemPromptBuilder) {
-	systemPromptBuilder = builder
-}
-
 func (c *Client) GenerateResponse(ctx context.Context, session *model.Session, conversation *model.Conversation, relevantFacts string) string {
 	var sessionSummary string
 	if session != nil {
 		sessionSummary = session.Summary
 	}
-	systemPrompt := systemPromptBuilder(c.config.CharacterPrompt, sessionSummary, relevantFacts, true)
-	return c.CallClaudeAPI(ctx, conversation.Messages, systemPrompt, MaxResponseTokens)
+	systemPrompt := BuildSystemPrompt(c.config.CharacterPrompt, sessionSummary, relevantFacts, true)
+	return c.CallClaudeAPI(ctx, conversation.Messages, systemPrompt, c.config.MaxResponseTokens)
 }
 
 func (c *Client) CallClaudeAPIForSummary(ctx context.Context, messages []model.Message, summary string) string {
-	systemPrompt := systemPromptBuilder(c.config.CharacterPrompt, summary, "", false)
-	return c.CallClaudeAPI(ctx, messages, systemPrompt, MaxSummaryTokens)
+	systemPrompt := BuildSystemPrompt(c.config.CharacterPrompt, summary, "", false)
+	return c.CallClaudeAPI(ctx, messages, systemPrompt, c.config.MaxSummaryTokens)
 }
 
 func (c *Client) CallClaudeAPI(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64) string {

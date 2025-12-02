@@ -6,7 +6,6 @@ import (
 	"log"
 	"time"
 
-	"claude_bot/internal/bot"
 	"claude_bot/internal/config"
 	"claude_bot/internal/llm"
 	"claude_bot/internal/model"
@@ -20,7 +19,6 @@ func main() {
 	cfg := config.LoadConfig()
 
 	// Set the system prompt builder from bot package
-	llm.SetSystemPromptBuilder(bot.BuildSystemPrompt)
 
 	llmClient := llm.NewClient(cfg)
 

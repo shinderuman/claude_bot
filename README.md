@@ -55,6 +55,11 @@ CHARACTER_PROMPT=あなたは親切で丁寧なアシスタントです。
 # true: 他サーバーからのメンションも受け付ける
 # false: 同一サーバーからのメンションのみ受け付ける（デフォルト）
 ALLOW_REMOTE_USERS=false
+
+# LLM & 投稿設定
+MAX_RESPONSE_TOKENS=1024  # 通常応答の最大トークン数
+MAX_SUMMARY_TOKENS=2048   # 要約生成の最大トークン数
+MAX_POST_CHARS=480        # 投稿の最大文字数
 ```
 
 ## セットアップ
@@ -162,7 +167,8 @@ claude_bot/
 ├── internal/
 │   ├── bot/           # Mastodonボットロジック
 │   ├── config/        # 設定管理
-│   ├── llm/           # Claude API連携
+│   ├── llm/           # Claude API連携・プロンプト管理
+│   ├── mastodon/      # Mastodon APIクライアント
 │   ├── model/         # データモデル
 │   └── store/         # データ永続化
 ├── .env               # 環境変数設定
@@ -267,17 +273,11 @@ CONVERSATION_MIN_KEEP_COUNT=3               # 最低限保持する会話数
 
 # 事実データベース設定
 ENABLE_FACT_STORE=true                      # 事実保存機能の有効/無効
-```
 
-コード内の定数（`internal/llm/client.go`、`internal/bot/bot.go`）：
-
-```go
-// Claude API設定
-MaxResponseTokens = 1024 // 通常応答の最大トークン数
-MaxSummaryTokens  = 2048 // 要約生成の最大トークン数
-
-// Mastodon投稿設定
-maxPostChars = 480 // 投稿の最大文字数（バッファ含む）
+# LLM & 投稿設定
+MAX_RESPONSE_TOKENS=1024                    # 通常応答の最大トークン数
+MAX_SUMMARY_TOKENS=2048                     # 要約生成の最大トークン数
+MAX_POST_CHARS=480                          # 投稿の最大文字数
 ```
 
 ## 注意事項

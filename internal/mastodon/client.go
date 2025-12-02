@@ -1,4 +1,4 @@
-package bot
+package mastodon
 
 import (
 	"context"
@@ -6,27 +6,36 @@ import (
 	"log"
 	"strings"
 
-	mastodon "github.com/mattn/go-mastodon"
+	"github.com/mattn/go-mastodon"
 	"golang.org/x/net/html"
 )
 
-const (
-	maxPostChars = 480 // 投稿の最大文字数（バッファ含む）
-)
-
-// Mastodon client operations
-
-func (b *Bot) createMastodonClient() *mastodon.Client {
-	return mastodon.NewClient(&mastodon.Config{
-		Server:      b.config.MastodonServer,
-		AccessToken: b.config.MastodonAccessToken,
-	})
+type Config struct {
+	Server           string
+	AccessToken      string
+	BotUsername      string
+	AllowRemoteUsers bool
+	MaxPostChars     int
 }
 
-func (b *Bot) streamNotifications(ctx context.Context) {
-	client := b.createMastodonClient()
+type Client struct {
+	client *mastodon.Client
+	config Config
+}
 
-	events, err := client.StreamingUser(ctx)
+func NewClient(cfg Config) *Client {
+	c := mastodon.NewClient(&mastodon.Config{
+		Server:      cfg.Server,
+		AccessToken: cfg.AccessToken,
+	})
+	return &Client{
+		client: c,
+		config: cfg,
+	}
+}
+
+func (c *Client) StreamNotifications(ctx context.Context, notificationChan chan<- *mastodon.Notification) {
+	events, err := c.client.StreamingUser(ctx)
 	if err != nil {
 		log.Printf("ストリーミング接続エラー: %v", err)
 		return
@@ -35,9 +44,9 @@ func (b *Bot) streamNotifications(ctx context.Context) {
 	log.Println("ストリーミング接続成功")
 
 	for event := range events {
-		if notification := b.extractMentionNotification(event); notification != nil {
-			if b.shouldProcessNotification(notification) {
-				go b.processNotification(ctx, notification)
+		if notification := c.extractMentionNotification(event); notification != nil {
+			if c.shouldProcessNotification(notification) {
+				notificationChan <- notification
 			}
 		}
 	}
@@ -45,7 +54,7 @@ func (b *Bot) streamNotifications(ctx context.Context) {
 	log.Println("ストリーミング接続が切断されました")
 }
 
-func (b *Bot) extractMentionNotification(event mastodon.Event) *mastodon.Notification {
+func (c *Client) extractMentionNotification(event mastodon.Event) *mastodon.Notification {
 	notification, ok := event.(*mastodon.NotificationEvent)
 	if !ok {
 		return nil
@@ -58,12 +67,12 @@ func (b *Bot) extractMentionNotification(event mastodon.Event) *mastodon.Notific
 	return notification.Notification
 }
 
-func (b *Bot) shouldProcessNotification(notification *mastodon.Notification) bool {
-	if notification.Account.Username == b.config.BotUsername {
+func (c *Client) shouldProcessNotification(notification *mastodon.Notification) bool {
+	if notification.Account.Username == c.config.BotUsername {
 		return false
 	}
 
-	if !b.config.AllowRemoteUsers && isRemoteUser(notification.Account.Acct) {
+	if !c.config.AllowRemoteUsers && isRemoteUser(notification.Account.Acct) {
 		log.Printf("リモートユーザーからのメンションをスキップ: @%s", notification.Account.Acct)
 		return false
 	}
@@ -75,16 +84,15 @@ func isRemoteUser(acct string) bool {
 	return strings.Contains(acct, "@")
 }
 
-func (b *Bot) getRootStatusID(ctx context.Context, notification *mastodon.Notification) string {
+func (c *Client) GetRootStatusID(ctx context.Context, notification *mastodon.Notification) string {
 	if notification.Status.InReplyToID == nil {
 		return string(notification.Status.ID)
 	}
 
-	client := b.createMastodonClient()
 	currentStatus := notification.Status
 
 	for currentStatus.InReplyToID != nil {
-		parentStatus, err := convertToIDAndFetchStatus(ctx, currentStatus.InReplyToID, client)
+		parentStatus, err := c.convertToIDAndFetchStatus(ctx, currentStatus.InReplyToID)
 		if err != nil {
 			return string(notification.Status.ID)
 		}
@@ -94,14 +102,14 @@ func (b *Bot) getRootStatusID(ctx context.Context, notification *mastodon.Notifi
 	return string(currentStatus.ID)
 }
 
-func convertToIDAndFetchStatus(ctx context.Context, inReplyToID any, client *mastodon.Client) (*mastodon.Status, error) {
+func (c *Client) convertToIDAndFetchStatus(ctx context.Context, inReplyToID any) (*mastodon.Status, error) {
 	id := mastodon.ID(fmt.Sprintf("%v", inReplyToID))
-	return client.GetStatus(ctx, id)
+	return c.client.GetStatus(ctx, id)
 }
 
 // Message extraction and HTML parsing
 
-func extractUserMessage(notification *mastodon.Notification) string {
+func (c *Client) ExtractUserMessage(notification *mastodon.Notification) string {
 	content := stripHTML(string(notification.Status.Content))
 	words := strings.Fields(content)
 
@@ -137,26 +145,26 @@ func extractText(n *html.Node, buf *strings.Builder) {
 	}
 }
 
-func buildMention(acct string) string {
+func (c *Client) BuildMention(acct string) string {
 	return "@" + acct + " "
 }
 
 // Post operations
 
-func (b *Bot) postErrorMessage(ctx context.Context, statusID, mention, visibility string) {
+func (c *Client) PostErrorMessage(ctx context.Context, statusID, mention, visibility string) {
 	log.Printf("応答生成失敗: エラーメッセージを投稿します")
 	// エラーメッセージは固定または簡易生成
 	errorMsg := "申し訳ありません。エラーが発生しました。"
-	b.postResponseWithSplit(ctx, statusID, mention, errorMsg, visibility)
+	c.PostResponseWithSplit(ctx, statusID, mention, errorMsg, visibility)
 }
 
-func (b *Bot) postResponseWithSplit(ctx context.Context, inReplyToID, mention, response, visibility string) error {
-	parts := splitResponse(response, mention)
+func (c *Client) PostResponseWithSplit(ctx context.Context, inReplyToID, mention, response, visibility string) error {
+	parts := splitResponse(response, mention, c.config.MaxPostChars)
 
 	currentReplyID := inReplyToID
 	for i, part := range parts {
 		content := mention + part
-		status, err := b.postReply(ctx, currentReplyID, content, visibility)
+		status, err := c.postReply(ctx, currentReplyID, content, visibility)
 		if err != nil {
 			log.Printf("分割投稿失敗 (%d/%d): %v", i+1, len(parts), err)
 			return err
@@ -167,15 +175,14 @@ func (b *Bot) postResponseWithSplit(ctx context.Context, inReplyToID, mention, r
 	return nil
 }
 
-func (b *Bot) postReply(ctx context.Context, inReplyToID, content, visibility string) (*mastodon.Status, error) {
-	client := b.createMastodonClient()
+func (c *Client) postReply(ctx context.Context, inReplyToID, content, visibility string) (*mastodon.Status, error) {
 	toot := &mastodon.Toot{
 		Status:      content,
 		InReplyToID: mastodon.ID(inReplyToID),
 		Visibility:  visibility,
 	}
 
-	status, err := client.PostStatus(ctx, toot)
+	status, err := c.client.PostStatus(ctx, toot)
 	if err != nil {
 		log.Printf("投稿エラー: %v", err)
 		log.Printf("投稿内容（%d文字）: %s", len([]rune(content)), content)
@@ -187,9 +194,9 @@ func (b *Bot) postReply(ctx context.Context, inReplyToID, content, visibility st
 
 // Response splitting
 
-func splitResponse(response, mention string) []string {
+func splitResponse(response, mention string, maxChars int) []string {
 	mentionLen := len([]rune(mention))
-	maxContentLen := maxPostChars - mentionLen
+	maxContentLen := maxChars - mentionLen
 
 	runes := []rune(response)
 	if len(runes) <= maxContentLen {

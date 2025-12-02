@@ -7,25 +7,36 @@ import (
 
 	"claude_bot/internal/config"
 	"claude_bot/internal/llm"
+	"claude_bot/internal/mastodon"
 	"claude_bot/internal/model"
 	"claude_bot/internal/store"
 
-	mastodon "github.com/mattn/go-mastodon"
+	gomastodon "github.com/mattn/go-mastodon"
 )
 
 type Bot struct {
-	config    *config.Config
-	history   *store.ConversationHistory
-	factStore *store.FactStore
-	llmClient *llm.Client
+	config         *config.Config
+	history        *store.ConversationHistory
+	factStore      *store.FactStore
+	llmClient      *llm.Client
+	mastodonClient *mastodon.Client
 }
 
 func New(cfg *config.Config, history *store.ConversationHistory, factStore *store.FactStore, llmClient *llm.Client) *Bot {
+	mastodonConfig := mastodon.Config{
+		Server:           cfg.MastodonServer,
+		AccessToken:      cfg.MastodonAccessToken,
+		BotUsername:      cfg.BotUsername,
+		AllowRemoteUsers: cfg.AllowRemoteUsers,
+		MaxPostChars:     cfg.MaxPostChars,
+	}
+
 	return &Bot{
-		config:    cfg,
-		history:   history,
-		factStore: factStore,
-		llmClient: llmClient,
+		config:         cfg,
+		history:        history,
+		factStore:      factStore,
+		llmClient:      llmClient,
+		mastodonClient: mastodon.NewClient(mastodonConfig),
 	}
 }
 
@@ -35,7 +46,12 @@ func (b *Bot) Run(ctx context.Context) {
 	// バックグラウンドで定期的にクリーンアップを実行
 	go store.RunPeriodicCleanup(b.factStore)
 
-	b.streamNotifications(ctx)
+	notificationChan := make(chan *gomastodon.Notification)
+	go b.mastodonClient.StreamNotifications(ctx, notificationChan)
+
+	for notification := range notificationChan {
+		b.processNotification(ctx, notification)
+	}
 }
 
 func (b *Bot) logStartupInfo() {
@@ -43,8 +59,8 @@ func (b *Bot) logStartupInfo() {
 	log.Printf("Claude API: %s (model: %s)", b.config.AnthropicBaseURL, b.config.AnthropicModel)
 }
 
-func (b *Bot) processNotification(ctx context.Context, notification *mastodon.Notification) {
-	userMessage := extractUserMessage(notification)
+func (b *Bot) processNotification(ctx context.Context, notification *gomastodon.Notification) {
+	userMessage := b.mastodonClient.ExtractUserMessage(notification)
 	if userMessage == "" {
 		return
 	}
@@ -53,7 +69,7 @@ func (b *Bot) processNotification(ctx context.Context, notification *mastodon.No
 	log.Printf("@%s: %s", userID, userMessage)
 
 	session := b.history.GetOrCreateSession(userID)
-	rootStatusID := b.getRootStatusID(ctx, notification)
+	rootStatusID := b.mastodonClient.GetRootStatusID(ctx, notification)
 
 	if b.processResponse(ctx, session, notification, userMessage, rootStatusID) {
 		b.compressHistoryIfNeeded(ctx, session)
@@ -61,8 +77,8 @@ func (b *Bot) processNotification(ctx context.Context, notification *mastodon.No
 	}
 }
 
-func (b *Bot) processResponse(ctx context.Context, session *model.Session, notification *mastodon.Notification, userMessage, rootStatusID string) bool {
-	mention := buildMention(notification.Account.Acct)
+func (b *Bot) processResponse(ctx context.Context, session *model.Session, notification *gomastodon.Notification, userMessage, rootStatusID string) bool {
+	mention := b.mastodonClient.BuildMention(notification.Account.Acct)
 	statusID := string(notification.Status.ID)
 	visibility := string(notification.Status.Visibility)
 
@@ -82,16 +98,16 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 
 	if response == "" {
 		store.RollbackLastMessages(conversation, 1)
-		b.postErrorMessage(ctx, statusID, mention, visibility)
+		b.mastodonClient.PostErrorMessage(ctx, statusID, mention, visibility)
 		return false
 	}
 
 	store.AddMessage(conversation, "assistant", response)
-	err := b.postResponseWithSplit(ctx, statusID, mention, response, visibility)
+	err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
 
 	if err != nil {
 		store.RollbackLastMessages(conversation, 2)
-		b.postErrorMessage(ctx, statusID, mention, visibility)
+		b.mastodonClient.PostErrorMessage(ctx, statusID, mention, visibility)
 		return false
 	}
 

@@ -18,10 +18,10 @@ func (b *Bot) extractAndSaveFacts(ctx context.Context, author, authorUserName, m
 		return
 	}
 
-	prompt := buildFactExtractionPrompt(authorUserName, author, message)
+	prompt := llm.BuildFactExtractionPrompt(authorUserName, author, message)
 	messages := []model.Message{{Role: "user", Content: prompt}}
 
-	response := b.llmClient.CallClaudeAPI(ctx, messages, SystemPromptFactExtraction, llm.MaxResponseTokens)
+	response := b.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactExtraction, b.config.MaxResponseTokens)
 	if response == "" {
 		return
 	}
@@ -57,10 +57,10 @@ func (b *Bot) queryRelevantFacts(ctx context.Context, author, authorUserName, me
 
 	log.Printf("[DEBUG] queryRelevantFacts called: author=%s, message=%s", author, message)
 
-	prompt := buildFactQueryPrompt(authorUserName, author, message)
+	prompt := llm.BuildFactQueryPrompt(authorUserName, author, message)
 	messages := []model.Message{{Role: "user", Content: prompt}}
 
-	response := b.llmClient.CallClaudeAPI(ctx, messages, SystemPromptFactQuery, llm.MaxResponseTokens)
+	response := b.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactQuery, b.config.MaxResponseTokens)
 	if response == "" {
 		return ""
 	}

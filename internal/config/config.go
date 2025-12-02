@@ -25,6 +25,11 @@ type Config struct {
 	ConversationMessageKeepCount         int
 	ConversationRetentionHours           int
 	ConversationMinKeepCount             int
+
+	// LLM & Post Settings
+	MaxResponseTokens int64
+	MaxSummaryTokens  int64
+	MaxPostChars      int
 }
 
 func LoadEnvironment() {
@@ -52,6 +57,10 @@ func LoadConfig() *Config {
 		ConversationMessageKeepCount:         parseIntRequired(os.Getenv("CONVERSATION_MESSAGE_KEEP_COUNT")),
 		ConversationRetentionHours:           parseIntRequired(os.Getenv("CONVERSATION_RETENTION_HOURS")),
 		ConversationMinKeepCount:             parseIntRequired(os.Getenv("CONVERSATION_MIN_KEEP_COUNT")),
+
+		MaxResponseTokens: int64(parseIntRequired(os.Getenv("MAX_RESPONSE_TOKENS"))),
+		MaxSummaryTokens:  int64(parseIntRequired(os.Getenv("MAX_SUMMARY_TOKENS"))),
+		MaxPostChars:      parseIntRequired(os.Getenv("MAX_POST_CHARS")),
 	}
 }
 
