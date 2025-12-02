@@ -58,7 +58,7 @@ ALLOW_REMOTE_USERS=false
 
 # LLM & 投稿設定
 MAX_RESPONSE_TOKENS=1024  # 通常応答の最大トークン数
-MAX_SUMMARY_TOKENS=2048   # 要約生成の最大トークン数
+MAX_SUMMARY_TOKENS=1024   # 要約生成の最大トークン数
 MAX_POST_CHARS=480        # 投稿の最大文字数
 ```
 
@@ -277,7 +277,7 @@ ENABLE_FACT_STORE=true                      # 事実保存機能の有効/無効
 
 # LLM & 投稿設定
 MAX_RESPONSE_TOKENS=1024                    # 通常応答の最大トークン数
-MAX_SUMMARY_TOKENS=2048                     # 要約生成の最大トークン数
+MAX_SUMMARY_TOKENS=1024                     # 要約生成の最大トークン数
 MAX_POST_CHARS=480                          # 投稿の最大文字数
 ```
 
