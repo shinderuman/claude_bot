@@ -38,6 +38,7 @@ type Config struct {
 	BotUsername         string
 	CharacterPrompt     string
 	AllowRemoteUsers    bool
+	EnableFactStore     bool
 
 	// 会話管理設定
 	ConversationMessageCompressThreshold int
@@ -70,11 +71,13 @@ type Message struct {
 }
 
 type Fact struct {
-	Target    string    `json:"target"` // 情報の対象（誰の情報か）
-	Author    string    `json:"author"` // 情報の提供者（誰が言ったか）
-	Key       string    `json:"key"`
-	Value     string    `json:"value"`
-	Timestamp time.Time `json:"timestamp"`
+	Target         string    `json:"target"`          // 情報の対象（誰の情報か）
+	TargetUserName string    `json:"target_username"` // 対象のUserName
+	Author         string    `json:"author"`          // 情報の提供者（誰が言ったか）
+	AuthorUserName string    `json:"author_username"` // 提供者のUserName
+	Key            string    `json:"key"`
+	Value          string    `json:"value"`
+	Timestamp      time.Time `json:"timestamp"`
 }
 
 type FactStore struct {
@@ -141,7 +144,8 @@ func loadConfig() *Config {
 		AnthropicModel:      os.Getenv("ANTHROPIC_DEFAULT_MODEL"),
 		BotUsername:         os.Getenv("BOT_USERNAME"),
 		CharacterPrompt:     os.Getenv("CHARACTER_PROMPT"),
-		AllowRemoteUsers:    parseAllowRemoteUsers(),
+		AllowRemoteUsers:    parseBool(os.Getenv("ALLOW_REMOTE_USERS"), false),
+		EnableFactStore:     parseBool(os.Getenv("ENABLE_FACT_STORE"), true),
 
 		ConversationMessageCompressThreshold: parseIntRequired(os.Getenv("CONVERSATION_MESSAGE_COMPRESS_THRESHOLD")),
 		ConversationMessageKeepCount:         parseIntRequired(os.Getenv("CONVERSATION_MESSAGE_KEEP_COUNT")),
@@ -150,8 +154,10 @@ func loadConfig() *Config {
 	}
 }
 
-func parseAllowRemoteUsers() bool {
-	value := os.Getenv("ALLOW_REMOTE_USERS")
+func parseBool(value string, defaultValue bool) bool {
+	if value == "" {
+		return defaultValue
+	}
 	return value == "true" || value == "1"
 }
 
@@ -343,10 +349,14 @@ func processResponse(ctx context.Context, config *Config, session *Session, fact
 	conversation.addMessage("user", userMessage)
 
 	// 事実の抽出（非同期）
-	go extractAndSaveFacts(ctx, config, factStore, notification.Account.Acct, userMessage)
+	displayName := notification.Account.DisplayName
+	if displayName == "" {
+		displayName = notification.Account.Username
+	}
+	go extractAndSaveFacts(ctx, config, factStore, notification.Account.Acct, displayName, userMessage)
 
 	// 事実の検索と応答生成
-	relevantFacts := queryRelevantFacts(ctx, config, factStore, notification.Account.Acct, userMessage)
+	relevantFacts := queryRelevantFacts(ctx, config, factStore, notification.Account.Acct, displayName, userMessage)
 	response := generateResponse(ctx, config, session, conversation, relevantFacts)
 
 	if response == "" {
@@ -927,7 +937,7 @@ func (s *FactStore) save() error {
 	return os.WriteFile(s.saveFilePath, data, 0644)
 }
 
-func (s *FactStore) upsert(target, author, key, value string) {
+func (s *FactStore) upsert(target, targetUserName, author, authorUserName, key, value string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -936,6 +946,10 @@ func (s *FactStore) upsert(target, author, key, value string) {
 		if fact.Target == target && fact.Key == key {
 			s.Facts[i].Value = value
 			s.Facts[i].Author = author // 情報提供者を更新
+			s.Facts[i].AuthorUserName = authorUserName
+			if targetUserName != "" {
+				s.Facts[i].TargetUserName = targetUserName
+			}
 			s.Facts[i].Timestamp = time.Now()
 			return
 		}
@@ -943,11 +957,13 @@ func (s *FactStore) upsert(target, author, key, value string) {
 
 	// 新規追加
 	s.Facts = append(s.Facts, Fact{
-		Target:    target,
-		Author:    author,
-		Key:       key,
-		Value:     value,
-		Timestamp: time.Now(),
+		Target:         target,
+		TargetUserName: targetUserName,
+		Author:         author,
+		AuthorUserName: authorUserName,
+		Key:            key,
+		Value:          value,
+		Timestamp:      time.Now(),
 	})
 }
 
@@ -971,25 +987,32 @@ func (s *FactStore) search(target string, keys []string) []Fact {
 }
 
 // searchFuzzy は部分一致で検索する（targetの一部が含まれていればマッチ）
-func (s *FactStore) searchFuzzy(targetCandidates []string, keys []string) []Fact {
+type SearchQuery struct {
+	TargetCandidates []string `json:"target_candidates"`
+	Keys             []string `json:"keys"`
+}
+
+func (s *FactStore) searchFuzzy(targets []string, keys []string) []Fact {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	var results []Fact
 	for _, fact := range s.Facts {
-		matched := false
-		for _, candidate := range targetCandidates {
-			// 完全一致または部分一致
-			if fact.Target == candidate || strings.Contains(fact.Target, candidate) || strings.Contains(candidate, fact.Target) {
-				matched = true
+		// Targetの一致確認
+		targetMatch := false
+		for _, t := range targets {
+			if fact.Target == t {
+				targetMatch = true
 				break
 			}
 		}
-		if !matched {
+		if !targetMatch {
 			continue
 		}
+
+		// Keyの部分一致確認
 		for _, key := range keys {
-			if fact.Key == key {
+			if strings.Contains(fact.Key, key) || strings.Contains(key, fact.Key) {
 				results = append(results, fact)
 				break
 			}
@@ -1030,7 +1053,11 @@ func (s *FactStore) cleanup(retention time.Duration) int {
 
 // Fact Extraction and Query Logic
 
-func extractAndSaveFacts(ctx context.Context, config *Config, store *FactStore, author, message string) {
+func extractAndSaveFacts(ctx context.Context, config *Config, store *FactStore, author, authorUserName, message string) {
+	if !config.EnableFactStore {
+		return
+	}
+
 	// 事実抽出プロンプト
 	prompt := fmt.Sprintf(`以下のユーザーの発言から、永続的に保存すべき「事実」を抽出してください。
 事実とは、客観的な属性、所有物、固定的な好みを指します。
@@ -1038,42 +1065,42 @@ func extractAndSaveFacts(ctx context.Context, config *Config, store *FactStore, 
 
 【重要：質問は事実ではありません】
 「〜は何？」「〜はいくつ？」のような**質問文は絶対に抽出しないでください**。
-事実は「〜です」「〜だ」のような断定的な文からのみ抽出してください。
+質問文が含まれている場合は、その部分は無視してください。
 
-【重要：セキュリティとプライバシー】
-以下の情報は**絶対に**抽出・保存しないでください。
-- 個人を特定できる詳細な住所（都道府県・市町村レベルはOK）
-- 電話番号、メールアドレス
-- パスワード、APIキー、クレジットカード番号
-- その他、漏洩すると危険な機密情報
-
-【重要：表記の正規化】
-target（対象者）は、可能な限りMastodonのユーザーID（@username形式）に正規化してください。
-ユーザーIDが不明な場合は、最も一般的な呼び名に統一してください（例: "スズキ", "鈴木" -> "鈴木"）。
+【重要：UserNameの扱い】
+発言者のUserName: %s
+発言者のID: %s
 
 発言者: %s
 発言: %s
 
-事実が含まれる場合のみ、以下のJSONフォーマットで出力してください。含まれない場合は空のJSON配列 [] を出力してください。
-targetには、その事実が「誰の情報か」を記述してください。発言者自身の場合は発言者のIDを入れてください。
+抽出ルール:
+1. ユーザー自身に関する事実（「私は〜が好き」「私は〜に住んでいる」など）
+2. 第三者に関する事実（「@userは〜だ」など）
+3. 質問文は無視する（「〜は好きですか？」は事実ではない）
+4. 挨拶や感想は無視する
 
+出力形式（JSON配列のみ）:
 [
-  {
-    "target": "情報の対象者（正規化された名称）",
-    "key": "事実の種類（英語、スネークケース。例: height, favorite_food, pc_specs）",
-    "value": "事実の値（具体的かつ簡潔に）"
-  }
-]`, author, message)
+  {"target": "対象者のID(Acct)", "target_username": "対象者のUserName(分かれば)", "key": "項目名", "value": "値"}
+]
 
-	systemPrompt := "あなたは事実抽出エンジンです。余計な説明はせず、JSONのみを出力してください。"
-	response := callClaudeAPI(ctx, config, []Message{{Role: "user", Content: prompt}}, systemPrompt, 1024)
+targetについて:
+- 発言者自身のことなら、targetは "%s" としてください
+- 他のユーザーのことなら、そのユーザーのID(Acct)を指定してください（分かる場合）
+- target_usernameは分かる範囲で入力してください
 
-	var extracted []struct {
-		Target string `json:"target"`
-		Key    string `json:"key"`
-		Value  string `json:"value"`
+抽出するものがない場合は空配列 [] を返してください。`, authorUserName, author, author, message, author)
+
+	systemPrompt := "あなたは事実抽出エンジンです。JSONのみを出力してください。"
+	messages := []Message{{Role: "user", Content: prompt}}
+
+	response := callClaudeAPI(ctx, config, messages, systemPrompt, maxResponseTokens)
+	if response == "" {
+		return
 	}
 
+	var extracted []Fact
 	// JSON部分のみ抽出（Markdownコードブロック対策）
 	jsonStr := extractJSON(response)
 	if err := json.Unmarshal([]byte(jsonStr), &extracted); err != nil {
@@ -1085,93 +1112,79 @@ targetには、その事実が「誰の情報か」を記述してください�
 		for _, item := range extracted {
 			// Targetが空なら発言者をセット
 			target := item.Target
+			targetUserName := item.TargetUserName
 			if target == "" {
 				target = author
+				targetUserName = authorUserName
 			}
-			store.upsert(target, author, item.Key, item.Value)
-			log.Printf("事実保存: [Target:%s] %s = %s (by %s)", target, item.Key, item.Value, author)
+			store.upsert(target, targetUserName, author, authorUserName, item.Key, item.Value)
+			log.Printf("事実保存: [Target:%s(%s)] %s = %s (by %s)", target, targetUserName, item.Key, item.Value, author)
 		}
 		store.save()
 	}
 }
 
-func queryRelevantFacts(ctx context.Context, config *Config, store *FactStore, author, message string) string {
+func queryRelevantFacts(ctx context.Context, config *Config, store *FactStore, author, authorUserName, message string) string {
+	if !config.EnableFactStore {
+		return ""
+	}
+
 	log.Printf("[DEBUG] queryRelevantFacts called: author=%s, message=%s", author, message)
 	// 検索キー抽出プロンプト
 	prompt := fmt.Sprintf(`以下のユーザーの発言に対して適切に応答するために、データベースから参照すべき「事実のカテゴリ（キー）」と「対象者（target）」を推測してください。
 
-発言者: %s
+発言者: %s (ID: %s)
 発言: %s
 
 【重要な推測ルール】
 1. 対象者（target）の推測:
-   - 「私の...」「ぼくの...」→ 発言者のID
-   - 「Aさんの...」「Aの...」→ "A"（正規化された名前）
-   - 「もぐのの...」→ "もぐの"
-   - Mastodon IDの場合は完全な形式（例: "nayami_muyou@gochisou.dev"）を優先
-   - **重要**: 対象者が特定しにくい場合（ニックネームなど）は、複数の候補を列挙してください
-     例: "悩み無用" → ["悩み無用", "nayami_muyou", "nayami_muyou@gochisou.dev"]
+- 「私は〜」→ 発言者本人 (%s)
+- 「@userは〜」→ そのユーザーのID
+- 特定の対象がない → 発言者本人
 
-2. キー（key）の推測:
-   - 「身長」「背」→ "height"
-   - 「好きな食べ物」「好物」→ "favorite_food"
-   - 「PCのスペック」→ "pc_specs"
-   - 「棒は何倍」「○○の倍率」→ "stick_power_multiplier" や関連するキー
-   - 可能な限り、保存時に使われそうなスネークケースのキー名を推測してください
+2. キーの推測:
+- 「好きな食べ物は？」→ "好きな食べ物", "食事", "好物" など
+- 「誕生日は？」→ "誕生日", "生年月日" など
+- 文脈から広めに推測してください
 
-3. 複数の可能性がある場合は、すべて列挙してください
+出力形式（JSONのみ）:
+{
+  "target_candidates": ["ID1", "ID2"],
+  "keys": ["key1", "key2", "key3"]
+}
 
-参照すべきキーがある場合のみ、以下のJSONフォーマットで出力してください。ない場合は空の配列 [] を出力してください。
-targetが特定できない（「私の...」など）場合は、発言者のIDを指定してください。
+target_candidatesには、可能性のあるユーザーID(Acct)をリストアップしてください。発言者本人の場合は "%s" を含めてください。`, authorUserName, author, message, author, author)
 
-例:
-- 「もぐのの棒は何倍？」→ [{"target_candidates": ["もぐの"], "key": "stick_power_multiplier"}]
-- 「私の身長は？」→ [{"target_candidates": ["%s"], "key": "height"}]
-- 「Aさんの好きな食べ物は？」→ [{"target_candidates": ["A"], "key": "favorite_food"}]
-- 「悩み無用の好物は？」→ [{"target_candidates": ["悩み無用", "nayami_muyou", "nayami_muyou@gochisou.dev"], "key": "favorite_food"}]
+	systemPrompt := "あなたは検索クエリ生成エンジンです。JSONのみを出力してください。"
+	messages := []Message{{Role: "user", Content: prompt}}
 
-出力形式:
-[
-  {
-    "target_candidates": ["対象者の候補1", "対象者の候補2", ...],
-    "key": "事実の種類"
-  }
-]`, author, message, author)
-
-	systemPrompt := "あなたは検索クエリ生成エンジンです。余計な説明はせず、JSONのみを出力してください。"
-	response := callClaudeAPI(ctx, config, []Message{{Role: "user", Content: prompt}}, systemPrompt, 512)
-
-	var queries []struct {
-		TargetCandidates []string `json:"target_candidates"`
-		Key              string   `json:"key"`
+	response := callClaudeAPI(ctx, config, messages, systemPrompt, maxResponseTokens)
+	if response == "" {
+		return ""
 	}
+
+	var q SearchQuery
 	jsonStr := extractJSON(response)
-	log.Printf("[DEBUG] LLM response for query: %s", jsonStr)
-	if err := json.Unmarshal([]byte(jsonStr), &queries); err != nil {
-		// エラー時は空の結果として扱う
-		log.Printf("[DEBUG] Failed to parse query JSON: %v", err)
+	if err := json.Unmarshal([]byte(jsonStr), &q); err != nil {
+		log.Printf("検索クエリパースエラー: %v", err)
 		return ""
 	}
-
-	if len(queries) == 0 {
-		log.Printf("[DEBUG] No queries generated")
-		return ""
-	}
-
-	log.Printf("[DEBUG] Generated %d queries", len(queries))
 
 	var builder strings.Builder
-	for _, q := range queries {
-		// TargetCandidatesが空なら発言者をセット
+	if len(q.Keys) > 0 {
 		if len(q.TargetCandidates) == 0 {
 			q.TargetCandidates = []string{author}
 		}
 
 		// あいまい検索を使用
-		facts := store.searchFuzzy(q.TargetCandidates, []string{q.Key})
-		log.Printf("[DEBUG] Search for candidates=%v, key=%s: found %d facts", q.TargetCandidates, q.Key, len(facts))
+		facts := store.searchFuzzy(q.TargetCandidates, q.Keys) // q.Keys is now []string
+		log.Printf("[DEBUG] Search for candidates=%v, keys=%v: found %d facts", q.TargetCandidates, q.Keys, len(facts))
 		for _, fact := range facts {
-			builder.WriteString(fmt.Sprintf("- %sの%s: %s (記録日: %s)\n", fact.Target, fact.Key, fact.Value, fact.Timestamp.Format("2006-01-02")))
+			targetName := fact.TargetUserName
+			if targetName == "" {
+				targetName = fact.Target
+			}
+			builder.WriteString(fmt.Sprintf("- %s(%s)の%s: %s (記録日: %s)\n", targetName, fact.Target, fact.Key, fact.Value, fact.Timestamp.Format("2006-01-02")))
 		}
 	}
 	result := builder.String()
@@ -1180,10 +1193,50 @@ targetが特定できない（「私の...」など）場合は、発言者のID
 }
 
 func extractJSON(s string) string {
-	start := strings.Index(s, "[")
-	end := strings.LastIndex(s, "]")
-	if start == -1 || end == -1 || start > end {
-		return "[]"
+	// コードブロックの削除
+	s = strings.ReplaceAll(s, "```json", "")
+	s = strings.ReplaceAll(s, "```", "")
+
+	// 最初に見つかった { または [ から、最後に見つかった } または ] までを抽出
+	startObj := strings.Index(s, "{")
+	startArr := strings.Index(s, "[")
+
+	start := -1
+	if startObj != -1 && startArr != -1 {
+		if startObj < startArr {
+			start = startObj
+		} else {
+			start = startArr
+		}
+	} else if startObj != -1 {
+		start = startObj
+	} else if startArr != -1 {
+		start = startArr
 	}
+
+	if start == -1 {
+		return "{}" // デフォルトは空オブジェクト（文脈によるが安全策）
+	}
+
+	endObj := strings.LastIndex(s, "}")
+	endArr := strings.LastIndex(s, "]")
+
+	end := -1
+	if endObj != -1 && endArr != -1 {
+		if endObj > endArr {
+			end = endObj
+		} else {
+			end = endArr
+		}
+	} else if endObj != -1 {
+		end = endObj
+	} else if endArr != -1 {
+		end = endArr
+	}
+
+	if end == -1 || start > end {
+		return "{}"
+	}
+
 	return s[start : end+1]
 }
