@@ -55,8 +55,25 @@ func (b *Bot) Run(ctx context.Context) {
 }
 
 func (b *Bot) logStartupInfo() {
-	log.Printf("Mastodon Bot起動: @%s", b.config.BotUsername)
-	log.Printf("Claude API: %s (model: %s)", b.config.AnthropicBaseURL, b.config.AnthropicModel)
+	log.Printf("=== Mastodon Bot 設定情報 ===")
+	log.Printf("Botユーザー名: @%s", b.config.BotUsername)
+	log.Printf("Mastodonサーバー: %s", b.config.MastodonServer)
+	log.Printf("Claude API: %s", b.config.AnthropicBaseURL)
+	log.Printf("Claudeモデル: %s", b.config.AnthropicModel)
+	log.Printf("リモートユーザー許可: %t", b.config.AllowRemoteUsers)
+	log.Printf("事実ストア有効: %t", b.config.EnableFactStore)
+
+	log.Printf("=== 会話管理設定 ===")
+	log.Printf("メッセージ圧縮しきい値: %d", b.config.ConversationMessageCompressThreshold)
+	log.Printf("保持メッセージ数: %d", b.config.ConversationMessageKeepCount)
+	log.Printf("会話保持時間: %d時間", b.config.ConversationRetentionHours)
+	log.Printf("最小保持数: %d", b.config.ConversationMinKeepCount)
+
+	log.Printf("=== LLM & 投稿設定 ===")
+	log.Printf("最大応答トークン: %d", b.config.MaxResponseTokens)
+	log.Printf("最大要約トークン: %d", b.config.MaxSummaryTokens)
+	log.Printf("最大投稿文字数: %d", b.config.MaxPostChars)
+	log.Printf("=== Bot 起動完了 ===")
 }
 
 func (b *Bot) processNotification(ctx context.Context, notification *gomastodon.Notification) {
