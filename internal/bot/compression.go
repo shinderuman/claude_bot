@@ -28,18 +28,14 @@ func (b *Bot) compressConversationIfNeeded(ctx context.Context, session *model.S
 	compressCount := len(conversation.Messages) - b.config.ConversationMessageKeepCount
 	messagesToCompress := conversation.Messages[:compressCount]
 
-	summary := b.generateSummary(ctx, messagesToCompress, "")
+	summary := b.generateSummary(ctx, messagesToCompress, session.Summary)
 	if summary == "" {
 		log.Printf("会話内要約生成エラー: 応答が空です")
 		return
 	}
 
 	conversation.Messages = conversation.Messages[compressCount:]
-	if session.Summary == "" {
-		session.Summary = summary
-	} else {
-		session.Summary = session.Summary + "\n\n" + summary
-	}
+	session.Summary = summary
 
 	log.Printf("会話内圧縮完了: %d件のメッセージを削除、%d件を保持", compressCount, len(conversation.Messages))
 }

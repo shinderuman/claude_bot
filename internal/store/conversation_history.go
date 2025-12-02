@@ -147,11 +147,7 @@ func FindOldConversations(config *config.Config, session *model.Session) []model
 }
 
 func UpdateSessionWithSummary(session *model.Session, summary string, oldConversations []model.Conversation) {
-	if session.Summary == "" {
-		session.Summary = summary
-	} else {
-		session.Summary = session.Summary + "\n\n" + summary
-	}
+	session.Summary = summary
 
 	// Remove old conversations
 	// This is a bit tricky because we need to remove specific conversations from the slice.
