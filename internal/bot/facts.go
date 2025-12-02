@@ -44,7 +44,7 @@ func (b *Bot) extractAndSaveFacts(ctx context.Context, author, authorUserName, m
 				targetUserName = authorUserName
 			}
 			b.factStore.Upsert(target, targetUserName, author, authorUserName, item.Key, item.Value)
-			log.Printf("事実保存: [Target:%s(%s)] %s = %s (by %s)", target, targetUserName, item.Key, item.Value, author)
+			log.Printf("事実保存: [Target:%s(%s)] %s = %v (by %s)", target, targetUserName, item.Key, item.Value, author)
 		}
 		b.factStore.Save()
 	}
@@ -86,7 +86,7 @@ func (b *Bot) queryRelevantFacts(ctx context.Context, author, authorUserName, me
 			if targetName == "" {
 				targetName = fact.Target
 			}
-			builder.WriteString(fmt.Sprintf("- %s(%s)の%s: %s (記録日: %s)\n", targetName, fact.Target, fact.Key, fact.Value, fact.Timestamp.Format("2006-01-02")))
+			builder.WriteString(fmt.Sprintf("- %s(%s)の%s: %v (記録日: %s)\n", targetName, fact.Target, fact.Key, fact.Value, fact.Timestamp.Format("2006-01-02")))
 		}
 	}
 	result := builder.String()

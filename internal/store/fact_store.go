@@ -79,7 +79,7 @@ func (s *FactStore) Save() error {
 	return os.WriteFile(s.saveFilePath, data, 0644)
 }
 
-func (s *FactStore) Upsert(target, targetUserName, author, authorUserName, key, value string) {
+func (s *FactStore) Upsert(target, targetUserName, author, authorUserName, key string, value interface{}) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
