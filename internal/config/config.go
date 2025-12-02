@@ -24,6 +24,7 @@ type Config struct {
 	ConversationMessageCompressThreshold int
 	ConversationMessageKeepCount         int
 	ConversationRetentionHours           int
+	ConversationIdleHours                int
 	ConversationMinKeepCount             int
 
 	// LLM & Post Settings
@@ -56,6 +57,7 @@ func LoadConfig() *Config {
 		ConversationMessageCompressThreshold: parseIntRequired(os.Getenv("CONVERSATION_MESSAGE_COMPRESS_THRESHOLD")),
 		ConversationMessageKeepCount:         parseIntRequired(os.Getenv("CONVERSATION_MESSAGE_KEEP_COUNT")),
 		ConversationRetentionHours:           parseIntRequired(os.Getenv("CONVERSATION_RETENTION_HOURS")),
+		ConversationIdleHours:                parseIntWithDefault(os.Getenv("CONVERSATION_IDLE_HOURS"), 3),
 		ConversationMinKeepCount:             parseIntRequired(os.Getenv("CONVERSATION_MIN_KEEP_COUNT")),
 
 		MaxResponseTokens: int64(parseIntRequired(os.Getenv("MAX_RESPONSE_TOKENS"))),
@@ -75,6 +77,17 @@ func parseIntRequired(value string) int {
 	parsed, err := strconv.Atoi(value)
 	if err != nil {
 		log.Fatal("エラー: 環境変数の値が無効です。数値を指定してください: ", value)
+	}
+	return parsed
+}
+
+func parseIntWithDefault(value string, defaultValue int) int {
+	if value == "" {
+		return defaultValue
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return defaultValue
 	}
 	return parsed
 }

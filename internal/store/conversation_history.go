@@ -90,6 +90,7 @@ func (h *ConversationHistory) GetOrCreateConversation(session *model.Session, ro
 	newConv := model.Conversation{
 		RootStatusID: rootStatusID,
 		CreatedAt:    time.Now(),
+		LastUpdated:  time.Now(),
 		Messages:     []model.Message{},
 	}
 	session.Conversations = append(session.Conversations, newConv)
@@ -101,6 +102,7 @@ func AddMessage(c *model.Conversation, role, content string) {
 		Role:    role,
 		Content: content,
 	})
+	c.LastUpdated = time.Now()
 }
 
 func RollbackLastMessages(c *model.Conversation, count int) {
@@ -114,11 +116,29 @@ func FindOldConversations(config *config.Config, session *model.Session) []model
 		return nil
 	}
 
-	threshold := time.Now().Add(-time.Duration(config.ConversationRetentionHours) * time.Hour)
+	retentionThreshold := time.Now().Add(-time.Duration(config.ConversationRetentionHours) * time.Hour)
+	idleThreshold := time.Now().Add(-time.Duration(config.ConversationIdleHours) * time.Hour)
+
 	var oldConvs []model.Conversation
 
 	for _, conv := range session.Conversations {
-		if conv.CreatedAt.Before(threshold) {
+		// 最終更新日時がない場合は作成日時を使用（後方互換性）
+		lastUpdated := conv.LastUpdated
+		if lastUpdated.IsZero() {
+			lastUpdated = conv.CreatedAt
+		}
+
+		// 保持期間切れチェック (絶対的な寿命)
+		isExpired := conv.CreatedAt.Before(retentionThreshold)
+
+		// アイドル状態チェック (最後の更新からの経過時間)
+		// メッセージ数が一定以上ある場合のみアイドル判定を行う（短い会話は即サマリしない）
+		isIdle := false
+		if len(conv.Messages) >= 4 { // 最低2往復程度
+			isIdle = lastUpdated.Before(idleThreshold)
+		}
+
+		if isExpired || isIdle {
 			oldConvs = append(oldConvs, conv)
 		}
 	}

@@ -58,7 +58,7 @@ ALLOW_REMOTE_USERS=false
 
 # LLM & 投稿設定
 MAX_RESPONSE_TOKENS=512  # 通常応答の最大トークン数
-MAX_SUMMARY_TOKENS=256   # 要約生成の最大トークン数
+MAX_SUMMARY_TOKENS=512   # 要約生成の最大トークン数
 MAX_POST_CHARS=480       # 投稿の最大文字数
 ```
 
@@ -239,7 +239,8 @@ MASTODON_SERVER=https://... MASTODON_ACCESS_TOKEN=... ./claude_bot
 - ユーザーごとの全会話を`sessions.json`に保存
 - 各リプライツリー内でメッセージが20件を超えると自動圧縮
 - 圧縮後は最新10件のメッセージを保持、それ以前は要約
-- 24時間以上経過した会話は自動的に要約に移行（最低3つの会話は保持）
+- 3時間以上更新がない会話（4往復以上）は自動的に要約に移行
+- 24時間以上経過した会話も自動的に要約に移行（最低3つの会話は保持）
 - 要約は累積方式で1つに統合（過去の要約 + 新しいメッセージを再要約）
 - プログラム再起動後も履歴を保持
 - 応答生成失敗時や投稿失敗時は自動的にロールバック
@@ -269,6 +270,7 @@ CHARACTER_PROMPT="あなたは猫のような口調で話すアシスタント�
 # 会話管理設定
 CONVERSATION_MESSAGE_COMPRESS_THRESHOLD=20  # この件数を超えたら圧縮
 CONVERSATION_MESSAGE_KEEP_COUNT=10          # 圧縮後に保持するメッセージ件数
+CONVERSATION_IDLE_HOURS=3                   # この時間更新がない会話を要約化
 CONVERSATION_RETENTION_HOURS=24             # この時間を超えた会話を削除
 CONVERSATION_MIN_KEEP_COUNT=3               # 最低限保持する会話数
 
@@ -277,7 +279,7 @@ ENABLE_FACT_STORE=true                      # 事実保存機能の有効/無効
 
 # LLM & 投稿設定
 MAX_RESPONSE_TOKENS=512                     # 通常応答の最大トークン数
-MAX_SUMMARY_TOKENS=256                      # 要約生成の最大トークン数
+MAX_SUMMARY_TOKENS=512                      # 要約生成の最大トークン数
 MAX_POST_CHARS=480                          # 投稿の最大文字数
 ```
 

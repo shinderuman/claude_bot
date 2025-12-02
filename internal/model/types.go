@@ -7,6 +7,7 @@ import (
 type Conversation struct {
 	RootStatusID string
 	CreatedAt    time.Time
+	LastUpdated  time.Time
 	Messages     []Message
 }
 

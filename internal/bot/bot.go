@@ -60,9 +60,9 @@ func (b *Bot) logStartupInfo() {
 		b.config.BotUsername, b.config.MastodonServer, b.config.AnthropicModel, b.config.AnthropicBaseURL)
 	log.Printf("機能: リモートユーザー=%t, 事実ストア=%t",
 		b.config.AllowRemoteUsers, b.config.EnableFactStore)
-	log.Printf("会話管理: 圧縮=%d件, 保持=%d件, 保持時間=%dh, 最小保持=%d件",
+	log.Printf("会話管理: 圧縮=%d件, 保持=%d件, アイドル=%dh, 保持時間=%dh, 最小保持=%d件",
 		b.config.ConversationMessageCompressThreshold, b.config.ConversationMessageKeepCount,
-		b.config.ConversationRetentionHours, b.config.ConversationMinKeepCount)
+		b.config.ConversationIdleHours, b.config.ConversationRetentionHours, b.config.ConversationMinKeepCount)
 	log.Printf("LLM設定: 応答=%dtok, 要約=%dtok, 投稿=%d文字",
 		b.config.MaxResponseTokens, b.config.MaxSummaryTokens, b.config.MaxPostChars)
 	log.Printf("=== 起動完了 ===")

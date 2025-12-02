@@ -71,14 +71,25 @@ target_candidatesには、可能性のあるユーザーID(Acct)をリストア�
 // BuildSummaryPrompt creates a prompt for summarizing conversation history
 func BuildSummaryPrompt(formattedMessages, existingSummary string) string {
 	var content string
+	var instruction string
 
 	if existingSummary != "" {
 		content = fmt.Sprintf("【これまでの会話要約】\n%s\n\n【新しい会話】\n%s", existingSummary, formattedMessages)
+		instruction = `以下の「これまでの会話要約」と「新しい会話」を統合して、**1つの簡潔な要約**を作成してください。
+
+重要な指示:
+1. **重複を徹底的に排除**: 同じ情報が複数回出てくる場合は、1回だけ記載してください
+2. **情報の統合**: 関連する情報は1つの項目にまとめてください
+3. **簡潔さ優先**: 冗長な説明を避け、要点のみを箇条書きで記載してください
+4. **古い情報の更新**: 新しい会話で更新された情報がある場合は、新しい情報を優先してください
+5. **不要な見出しの削除**: 内容がない見出しは出力しないでください
+6. **文字数制限**: 要約全体を800文字以内に収めてください`
 	} else {
 		content = fmt.Sprintf("【新しい会話】\n%s", formattedMessages)
+		instruction = `以下の会話をトピック別に整理して要約してください。`
 	}
 
-	return `以下の会話全体をトピック別に整理して要約してください。説明は不要です。要約内容のみを返してください。重複を避け、重要な情報を残し、関連する話題をグループ化してください。
+	return instruction + `
 
 出力形式:
 # 会話要約
@@ -106,6 +117,7 @@ func BuildSummaryPrompt(formattedMessages, existingSummary string) string {
 - 会話の流れや文脈を考慮して整理してください
 - 箇条書きで簡潔にまとめてください
 - 該当するトピックがない場合はその見出しを省略してください
+- 説明は不要です。要約内容のみを返してください
 
 会話内容:
 
