@@ -16,6 +16,10 @@ func main() {
 	// Initialize dependencies
 	history := store.InitializeHistory()
 	factStore := store.InitializeFactStore()
+
+	// Set the system prompt builder from bot package
+	llm.SetSystemPromptBuilder(bot.BuildSystemPrompt)
+
 	llmClient := llm.NewClient(cfg)
 	b := bot.New(cfg, history, factStore, llmClient)
 
