@@ -1,12 +1,7 @@
-# 環境変数ファイル
-.env
-
-# エディタ設定
-.cursorrules
-
-# 会話履歴
-sessions.json
-facts.json
+# データディレクトリ内の設定と履歴（.env.exampleは除く）
+data/.env
+data/sessions.json
+data/facts.json
 
 # ビルド成果物
 mastodon-bot
@@ -24,5 +19,3 @@ mastodon-bot
 
 # Go workspace file
 go.work
-
-/claude_bot

@@ -13,8 +13,8 @@ APP_NAME="claude_bot"
 SFTP_USER="ubuntu"
 SFTP_KEY_FILE="$HOME/.ssh/mastodon.pem"
 
-# 設定ファイルリスト
-CONFIG_FILES=(".env" "sessions.json" "facts.json")
+# データディレクトリ
+DATA_DIR="data"
 
 # デフォルト値
 DEPLOY_PROGRAM=false
@@ -23,23 +23,26 @@ DEPLOY_PROGRAM=false
 # 関数定義
 # ========================================
 
-# 設定ファイル同期処理
-sync_config_files() {
-    echo "設定ファイルを同期中..."
+# データディレクトリ同期処理
+sync_data_dir() {
+    echo "データディレクトリを同期中..."
 
-    for file in "${CONFIG_FILES[@]}"; do
-        if [ -f "$file" ]; then
-            local remote_file="${SFTP_USER}@${REMOTE_HOST}:${REMOTE_DIR}/${file}"
+    if [ -d "${DATA_DIR}" ]; then
+        local remote_dir="${SFTP_USER}@${REMOTE_HOST}:${REMOTE_DIR}/${DATA_DIR}"
 
-            # リモート → ローカル（リモートの方が新しい場合のみ）
-            rsync -avuz --quiet -e "ssh -i ${SFTP_KEY_FILE}" "${remote_file}" ./ 2>/dev/null || true
+        # リモートディレクトリを作成
+        ssh -i "${SFTP_KEY_FILE}" "${SFTP_USER}@${REMOTE_HOST}" "mkdir -p ${REMOTE_DIR}/${DATA_DIR}"
 
-            # ローカル → リモート（ローカルの方が新しい場合のみ）
-            rsync -avuz --quiet -e "ssh -i ${SFTP_KEY_FILE}" "${file}" "${remote_file}" 2>/dev/null || true
+        # リモート → ローカル（リモートの方が新しい場合のみ）
+        rsync -avuz --quiet -e "ssh -i ${SFTP_KEY_FILE}" "${remote_dir}/" "${DATA_DIR}/" 2>/dev/null || true
 
-            echo "  ✓ ${file}同期完了"
-        fi
-    done
+        # ローカル → リモート（ローカルの方が新しい場合のみ）
+        rsync -avuz --quiet -e "ssh -i ${SFTP_KEY_FILE}" "${DATA_DIR}/" "${remote_dir}/" 2>/dev/null || true
+
+        echo "  ✓ ${DATA_DIR}/同期完了"
+    else
+        echo "  ⚠ ${DATA_DIR}/ディレクトリが見つかりません"
+    fi
 }
 
 # ========================================
@@ -81,7 +84,7 @@ main() {
     else
         echo "  ✗ プログラムのビルドとデプロイ（スキップ）"
     fi
-    echo "  ✓ 設定ファイルの同期"
+    echo "  ✓ データディレクトリの同期"
 
     echo ""
 
@@ -107,9 +110,9 @@ main() {
     fi
 
     # ========================================
-    # フェーズ2: ファイル同期
+    # フェーズ2: データディレクトリ同期
     # ========================================
-    sync_config_files
+    sync_data_dir
 
     # ========================================
     # フェーズ3: デプロイ（プログラムデプロイ時のみ）

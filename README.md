@@ -64,11 +64,11 @@ MAX_POST_CHARS=480        # 投稿の最大文字数
 
 ## セットアップ
 
-1. `.env.example`を`.env`にコピーして環境変数を設定
+1. `data/.env.example`を`data/.env`にコピーして環境変数を設定
 
 ```bash
-cp .env.example .env
-# .envファイルを編集して適切な値を設定
+cp data/.env.example data/.env
+# data/.envファイルを編集して適切な値を設定
 ```
 
 2. 依存関係のインストール
@@ -104,7 +104,7 @@ go build -o test_claude ./cmd/test_claude
 
 ### デプロイスクリプトの機能
 
-- **設定ファイル自動同期**: .env、sessions.json、facts.jsonを常に同期
+- **設定ファイル自動同期**: data/ディレクトリを常に同期
 - **プログラムデプロイ選択**: 明示的に指定した場合のみプログラムをデプロイ
 - **自動ビルド**: Linux向けバイナリを自動でビルド（プログラムデプロイ時）
 - **rsync同期**: 高速・安全なファイル転送と双方向同期
@@ -126,8 +126,8 @@ APP_NAME="claude_bot"
 SFTP_USER="ubuntu"
 SFTP_KEY_FILE="$HOME/.ssh/mastodon.pem"
 
-# 同期対象ファイル
-CONFIG_FILES=(".env" "sessions.json" "facts.json")
+# 同期対象ディレクトリ
+DATA_DIR="data"
 
 # デフォルト値
 DEPLOY_PROGRAM=false  # 安全のためデフォルトで非デプロイ
@@ -145,7 +145,7 @@ DEPLOY_PROGRAM=false  # 安全のためデフォルトで非デプロイ
 2. **プログラムデプロイ選択**: y/Nプロンプトで選択（デフォルトはN）
 3. **リモート準備**: リモートディレクトリを作成
 4. **ビルド処理**: Linux向けバイナリをビルド（yを選択時）
-5. **設定ファイル同期**: 常に全設定ファイルを同期
+5. **データディレクトリ同期**: 常にdata/ディレクトリを同期
 6. **デプロイ実行**: Supervisorを停止・転送・開始（yを選択時）
 
 ### 事実データベースの同期
@@ -171,9 +171,10 @@ claude_bot/
 │   ├── mastodon/      # Mastodon APIクライアント
 │   ├── model/         # データモデル
 │   └── store/         # データ永続化
-├── .env               # 環境変数設定
-├── sessions.json      # 会話履歴
-├── facts.json         # 事実データベース
+├── data/              # 設定・データファイル
+│   ├── .env           # 環境変数設定
+│   ├── sessions.json  # 会話履歴
+│   └── facts.json     # 事実データベース
 └── deploy.sh          # デプロイスクリプト
 ```
 
