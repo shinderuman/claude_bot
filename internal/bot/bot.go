@@ -106,7 +106,7 @@ func (b *Bot) handleNotification(ctx context.Context, notification *gomastodon.N
 	log.Printf("メンションを受信: %s (ID: %s)", notification.Account.Acct, notification.Status.ID)
 
 	// セッション管理
-	rootStatusID := b.getRootStatusID(notification.Status)
+	rootStatusID := b.mastodonClient.GetRootStatusID(ctx, notification)
 	session := b.history.GetOrCreateSession(notification.Account.Acct)
 
 	// ユーザーメッセージの抽出
@@ -123,13 +123,6 @@ func (b *Bot) handleNotification(ctx context.Context, notification *gomastodon.N
 		// 会話履歴の保存
 		b.history.Save()
 	}
-}
-
-func (b *Bot) getRootStatusID(status *gomastodon.Status) string {
-	if status.InReplyToID != nil {
-		return string(status.InReplyToID.(string))
-	}
-	return string(status.ID)
 }
 
 func (b *Bot) processResponse(ctx context.Context, session *model.Session, notification *gomastodon.Notification, userMessage, rootStatusID string) bool {
