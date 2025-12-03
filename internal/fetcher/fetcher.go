@@ -58,7 +58,10 @@ func FetchPageContent(ctx context.Context, urlStr string) (*PageContent, error) 
 	// Limit reader to prevent reading large files
 	limitedReader := io.LimitReader(resp.Body, MaxBodySize)
 
-	return extractPageContent(limitedReader, urlStr)
+	// リダイレクト後の最終URLを取得
+	finalURL := resp.Request.URL.String()
+
+	return extractPageContent(limitedReader, finalURL)
 }
 
 func extractPageContent(r io.Reader, urlStr string) (*PageContent, error) {
