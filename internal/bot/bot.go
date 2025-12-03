@@ -206,8 +206,8 @@ func (b *Bot) extractFactsFromMentionURLs(ctx context.Context, notification *gom
 
 			urlContent := fetcher.FormatPageContent(meta)
 
-			// URLコンテンツからファクト抽出
-			b.factService.ExtractAndSaveFacts(ctx, author, displayName, urlContent, "mention_url", url, author, displayName)
+			// URLコンテンツからファクト抽出（URLコンテンツ専用メソッドを使用）
+			b.factService.ExtractAndSaveFactsFromURLContent(ctx, urlContent, "mention_url", url, author, displayName)
 		}(u)
 	}
 }

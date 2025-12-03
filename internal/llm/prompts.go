@@ -41,6 +41,42 @@ targetについて:
 抽出するものがない場合は空配列 [] を返してください。`, authorUserName, author, author, message, author)
 }
 
+// BuildURLContentFactExtractionPrompt creates a prompt for extracting facts from URL content
+func BuildURLContentFactExtractionPrompt(urlContent string) string {
+	return fmt.Sprintf(`以下のWebページの内容から、永続的に保存すべき「一般知識」を抽出してください。
+事実とは、客観的な情報、ニュース、技術情報、製品情報などを指します。
+
+【重要：一般知識の抽出】
+- このコンテンツは外部のWebページから取得したものです
+- 投稿者個人の情報ではなく、コンテンツそのものの情報を抽出してください
+- ニュース、技術情報、製品リリース、イベント情報などが対象です
+
+【抽出対象の例】
+- ソフトウェアのバージョン情報やリリース情報
+- 技術記事の要点
+- 製品やサービスの情報
+- イベントや発表の情報
+
+【抽出しないもの】
+- 投稿者の名前や属性
+- 一時的な感想や意見
+- 広告や宣伝文句
+
+Webページの内容:
+%s
+
+出力形式（JSON配列のみ）:
+[
+  {"target": "__general__", "target_username": "ドメイン名またはサイト名", "key": "項目名", "value": "値"}
+]
+
+重要:
+- targetは必ず "__general__" としてください（一般知識として保存）
+- target_usernameにはWebサイトのドメイン名やサイト名を入力してください
+- keyには情報の種類（例: "リリース情報", "技術情報", "製品名"など）を指定してください
+- 抽出するものがない場合は空配列 [] を返してください`, urlContent)
+}
+
 // BuildFactQueryPrompt creates a prompt for generating search queries for facts
 func BuildFactQueryPrompt(authorUserName, author, message string) string {
 	return fmt.Sprintf(`以下のユーザーの発言に対して適切に応答するために、データベースから参照すべき「事実のカテゴリ（キー）」と「対象者（target）」を推測してください。

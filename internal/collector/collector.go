@@ -287,8 +287,8 @@ func (fc *FactCollector) extractFactsFromURLs(ctx context.Context, status *gomas
 		// ページコンテンツからファクト抽出
 		urlContent := fetcher.FormatPageContent(meta)
 
-		// LLMでファクト抽出
-		prompt := llm.BuildFactExtractionPrompt(postAuthorUserName, postAuthor, urlContent)
+		// LLMでファクト抽出（URLコンテンツ用のプロンプトを使用）
+		prompt := llm.BuildURLContentFactExtractionPrompt(urlContent)
 		messages := []model.Message{{Role: "user", Content: prompt}}
 
 		response := fc.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactExtraction, fc.config.MaxResponseTokens)

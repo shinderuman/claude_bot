@@ -82,6 +82,51 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, author, authorUse
 	}
 }
 
+// ExtractAndSaveFactsFromURLContent extracts facts from URL content and saves them to the store
+func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, urlContent, sourceType, sourceURL, postAuthor, postAuthorUserName string) {
+	if !s.config.EnableFactStore {
+		return
+	}
+
+	prompt := llm.BuildURLContentFactExtractionPrompt(urlContent)
+	messages := []model.Message{{Role: "user", Content: prompt}}
+
+	response := s.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactExtraction, s.config.MaxResponseTokens)
+	if response == "" {
+		return
+	}
+
+	var extracted []model.Fact
+	jsonStr := llm.ExtractJSON(response)
+	if err := json.Unmarshal([]byte(jsonStr), &extracted); err != nil {
+		log.Printf("URL事実抽出JSONパースエラー: %v\nResponse: %s", err, response)
+		return
+	}
+
+	if len(extracted) > 0 {
+		for _, item := range extracted {
+			// URLコンテンツからの抽出では、targetは常に__general__
+			fact := model.Fact{
+				Target:             item.Target,
+				TargetUserName:     item.TargetUserName,
+				Author:             postAuthor,
+				AuthorUserName:     postAuthorUserName,
+				Key:                item.Key,
+				Value:              item.Value,
+				Timestamp:          time.Now(),
+				SourceType:         sourceType,
+				SourceURL:          sourceURL,
+				PostAuthor:         postAuthor,
+				PostAuthorUserName: postAuthorUserName,
+			}
+
+			s.factStore.UpsertWithSource(fact)
+			log.Printf("事実保存(URL): [Target:%s(%s)] %s = %v (source:%s, url:%s)", fact.Target, fact.TargetUserName, item.Key, item.Value, sourceType, sourceURL)
+		}
+		s.factStore.Save()
+	}
+}
+
 // QueryRelevantFacts queries relevant facts based on the message
 func (s *FactService) QueryRelevantFacts(ctx context.Context, author, authorUserName, message string) string {
 	if !s.config.EnableFactStore {
