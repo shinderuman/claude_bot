@@ -277,15 +277,15 @@ func (fc *FactCollector) extractFactsFromURLs(ctx context.Context, status *gomas
 			continue
 		}
 
-		// メタデータ取得
-		meta, err := fetcher.FetchMetadata(ctx, urlStr)
+		// ページコンテンツ取得
+		meta, err := fetcher.FetchPageContent(ctx, urlStr)
 		if err != nil {
 			// 取得エラーはログに出さない
 			continue
 		}
 
-		// メタデータからファクト抽出
-		urlContent := fetcher.FormatMetadata(meta)
+		// ページコンテンツからファクト抽出
+		urlContent := fetcher.FormatPageContent(meta)
 
 		// LLMでファクト抽出
 		prompt := llm.BuildFactExtractionPrompt(postAuthorUserName, postAuthor, urlContent)

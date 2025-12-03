@@ -196,13 +196,13 @@ func (b *Bot) extractURLContext(ctx context.Context, notification *gomastodon.No
 			continue
 		}
 
-		meta, err := fetcher.FetchMetadata(ctx, u)
+		meta, err := fetcher.FetchPageContent(ctx, u)
 		if err != nil {
-			log.Printf("メタデータ取得失敗 (%s): %v", u, err)
+			log.Printf("ページコンテンツ取得失敗 (%s): %v", u, err)
 			continue
 		}
 
-		return fetcher.FormatMetadata(meta)
+		return fetcher.FormatPageContent(meta)
 	}
 
 	return ""

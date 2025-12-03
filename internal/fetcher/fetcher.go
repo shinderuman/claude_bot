@@ -18,7 +18,7 @@ const (
 	UserAgent   = "MastodonBot/1.0 (+https://github.com/shinderuman/claude_bot)"
 )
 
-type Metadata struct {
+type PageContent struct {
 	URL         string
 	Title       string
 	Description string
@@ -27,9 +27,9 @@ type Metadata struct {
 	Content     string // Extracted text content from body
 }
 
-// FetchMetadata retrieves metadata (Title, Description, OGP) and text content from the given URL.
+// FetchPageContent retrieves metadata (Title, Description, OGP) and text content from the given URL.
 // It enforces strict security measures: timeout, size limit, and content type check.
-func FetchMetadata(ctx context.Context, urlStr string) (*Metadata, error) {
+func FetchPageContent(ctx context.Context, urlStr string) (*PageContent, error) {
 	ctx, cancel := context.WithTimeout(ctx, Timeout)
 	defer cancel()
 
@@ -58,17 +58,17 @@ func FetchMetadata(ctx context.Context, urlStr string) (*Metadata, error) {
 	// Limit reader to prevent reading large files
 	limitedReader := io.LimitReader(resp.Body, MaxBodySize)
 
-	return extractMetadata(limitedReader, urlStr)
+	return extractPageContent(limitedReader, urlStr)
 }
 
-func extractMetadata(r io.Reader, urlStr string) (*Metadata, error) {
+func extractPageContent(r io.Reader, urlStr string) (*PageContent, error) {
 	doc, err := html.Parse(r)
 	if err != nil {
 		return nil, fmt.Errorf("HTMLパースエラー: %w", err)
 	}
 
-	meta := &Metadata{URL: urlStr}
-	extractMetaTags(doc, meta)
+	meta := &PageContent{URL: urlStr}
+	extractMetaAndTitle(doc, meta)
 
 	// Extract text content from body
 	meta.Content = extractTextContent(doc)
@@ -81,7 +81,7 @@ func extractMetadata(r io.Reader, urlStr string) (*Metadata, error) {
 	return meta, nil
 }
 
-func extractMetaTags(n *html.Node, meta *Metadata) {
+func extractMetaAndTitle(n *html.Node, meta *PageContent) {
 	if n.Type == html.ElementNode {
 		switch n.Data {
 		case "title":
@@ -116,7 +116,7 @@ func extractMetaTags(n *html.Node, meta *Metadata) {
 	}
 
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		extractMetaTags(c, meta)
+		extractMetaAndTitle(c, meta)
 	}
 }
 
@@ -188,7 +188,7 @@ func getAttr(n *html.Node, key string) string {
 	return ""
 }
 
-func FormatMetadata(meta *Metadata) string {
+func FormatPageContent(meta *PageContent) string {
 	var sb strings.Builder
 	sb.WriteString("\n\n[参照URL情報]\n")
 	sb.WriteString(fmt.Sprintf("URL: %s\n", meta.URL))
