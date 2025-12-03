@@ -298,7 +298,7 @@ func (fc *FactCollector) extractFactsFromURLs(ctx context.Context, status *gomas
 		}
 
 		// ページコンテンツ取得
-		meta, err := fetcher.FetchPageContent(ctx, urlStr)
+		meta, err := fetcher.FetchPageContent(ctx, urlStr, fc.config.URLBlacklist)
 		if err != nil {
 			// 取得エラーはログに出さない
 			continue
@@ -364,37 +364,7 @@ func (fc *FactCollector) extractFactsFromURLs(ctx context.Context, status *gomas
 
 // isNoiseURL はハッシュタグURLやユーザープロフィールURLなどのノイズURLかを判定します
 func (fc *FactCollector) isNoiseURL(urlStr string) bool {
-	parsedURL, err := url.Parse(urlStr)
-	if err != nil {
-		return true // パースできないURLはノイズとして扱う
-	}
-
-	path := strings.ToLower(parsedURL.Path)
-
-	// ハッシュタグURL
-	if strings.Contains(path, "/tags/") {
-		return true
-	}
-
-	// ユーザープロフィールURL (/@username の形式)
-	// ただし、特定の投稿URL (/@username/123456 の形式) は除外しない
-	if strings.Contains(path, "/@") {
-		// /@以降にスラッシュがなければプロフィールURL
-		atIndex := strings.Index(path, "/@")
-		if atIndex != -1 {
-			afterAt := path[atIndex+2:]
-			if !strings.Contains(afterAt, "/") {
-				return true
-			}
-		}
-	}
-
-	// サーバーのトップページ (パスが空または/)
-	if path == "" || path == "/" {
-		return true
-	}
-
-	return false
+	return fetcher.IsNoiseURL(urlStr)
 }
 
 // extractDomain はActorのAcctからドメインを抽出します

@@ -199,12 +199,18 @@ func (b *Bot) extractFactsFromMentionURLs(ctx context.Context, notification *gom
 	author := notification.Account.Acct
 
 	for _, u := range urls {
-		if err := fetcher.IsValidURL(u, b.config.URLBlacklist); err != nil {
+		// 基本的なURLバリデーション（スキーム、IPアドレスチェック）
+		if err := fetcher.IsValidURLBasic(u); err != nil {
+			continue
+		}
+
+		// ノイズURL（プロフィールURL、ハッシュタグURLなど）をフィルタリング
+		if fetcher.IsNoiseURL(u) {
 			continue
 		}
 
 		go func(url string) {
-			meta, err := fetcher.FetchPageContent(ctx, url)
+			meta, err := fetcher.FetchPageContent(ctx, url, nil)
 			if err != nil {
 				return
 			}
@@ -231,12 +237,17 @@ func (b *Bot) extractURLContext(ctx context.Context, notification *gomastodon.No
 
 	// 最初の有効なURLのみ処理
 	for _, u := range urls {
-		if err := fetcher.IsValidURL(u, b.config.URLBlacklist); err != nil {
-			log.Printf("URLスキップ (%s): %v", u, err)
+		// 基本的なURLバリデーション（スキーム、IPアドレスチェック）
+		if err := fetcher.IsValidURLBasic(u); err != nil {
 			continue
 		}
 
-		meta, err := fetcher.FetchPageContent(ctx, u)
+		// ノイズURL（プロフィールURL、ハッシュタグURLなど）をフィルタリング
+		if fetcher.IsNoiseURL(u) {
+			continue
+		}
+
+		meta, err := fetcher.FetchPageContent(ctx, u, nil)
 		if err != nil {
 			log.Printf("ページコンテンツ取得失敗 (%s): %v", u, err)
 			continue

@@ -28,10 +28,25 @@ type PageContent struct {
 }
 
 // FetchPageContent retrieves metadata (Title, Description, OGP) and text content from the given URL.
-// It enforces strict security measures: timeout, size limit, and content type check.
-func FetchPageContent(ctx context.Context, urlStr string) (*PageContent, error) {
+// It enforces strict security measures: timeout, size limit, content type check, and redirect validation.
+func FetchPageContent(ctx context.Context, urlStr string, blacklist []string) (*PageContent, error) {
 	ctx, cancel := context.WithTimeout(ctx, Timeout)
 	defer cancel()
+
+	// Custom client to handle redirect validation
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			// Validate redirect URL
+			// If blacklist is nil/empty, IsValidURL will still check for IP addresses and scheme
+			if err := IsValidURL(req.URL.String(), blacklist); err != nil {
+				return fmt.Errorf("リダイレクト先が不正です: %w", err)
+			}
+			return nil
+		},
+	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
 	if err != nil {
@@ -39,7 +54,7 @@ func FetchPageContent(ctx context.Context, urlStr string) (*PageContent, error) 
 	}
 	req.Header.Set("User-Agent", UserAgent)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("通信エラー: %w", err)
 	}
