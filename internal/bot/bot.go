@@ -5,10 +5,12 @@ import (
 	"log"
 	"time"
 
+	"claude_bot/internal/collector"
 	"claude_bot/internal/config"
+	"claude_bot/internal/facts"
+	"claude_bot/internal/fetcher"
 	"claude_bot/internal/llm"
 	"claude_bot/internal/mastodon"
-	"claude_bot/internal/metadata"
 	"claude_bot/internal/model"
 	"claude_bot/internal/store"
 
@@ -24,10 +26,16 @@ type Bot struct {
 	factStore      *store.FactStore
 	llmClient      *llm.Client
 	mastodonClient *mastodon.Client
-	factCollector  *FactCollector
+	factCollector  *collector.FactCollector
+	factService    *facts.FactService
 }
 
-func New(cfg *config.Config, history *store.ConversationHistory, factStore *store.FactStore, llmClient *llm.Client) *Bot {
+// NewBot creates a new Bot instance
+func NewBot(cfg *config.Config) *Bot {
+	history := store.InitializeHistory()
+
+	llmClient := llm.NewClient(cfg)
+
 	mastodonConfig := mastodon.Config{
 		Server:           cfg.MastodonServer,
 		AccessToken:      cfg.MastodonAccessToken,
@@ -35,66 +43,93 @@ func New(cfg *config.Config, history *store.ConversationHistory, factStore *stor
 		AllowRemoteUsers: cfg.AllowRemoteUsers,
 		MaxPostChars:     cfg.MaxPostChars,
 	}
-
 	mastodonClient := mastodon.NewClient(mastodonConfig)
 
-	return &Bot{
+	factStore := store.InitializeFactStore()
+
+	factService := facts.NewFactService(cfg, factStore, llmClient)
+
+	bot := &Bot{
 		config:         cfg,
 		history:        history,
 		factStore:      factStore,
 		llmClient:      llmClient,
 		mastodonClient: mastodonClient,
-		factCollector:  NewFactCollector(cfg, factStore, llmClient, mastodonClient),
+		factService:    factService,
 	}
+
+	// FactCollectorの初期化
+	if cfg.FactCollectionEnabled {
+		bot.factCollector = collector.NewFactCollector(cfg, factStore, llmClient, mastodonClient)
+	}
+
+	return bot
 }
 
-func (b *Bot) Run(ctx context.Context) {
-	b.logStartupInfo()
+// Run starts the bot
+func (b *Bot) Run(ctx context.Context) error {
+	log.Println("Botを起動しています...")
 
-	// バックグラウンドで定期的にクリーンアップを実行
-	go store.RunPeriodicCleanup(b.factStore)
+	// ファクト収集の開始
+	if b.factCollector != nil {
+		b.factCollector.Start(ctx)
+	}
 
-	// ファクト収集を開始
-	b.factCollector.Start(ctx)
-
+	// メンションのストリーミング
 	notificationChan := make(chan *gomastodon.Notification)
 	go b.mastodonClient.StreamNotifications(ctx, notificationChan)
 
-	for notification := range notificationChan {
-		b.processNotification(ctx, notification)
+	log.Println("メンションの監視を開始しました")
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case notification := <-notificationChan:
+			b.handleNotification(ctx, notification)
+		}
 	}
 }
 
-func (b *Bot) logStartupInfo() {
-	log.Printf("=== Mastodon Bot 起動 ===")
-	log.Printf("Bot: @%s @ %s | Claude: %s (%s)",
-		b.config.BotUsername, b.config.MastodonServer, b.config.AnthropicModel, b.config.AnthropicBaseURL)
-	log.Printf("機能: リモートユーザー=%t, 事実ストア=%t",
-		b.config.AllowRemoteUsers, b.config.EnableFactStore)
-	log.Printf("会話管理: 圧縮=%d件, 保持=%d件, アイドル=%dh, 保持時間=%dh, 最小保持=%d件",
-		b.config.ConversationMessageCompressThreshold, b.config.ConversationMessageKeepCount,
-		b.config.ConversationIdleHours, b.config.ConversationRetentionHours, b.config.ConversationMinKeepCount)
-	log.Printf("LLM設定: 応答=%dtok, 要約=%dtok, 投稿=%d文字",
-		b.config.MaxResponseTokens, b.config.MaxSummaryTokens, b.config.MaxPostChars)
-	log.Printf("=== 起動完了 ===")
-}
+func (b *Bot) handleNotification(ctx context.Context, notification *gomastodon.Notification) {
+	// 自分の投稿への返信は無視
+	if notification.Account.Acct == b.config.BotUsername {
+		return
+	}
 
-func (b *Bot) processNotification(ctx context.Context, notification *gomastodon.Notification) {
+	// 外部ユーザーのチェック
+	if !b.config.AllowRemoteUsers && notification.Account.Acct != notification.Account.Username {
+		log.Printf("外部ユーザーからのメンションを無視しました: %s", notification.Account.Acct)
+		return
+	}
+
+	log.Printf("メンションを受信: %s (ID: %s)", notification.Account.Acct, notification.Status.ID)
+
+	// セッション管理
+	rootStatusID := b.getRootStatusID(notification.Status)
+	session := b.history.GetOrCreateSession(notification.Account.Acct)
+
+	// ユーザーメッセージの抽出
 	userMessage := b.mastodonClient.ExtractUserMessage(notification)
 	if userMessage == "" {
 		return
 	}
 
-	userID := string(notification.Account.Acct)
-	log.Printf("@%s: %s", userID, userMessage)
-
-	session := b.history.GetOrCreateSession(userID)
-	rootStatusID := b.mastodonClient.GetRootStatusID(ctx, notification)
-
-	if b.processResponse(ctx, session, notification, userMessage, rootStatusID) {
-		b.compressHistoryIfNeeded(ctx, session)
+	// 応答生成と送信
+	success := b.processResponse(ctx, session, notification, userMessage, rootStatusID)
+	if success {
+		// 履歴の圧縮
+		b.history.CompressHistoryIfNeeded(ctx, session, b.config, b.llmClient)
+		// 会話履歴の保存
 		b.history.Save()
 	}
+}
+
+func (b *Bot) getRootStatusID(status *gomastodon.Status) string {
+	if status.InReplyToID != nil {
+		return string(status.InReplyToID.(string))
+	}
+	return string(status.ID)
 }
 
 func (b *Bot) processResponse(ctx context.Context, session *model.Session, notification *gomastodon.Notification, userMessage, rootStatusID string) bool {
@@ -117,10 +152,10 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 		displayName = notification.Account.Username
 	}
 	sourceURL := string(notification.Status.URL)
-	go b.extractAndSaveFacts(ctx, notification.Account.Acct, displayName, userMessage, "mention", sourceURL, notification.Account.Acct, displayName)
+	go b.factService.ExtractAndSaveFacts(ctx, notification.Account.Acct, displayName, userMessage, "mention", sourceURL, notification.Account.Acct, displayName)
 
 	// 事実の検索と応答生成
-	relevantFacts := b.queryRelevantFacts(ctx, notification.Account.Acct, displayName, userMessage)
+	relevantFacts := b.factService.QueryRelevantFacts(ctx, notification.Account.Acct, displayName, userMessage)
 	response := b.llmClient.GenerateResponse(ctx, session, conversation, relevantFacts)
 
 	if response == "" {
@@ -156,18 +191,18 @@ func (b *Bot) extractURLContext(ctx context.Context, notification *gomastodon.No
 
 	// 最初の有効なURLのみ処理
 	for _, u := range urls {
-		if err := metadata.IsValidURL(u, b.config.URLBlacklist); err != nil {
+		if err := fetcher.IsValidURL(u, b.config.URLBlacklist); err != nil {
 			log.Printf("URLスキップ (%s): %v", u, err)
 			continue
 		}
 
-		meta, err := metadata.FetchMetadata(ctx, u)
+		meta, err := fetcher.FetchMetadata(ctx, u)
 		if err != nil {
 			log.Printf("メタデータ取得失敗 (%s): %v", u, err)
 			continue
 		}
 
-		return metadata.FormatMetadata(meta)
+		return fetcher.FormatMetadata(meta)
 	}
 
 	return ""

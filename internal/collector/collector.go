@@ -1,18 +1,19 @@
-package bot
+package collector
 
 import (
 	"context"
 	"encoding/json"
 	"log"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"claude_bot/internal/config"
+	"claude_bot/internal/fetcher"
 	"claude_bot/internal/llm"
 	"claude_bot/internal/mastodon"
-	"claude_bot/internal/metadata"
 	"claude_bot/internal/model"
 	"claude_bot/internal/store"
 
@@ -32,11 +33,14 @@ type FactCollector struct {
 	processedTimes []time.Time
 	processMu      sync.Mutex
 	urlExtractor   *regexp.Regexp
+
+	// 重複排除用キャッシュ (URL -> timestamp)
+	processedURLs sync.Map
 }
 
 // NewFactCollector は新しい FactCollector を作成します
 func NewFactCollector(cfg *config.Config, factStore *store.FactStore, llmClient *llm.Client, mastodonClient *mastodon.Client) *FactCollector {
-	return &FactCollector{
+	fc := &FactCollector{
 		config:         cfg,
 		factStore:      factStore,
 		llmClient:      llmClient,
@@ -44,6 +48,30 @@ func NewFactCollector(cfg *config.Config, factStore *store.FactStore, llmClient 
 		semaphore:      make(chan struct{}, cfg.FactCollectionMaxWorkers),
 		processedTimes: make([]time.Time, 0),
 		urlExtractor:   xurls.Strict(),
+	}
+
+	// キャッシュのクリーンアップゴルーチンを開始
+	go fc.cleanupCacheLoop()
+
+	return fc
+}
+
+// cleanupCacheLoop は定期的に古いキャッシュを削除します
+func (fc *FactCollector) cleanupCacheLoop() {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		now := time.Now()
+		fc.processedURLs.Range(func(key, value interface{}) bool {
+			if t, ok := value.(time.Time); ok {
+				// 24時間経過したキャッシュは削除
+				if now.Sub(t) > 24*time.Hour {
+					fc.processedURLs.Delete(key)
+				}
+			}
+			return true
+		})
 	}
 }
 
@@ -89,7 +117,7 @@ func (fc *FactCollector) processEvents(ctx context.Context, eventChan <-chan gom
 
 		// レート制限チェック
 		if !fc.canProcess() {
-			log.Printf("レート制限: 投稿 %s をスキップ", status.ID)
+			// ログ出力を抑制（ノイズになるため）
 			continue
 		}
 
@@ -131,8 +159,6 @@ func (fc *FactCollector) processStatus(ctx context.Context, status *gomastodon.S
 	fc.semaphore <- struct{}{}
 	defer func() { <-fc.semaphore }()
 
-	log.Printf("ファクト収集開始: @%s の投稿 %s", status.Account.Acct, status.ID)
-
 	// ソース情報
 	sourceType := fc.determineSourceType(status)
 	sourceURL := string(status.URL)
@@ -149,8 +175,6 @@ func (fc *FactCollector) processStatus(ctx context.Context, status *gomastodon.S
 
 	// URLコンテンツからのファクト抽出
 	fc.extractFactsFromURLs(ctx, status, sourceType, sourceURL, postAuthor, postAuthorUserName)
-
-	log.Printf("ファクト収集完了: @%s の投稿 %s", status.Account.Acct, status.ID)
 }
 
 // determineSourceType はソースタイプを判定します
@@ -164,9 +188,7 @@ func (fc *FactCollector) determineSourceType(status *gomastodon.Status) string {
 
 // extractFactsFromContent は投稿本文からファクトを抽出します
 func (fc *FactCollector) extractFactsFromContent(ctx context.Context, status *gomastodon.Status, sourceType, sourceURL, postAuthor, postAuthorUserName string) {
-	content := fc.mastodonClient.ExtractUserMessage(&gomastodon.Notification{
-		Status: status,
-	})
+	content := fc.mastodonClient.ExtractContentFromStatus(status)
 
 	if content == "" {
 		return
@@ -184,7 +206,7 @@ func (fc *FactCollector) extractFactsFromContent(ctx context.Context, status *go
 	var extracted []model.Fact
 	jsonStr := llm.ExtractJSON(response)
 	if err := json.Unmarshal([]byte(jsonStr), &extracted); err != nil {
-		log.Printf("ファクト抽出JSONパースエラー: %v", err)
+		// JSONパースエラーはログに出さない（ノイズになるため）
 		return
 	}
 
@@ -212,7 +234,10 @@ func (fc *FactCollector) extractFactsFromContent(ctx context.Context, status *go
 			}
 
 			fc.factStore.UpsertWithSource(fact)
-			log.Printf("ファクト保存(投稿): [%s(%s)] %s = %v (source:%s)", target, targetUserName, item.Key, item.Value, sourceType)
+
+			// 成功ログの詳細出力
+			log.Printf("✅ ファクト保存(投稿): URL=%s, Target=%s(%s), Key=%s, Value=%v, Source=%s",
+				sourceURL, target, targetUserName, item.Key, item.Value, sourceType)
 		}
 		fc.factStore.Save()
 	}
@@ -226,35 +251,41 @@ func (fc *FactCollector) extractFactsFromURLs(ctx context.Context, status *gomas
 	// 投稿者のドメインを取得
 	authorDomain := fc.extractDomain(postAuthor)
 
-	for _, url := range urls {
+	for _, urlStr := range urls {
+		// 重複チェック (キャッシュ確認)
+		if _, loaded := fc.processedURLs.LoadOrStore(urlStr, time.Now()); loaded {
+			// 既に処理済みのURLはスキップ（ログも出さない）
+			continue
+		}
+
 		// URLの検証
-		if err := metadata.IsValidURL(url, fc.config.URLBlacklist); err != nil {
-			log.Printf("URLスキップ (%s): %v", url, err)
+		if err := fetcher.IsValidURL(urlStr, fc.config.URLBlacklist); err != nil {
+			// 検証エラーはログに出さない
 			continue
 		}
 
 		// 投稿者と同じドメインのURLを除外(Fediverseサーバーのローカルコンテンツ)
-		urlDomain := fc.extractDomainFromURL(url)
+		urlDomain := fc.extractDomainFromURL(urlStr)
 		if urlDomain != "" && urlDomain == authorDomain {
-			log.Printf("同一ドメインURLをスキップ: %s (author domain: %s)", url, authorDomain)
+			// 同一ドメインはスキップ（ログも出さない）
 			continue
 		}
 
 		// ノイズURLをフィルタリング
-		if fc.isNoiseURL(url) {
-			log.Printf("ノイズURLをスキップ: %s", url)
+		if fc.isNoiseURL(urlStr) {
+			// ノイズはスキップ（ログも出さない）
 			continue
 		}
 
 		// メタデータ取得
-		meta, err := metadata.FetchMetadata(ctx, url)
+		meta, err := fetcher.FetchMetadata(ctx, urlStr)
 		if err != nil {
-			log.Printf("メタデータ取得失敗 (%s): %v", url, err)
+			// 取得エラーはログに出さない
 			continue
 		}
 
 		// メタデータからファクト抽出
-		urlContent := metadata.FormatMetadata(meta)
+		urlContent := fetcher.FormatMetadata(meta)
 
 		// LLMでファクト抽出
 		prompt := llm.BuildFactExtractionPrompt(postAuthorUserName, postAuthor, urlContent)
@@ -268,7 +299,7 @@ func (fc *FactCollector) extractFactsFromURLs(ctx context.Context, status *gomas
 		var extracted []model.Fact
 		jsonStr := llm.ExtractJSON(response)
 		if err := json.Unmarshal([]byte(jsonStr), &extracted); err != nil {
-			log.Printf("ファクト抽出JSONパースエラー: %v", err)
+			// JSONパースエラーはログに出さない
 			continue
 		}
 
@@ -277,8 +308,13 @@ func (fc *FactCollector) extractFactsFromURLs(ctx context.Context, status *gomas
 				target := item.Target
 				targetUserName := item.TargetUserName
 				if target == "" {
-					target = postAuthor
-					targetUserName = postAuthorUserName
+					// ターゲットが不明な場合は「一般知識」として扱う
+					// これにより、特定の個人に紐付かない知識として保存される
+					target = "__general__"
+					targetUserName = "Web Knowledge"
+					if urlDomain != "" {
+						targetUserName = urlDomain
+					}
 				}
 
 				fact := model.Fact{
@@ -290,13 +326,16 @@ func (fc *FactCollector) extractFactsFromURLs(ctx context.Context, status *gomas
 					Value:              item.Value,
 					Timestamp:          time.Now(),
 					SourceType:         sourceType,
-					SourceURL:          url, // 実際のURL
+					SourceURL:          urlStr, // 実際のURL
 					PostAuthor:         postAuthor,
 					PostAuthorUserName: postAuthorUserName,
 				}
 
 				fc.factStore.UpsertWithSource(fact)
-				log.Printf("ファクト保存(URL): [%s(%s)] %s = %v (url:%s)", target, targetUserName, item.Key, item.Value, url)
+
+				// 成功ログの詳細出力
+				log.Printf("✅ ファクト保存(URL): PostURL=%s, TargetURL=%s, Target=%s(%s), Key=%s, Value=%v, Source=%s",
+					sourceURL, urlStr, target, targetUserName, item.Key, item.Value, sourceType)
 			}
 			fc.factStore.Save()
 		}
@@ -304,29 +343,35 @@ func (fc *FactCollector) extractFactsFromURLs(ctx context.Context, status *gomas
 }
 
 // isNoiseURL はハッシュタグURLやユーザープロフィールURLなどのノイズURLかを判定します
-func (fc *FactCollector) isNoiseURL(url string) bool {
-	lowerURL := strings.ToLower(url)
+func (fc *FactCollector) isNoiseURL(urlStr string) bool {
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil {
+		return true // パースできないURLはノイズとして扱う
+	}
+
+	path := strings.ToLower(parsedURL.Path)
 
 	// ハッシュタグURL
-	if strings.Contains(lowerURL, "/tags/") {
+	if strings.Contains(path, "/tags/") {
 		return true
 	}
 
 	// ユーザープロフィールURL (/@username の形式)
 	// ただし、特定の投稿URL (/@username/123456 の形式) は除外しない
-	if strings.Contains(lowerURL, "/@") && !strings.Contains(lowerURL[strings.LastIndex(lowerURL, "/@")+2:], "/") {
-		return true
+	if strings.Contains(path, "/@") {
+		// /@以降にスラッシュがなければプロフィールURL
+		atIndex := strings.Index(path, "/@")
+		if atIndex != -1 {
+			afterAt := path[atIndex+2:]
+			if !strings.Contains(afterAt, "/") {
+				return true
+			}
+		}
 	}
 
-	// サーバーのトップページ (ドメインのみ、またはドメイン/)
-	// 例: https://example.com または https://example.com/
-	parts := strings.Split(url, "//")
-	if len(parts) == 2 {
-		pathPart := parts[1]
-		slashIndex := strings.Index(pathPart, "/")
-		if slashIndex == -1 || slashIndex == len(pathPart)-1 {
-			return true
-		}
+	// サーバーのトップページ (パスが空または/)
+	if path == "" || path == "/" {
+		return true
 	}
 
 	return false
@@ -345,14 +390,9 @@ func (fc *FactCollector) extractDomain(acct string) string {
 // extractDomainFromURL はURLからドメインを抽出します
 // 例: "https://example.com/path" -> "example.com"
 func (fc *FactCollector) extractDomainFromURL(urlStr string) string {
-	// http:// または https:// を除去
-	urlStr = strings.TrimPrefix(urlStr, "http://")
-	urlStr = strings.TrimPrefix(urlStr, "https://")
-
-	// 最初の / までがドメイン
-	slashIndex := strings.Index(urlStr, "/")
-	if slashIndex != -1 {
-		return urlStr[:slashIndex]
+	parsedURL, err := url.Parse(urlStr)
+	if err != nil {
+		return ""
 	}
-	return urlStr
+	return parsedURL.Host
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"claude_bot/internal/model"
+	"claude_bot/internal/utils"
 )
 
 type FactStore struct {
@@ -18,7 +19,7 @@ type FactStore struct {
 }
 
 func InitializeFactStore() *FactStore {
-	factsPath := getFilePath("facts.json")
+	factsPath := utils.GetFilePath("facts.json")
 
 	store := &FactStore{
 		Facts:        []model.Fact{},
@@ -135,13 +136,11 @@ func (s *FactStore) Cleanup(retention time.Duration) int {
 
 	if deletedCount > 0 {
 		s.Facts = activeFacts
-		// 非同期で保存
-		go func() {
-			s.mu.RLock()
-			defer s.mu.RUnlock()
-			data, _ := json.MarshalIndent(s.Facts, "", "  ")
+		// 同期的に保存（非同期だとロック処理が複雑になるため）
+		data, err := json.MarshalIndent(s.Facts, "", "  ")
+		if err == nil {
 			os.WriteFile(s.saveFilePath, data, 0644)
-		}()
+		}
 	}
 
 	return deletedCount
@@ -186,4 +185,45 @@ func RunPeriodicCleanup(store *FactStore) {
 			log.Printf("定期クリーンアップ完了: %d件の古い事実を削除しました", deleted)
 		}
 	}
+}
+
+// GetRecentFacts は最新のファクトを指定された件数取得します
+func (s *FactStore) GetRecentFacts(limit int) []model.Fact {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// タイムスタンプの降順でソートするためのコピーを作成
+	facts := make([]model.Fact, len(s.Facts))
+	copy(facts, s.Facts)
+
+	// バブルソート（件数が少ないと想定）またはsort.Sliceを使用
+	// ここではシンプルに後ろから取得する（Factsは追記型なので概ね時系列だが、Upsertで更新されると順序が変わらないため、厳密にはソートが必要）
+	// ただし、Upsertの実装を見ると、更新時は位置が変わらず、新規時はappendなので、
+	// 更新されたものも含めて「最新」とするならタイムスタンプ順にソートすべき。
+
+	// 簡易実装: 末尾からlimit件取得（新規追加分は末尾に来るため）
+	// 厳密な時系列が必要ならソートを実装するが、今回は「最近覚えたこと」なので
+	// 新規追加分（末尾）で十分な場合が多い。
+	// しかし、更新されたものも「最近」とみなすならタイムスタンプを見る必要がある。
+
+	// ここでは末尾から取得する簡易実装とする
+	count := len(facts)
+	if count == 0 {
+		return []model.Fact{}
+	}
+
+	if count <= limit {
+		// 逆順にして返す
+		result := make([]model.Fact, count)
+		for i := 0; i < count; i++ {
+			result[i] = facts[count-1-i]
+		}
+		return result
+	}
+
+	result := make([]model.Fact, limit)
+	for i := 0; i < limit; i++ {
+		result[i] = facts[count-1-i]
+	}
+	return result
 }

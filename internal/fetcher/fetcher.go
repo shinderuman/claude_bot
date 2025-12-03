@@ -1,4 +1,4 @@
-package metadata
+package fetcher
 
 import (
 	"context"
@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	MaxBodySize = 100 * 1024 // 100KB limit for metadata fetching
-	Timeout     = 5 * time.Second
+	MaxBodySize = 500 * 1024 // 500KB limit (increased for content extraction)
+	Timeout     = 10 * time.Second
 	UserAgent   = "MastodonBot/1.0 (+https://github.com/shinderuman/claude_bot)"
 )
 
@@ -24,9 +24,10 @@ type Metadata struct {
 	Description string
 	ImageURL    string
 	SiteName    string
+	Content     string // Extracted text content from body
 }
 
-// FetchMetadata retrieves metadata (Title, Description, OGP) from the given URL.
+// FetchMetadata retrieves metadata (Title, Description, OGP) and text content from the given URL.
 // It enforces strict security measures: timeout, size limit, and content type check.
 func FetchMetadata(ctx context.Context, urlStr string) (*Metadata, error) {
 	ctx, cancel := context.WithTimeout(ctx, Timeout)
@@ -69,9 +70,13 @@ func extractMetadata(r io.Reader, urlStr string) (*Metadata, error) {
 	meta := &Metadata{URL: urlStr}
 	extractMetaTags(doc, meta)
 
+	// Extract text content from body
+	meta.Content = extractTextContent(doc)
+
 	// タイトルなどのクリーニング
 	meta.Title = strings.TrimSpace(meta.Title)
 	meta.Description = strings.TrimSpace(meta.Description)
+	meta.Content = strings.TrimSpace(meta.Content)
 
 	return meta, nil
 }
@@ -115,6 +120,65 @@ func extractMetaTags(n *html.Node, meta *Metadata) {
 	}
 }
 
+// extractTextContent extracts visible text from the HTML body
+func extractTextContent(n *html.Node) string {
+	var sb strings.Builder
+	var f func(*html.Node)
+
+	f = func(n *html.Node) {
+		if n.Type == html.ElementNode {
+			// Skip script, style, and other non-content tags
+			switch n.Data {
+			case "script", "style", "noscript", "iframe", "svg", "header", "footer", "nav":
+				return
+			}
+		}
+
+		if n.Type == html.TextNode {
+			text := strings.TrimSpace(n.Data)
+			if text != "" {
+				sb.WriteString(text)
+				sb.WriteString(" ")
+			}
+		}
+
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			f(c)
+		}
+	}
+
+	// Find body tag to start extraction
+	var body *html.Node
+	var findBody func(*html.Node)
+	findBody = func(n *html.Node) {
+		if n.Type == html.ElementNode && n.Data == "body" {
+			body = n
+			return
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			findBody(c)
+			if body != nil {
+				return
+			}
+		}
+	}
+	findBody(n)
+
+	if body != nil {
+		f(body)
+	} else {
+		// If no body tag found, try extracting from root (fallback)
+		f(n)
+	}
+
+	// Limit content length to avoid token limit issues
+	content := sb.String()
+	if len(content) > 2000 {
+		return content[:2000] + "..."
+	}
+	return content
+}
+
 func getAttr(n *html.Node, key string) string {
 	for _, attr := range n.Attr {
 		if attr.Key == key {
@@ -133,6 +197,9 @@ func FormatMetadata(meta *Metadata) string {
 	}
 	if meta.Description != "" {
 		sb.WriteString(fmt.Sprintf("説明: %s\n", meta.Description))
+	}
+	if meta.Content != "" {
+		sb.WriteString(fmt.Sprintf("本文抜粋: %s\n", meta.Content))
 	}
 	return sb.String()
 }

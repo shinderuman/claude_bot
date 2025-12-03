@@ -1,9 +1,9 @@
 package config
 
 import (
+	"claude_bot/internal/utils"
 	"log"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -45,7 +45,7 @@ type Config struct {
 }
 
 func LoadEnvironment() {
-	envPath := getFilePath(".env")
+	envPath := utils.GetFilePath(".env")
 
 	if err := godotenv.Load(envPath); err != nil {
 		log.Fatal(".envファイルが見つかりません: ", envPath)
@@ -68,7 +68,7 @@ func LoadConfig() *Config {
 		ConversationMessageCompressThreshold: parseIntRequired(os.Getenv("CONVERSATION_MESSAGE_COMPRESS_THRESHOLD")),
 		ConversationMessageKeepCount:         parseIntRequired(os.Getenv("CONVERSATION_MESSAGE_KEEP_COUNT")),
 		ConversationRetentionHours:           parseIntRequired(os.Getenv("CONVERSATION_RETENTION_HOURS")),
-		ConversationIdleHours:                parseIntWithDefault(os.Getenv("CONVERSATION_IDLE_HOURS"), 3),
+		ConversationIdleHours:                parseIntRequired(os.Getenv("CONVERSATION_IDLE_HOURS")),
 		ConversationMinKeepCount:             parseIntRequired(os.Getenv("CONVERSATION_MIN_KEEP_COUNT")),
 
 		MaxResponseTokens: int64(parseIntRequired(os.Getenv("MAX_RESPONSE_TOKENS"))),
@@ -80,8 +80,8 @@ func LoadConfig() *Config {
 		FactCollectionEnabled:         parseBool(os.Getenv("FACT_COLLECTION_ENABLED"), false),
 		FactCollectionFederated:       parseBool(os.Getenv("FACT_COLLECTION_FEDERATED"), true),
 		FactCollectionHome:            parseBool(os.Getenv("FACT_COLLECTION_HOME"), true),
-		FactCollectionMaxWorkers:      parseIntWithDefault(os.Getenv("FACT_COLLECTION_MAX_WORKERS"), 3),
-		FactCollectionMaxPerHour:      parseIntWithDefault(os.Getenv("FACT_COLLECTION_MAX_PER_HOUR"), 100),
+		FactCollectionMaxWorkers:      parseIntRequired(os.Getenv("FACT_COLLECTION_MAX_WORKERS")),
+		FactCollectionMaxPerHour:      parseIntRequired(os.Getenv("FACT_COLLECTION_MAX_PER_HOUR")),
 		FactCollectionFromPostContent: parseBool(os.Getenv("FACT_COLLECTION_FROM_POST_CONTENT"), false),
 	}
 }
@@ -116,31 +116,4 @@ func parseIntRequired(value string) int {
 		log.Fatal("エラー: 環境変数の値が無効です。数値を指定してください: ", value)
 	}
 	return parsed
-}
-
-func parseIntWithDefault(value string, defaultValue int) int {
-	if value == "" {
-		return defaultValue
-	}
-	parsed, err := strconv.Atoi(value)
-	if err != nil {
-		return defaultValue
-	}
-	return parsed
-}
-
-func getFilePath(filename string) string {
-	// data/ ディレクトリ内のファイルを優先
-	localPath := filepath.Join("data", filename)
-	if _, err := os.Stat(localPath); err == nil {
-		return localPath
-	}
-
-	// 実行ファイルディレクトリの data/ を fallback
-	exePath, err := os.Executable()
-	if err != nil {
-		log.Fatal("実行ファイルパス取得エラー: ", err)
-	}
-	exeDir := filepath.Dir(exePath)
-	return filepath.Join(exeDir, "data", filename)
 }

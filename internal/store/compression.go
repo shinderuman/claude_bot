@@ -1,34 +1,34 @@
-package bot
+package store
 
 import (
 	"context"
 	"log"
 	"strings"
 
+	"claude_bot/internal/config"
 	"claude_bot/internal/llm"
 	"claude_bot/internal/model"
-	"claude_bot/internal/store"
 )
 
 // Conversation compression and summarization
 
-func (b *Bot) compressHistoryIfNeeded(ctx context.Context, session *model.Session) {
+func (h *ConversationHistory) CompressHistoryIfNeeded(ctx context.Context, session *model.Session, cfg *config.Config, llmClient *llm.Client) {
 	for i := range session.Conversations {
-		b.compressConversationIfNeeded(ctx, session, &session.Conversations[i])
+		h.compressConversationIfNeeded(ctx, session, &session.Conversations[i], cfg, llmClient)
 	}
 
-	b.compressOldConversations(ctx, session)
+	h.compressOldConversations(ctx, session, cfg, llmClient)
 }
 
-func (b *Bot) compressConversationIfNeeded(ctx context.Context, session *model.Session, conversation *model.Conversation) {
-	if len(conversation.Messages) <= b.config.ConversationMessageCompressThreshold {
+func (h *ConversationHistory) compressConversationIfNeeded(ctx context.Context, session *model.Session, conversation *model.Conversation, cfg *config.Config, llmClient *llm.Client) {
+	if len(conversation.Messages) <= cfg.ConversationMessageCompressThreshold {
 		return
 	}
 
-	compressCount := len(conversation.Messages) - b.config.ConversationMessageKeepCount
+	compressCount := len(conversation.Messages) - cfg.ConversationMessageKeepCount
 	messagesToCompress := conversation.Messages[:compressCount]
 
-	summary := b.generateSummary(ctx, messagesToCompress, session.Summary)
+	summary := h.generateSummary(ctx, messagesToCompress, session.Summary, llmClient)
 	if summary == "" {
 		log.Printf("会話内要約生成エラー: 応答が空です")
 		return
@@ -40,8 +40,8 @@ func (b *Bot) compressConversationIfNeeded(ctx context.Context, session *model.S
 	log.Printf("会話内圧縮完了: %d件のメッセージを削除、%d件を保持", compressCount, len(conversation.Messages))
 }
 
-func (b *Bot) compressOldConversations(ctx context.Context, session *model.Session) {
-	oldConversations := store.FindOldConversations(b.config, session)
+func (h *ConversationHistory) compressOldConversations(ctx context.Context, session *model.Session, cfg *config.Config, llmClient *llm.Client) {
+	oldConversations := FindOldConversations(cfg, session)
 	if len(oldConversations) == 0 {
 		return
 	}
@@ -51,21 +51,21 @@ func (b *Bot) compressOldConversations(ctx context.Context, session *model.Sessi
 		allMessages = append(allMessages, conv.Messages...)
 	}
 
-	summary := b.generateSummary(ctx, allMessages, session.Summary)
+	summary := h.generateSummary(ctx, allMessages, session.Summary, llmClient)
 	if summary == "" {
 		log.Printf("要約生成エラー: 応答が空です")
 		return
 	}
 
-	store.UpdateSessionWithSummary(session, summary, oldConversations)
+	UpdateSessionWithSummary(session, summary, oldConversations)
 	log.Printf("履歴圧縮完了: %d件の会話を要約に移行", len(oldConversations))
 }
 
-func (b *Bot) generateSummary(ctx context.Context, messages []model.Message, existingSummary string) string {
+func (h *ConversationHistory) generateSummary(ctx context.Context, messages []model.Message, existingSummary string, llmClient *llm.Client) string {
 	formattedMessages := formatMessagesForSummary(messages)
 	summaryPrompt := llm.BuildSummaryPrompt(formattedMessages, existingSummary)
 	summaryMessages := []model.Message{{Role: "user", Content: summaryPrompt}}
-	return b.llmClient.CallClaudeAPIForSummary(ctx, summaryMessages, existingSummary)
+	return llmClient.CallClaudeAPIForSummary(ctx, summaryMessages, existingSummary)
 }
 
 func formatMessagesForSummary(messages []model.Message) string {

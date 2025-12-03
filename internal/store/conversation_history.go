@@ -9,6 +9,7 @@ import (
 
 	"claude_bot/internal/config"
 	"claude_bot/internal/model"
+	"claude_bot/internal/utils"
 )
 
 type ConversationHistory struct {
@@ -18,7 +19,7 @@ type ConversationHistory struct {
 }
 
 func InitializeHistory() *ConversationHistory {
-	sessionsPath := getFilePath("sessions.json")
+	sessionsPath := utils.GetFilePath("sessions.json")
 
 	history := &ConversationHistory{
 		Sessions:     make(map[string]*model.Session),

@@ -1,4 +1,4 @@
-package store
+package utils
 
 import (
 	"log"
@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 )
 
-// getFilePath returns the absolute path for a file, checking the working directory first,
+// GetFilePath returns the absolute path for a file, checking the working directory first,
 // then falling back to the executable directory.
-func getFilePath(filename string) string {
+func GetFilePath(filename string) string {
 	// data/ ディレクトリ内のファイルを優先
 	localPath := filepath.Join("data", filename)
 	if _, err := os.Stat(localPath); err == nil {
