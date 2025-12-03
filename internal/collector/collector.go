@@ -36,6 +36,9 @@ type FactCollector struct {
 
 	// 重複排除用キャッシュ (URL -> timestamp)
 	processedURLs sync.Map
+
+	// Fediverseドメインキャッシュ (domain -> timestamp)
+	fediverseDomains sync.Map
 }
 
 // NewFactCollector は新しい FactCollector を作成します
@@ -68,6 +71,17 @@ func (fc *FactCollector) cleanupCacheLoop() {
 				// 24時間経過したキャッシュは削除
 				if now.Sub(t) > 24*time.Hour {
 					fc.processedURLs.Delete(key)
+				}
+			}
+			return true
+		})
+
+		// Fediverseドメインキャッシュもクリーンアップ
+		fc.fediverseDomains.Range(func(key, value interface{}) bool {
+			if t, ok := value.(time.Time); ok {
+				// 24時間経過したキャッシュは削除
+				if now.Sub(t) > 24*time.Hour {
+					fc.fediverseDomains.Delete(key)
 				}
 			}
 			return true
@@ -271,6 +285,12 @@ func (fc *FactCollector) extractFactsFromURLs(ctx context.Context, status *gomas
 			continue
 		}
 
+		// FediverseサーバーのURLを除外
+		if urlDomain != "" && fc.isFediverseDomain(urlDomain) {
+			// Fediverseサーバーのローカル投稿URLはスキップ
+			continue
+		}
+
 		// ノイズURLをフィルタリング
 		if fc.isNoiseURL(urlStr) {
 			// ノイズはスキップ（ログも出さない）
@@ -395,4 +415,21 @@ func (fc *FactCollector) extractDomainFromURL(urlStr string) string {
 		return ""
 	}
 	return parsedURL.Host
+}
+
+// isFediverseDomain はドメインがFediverseサーバーかチェックします
+func (fc *FactCollector) isFediverseDomain(domain string) bool {
+	// キャッシュ確認
+	if _, ok := fc.fediverseDomains.Load(domain); ok {
+		return true
+	}
+
+	// NodeInfoで判定
+	if fetcher.IsFediverseServer(domain) {
+		// キャッシュに保存
+		fc.fediverseDomains.Store(domain, time.Now())
+		return true
+	}
+
+	return false
 }
