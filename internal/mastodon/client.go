@@ -56,53 +56,6 @@ func (c *Client) StreamUser(ctx context.Context, eventChan chan<- mastodon.Event
 	log.Println("ユーザーストリーミング接続が切断されました")
 }
 
-// StreamNotifications はメンション通知を抽出してチャネルに送信します(後方互換性のため)
-func (c *Client) StreamNotifications(ctx context.Context, notificationChan chan<- *mastodon.Notification) {
-	events, err := c.client.StreamingUser(ctx)
-	if err != nil {
-		log.Printf("ストリーミング接続エラー: %v", err)
-		return
-	}
-
-	log.Println("ストリーミング接続成功")
-
-	for event := range events {
-		if notification := c.extractMentionNotification(event); notification != nil {
-			if c.shouldProcessNotification(notification) {
-				notificationChan <- notification
-			}
-		}
-	}
-
-	log.Println("ストリーミング接続が切断されました")
-}
-
-func (c *Client) extractMentionNotification(event mastodon.Event) *mastodon.Notification {
-	notification, ok := event.(*mastodon.NotificationEvent)
-	if !ok {
-		return nil
-	}
-
-	if notification.Notification.Type != "mention" || notification.Notification.Status == nil {
-		return nil
-	}
-
-	return notification.Notification
-}
-
-func (c *Client) shouldProcessNotification(notification *mastodon.Notification) bool {
-	if notification.Account.Username == c.config.BotUsername {
-		return false
-	}
-
-	if !c.config.AllowRemoteUsers && isRemoteUser(notification.Account.Acct) {
-		log.Printf("リモートユーザーからのメンションをスキップ: @%s", notification.Account.Acct)
-		return false
-	}
-
-	return true
-}
-
 func isRemoteUser(acct string) bool {
 	return strings.Contains(acct, "@")
 }

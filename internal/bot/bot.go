@@ -77,8 +77,8 @@ func (b *Bot) Run(ctx context.Context) error {
 	}
 
 	// メンションのストリーミング
-	notificationChan := make(chan *gomastodon.Notification)
-	go b.mastodonClient.StreamNotifications(ctx, notificationChan)
+	eventChan := make(chan gomastodon.Event)
+	go b.mastodonClient.StreamUser(ctx, eventChan)
 
 	log.Println("メンションの監視を開始しました")
 
@@ -86,8 +86,13 @@ func (b *Bot) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case notification := <-notificationChan:
-			b.handleNotification(ctx, notification)
+		case event := <-eventChan:
+			switch e := event.(type) {
+			case *gomastodon.NotificationEvent:
+				if e.Notification.Type == "mention" && e.Notification.Status != nil {
+					b.handleNotification(ctx, e.Notification)
+				}
+			}
 		}
 	}
 }
