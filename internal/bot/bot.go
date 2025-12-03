@@ -69,6 +69,7 @@ func NewBot(cfg *config.Config) *Bot {
 // Run starts the bot
 func (b *Bot) Run(ctx context.Context) error {
 	log.Println("Botを起動しています...")
+	b.logStartupInfo()
 
 	// ファクト収集の開始
 	if b.factCollector != nil {
@@ -89,6 +90,29 @@ func (b *Bot) Run(ctx context.Context) error {
 			b.handleNotification(ctx, notification)
 		}
 	}
+}
+
+func (b *Bot) logStartupInfo() {
+	log.Printf("=== Mastodon Bot 起動 ===")
+
+	// Bot基本情報
+	log.Printf("Bot: @%s @ %s | Claude: %s (%s)",
+		b.config.BotUsername, b.config.MastodonServer, b.config.AnthropicModel, b.config.AnthropicBaseURL)
+
+	// 機能設定
+	log.Printf("機能: リモートユーザー=%t, 事実ストア=%t, 画像認識=%t, ファクト収集=%t",
+		b.config.AllowRemoteUsers, b.config.EnableFactStore, b.config.EnableImageRecognition, b.config.FactCollectionEnabled)
+
+	// 会話管理設定
+	log.Printf("会話管理: 圧縮=%d件, 保持=%d件, 保持時間=%dh, 最小保持=%d件, アイドル時間=%dh",
+		b.config.ConversationMessageCompressThreshold, b.config.ConversationMessageKeepCount,
+		b.config.ConversationRetentionHours, b.config.ConversationMinKeepCount, b.config.ConversationIdleHours)
+
+	// LLM設定
+	log.Printf("LLM設定: 応答=%dtok, 要約=%dtok, 投稿=%d文字",
+		b.config.MaxResponseTokens, b.config.MaxSummaryTokens, b.config.MaxPostChars)
+
+	log.Printf("=== 起動完了 ===")
 }
 
 func (b *Bot) handleNotification(ctx context.Context, notification *gomastodon.Notification) {
