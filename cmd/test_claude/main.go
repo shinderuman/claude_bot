@@ -39,8 +39,10 @@ func main() {
 		testSummary(cfg, llmClient, *message, *existingSummary)
 	case "fact":
 		testFactExtraction(cfg, llmClient, *message)
+	case "raw-image":
+		testRawImage(cfg, llmClient, *message, *imagePath)
 	default:
-		log.Fatalf("不明なモード: %s (使用可能: response, summary, fact)", *mode)
+		log.Fatalf("不明なモード: %s (使用可能: response, summary, fact, raw-image)", *mode)
 	}
 }
 
@@ -198,6 +200,44 @@ func testFactExtraction(cfg *config.Config, client *llm.Client, message string) 
 	log.Println("--- 抽出された事実 (JSON) ---")
 	log.Println(response)
 	log.Println("----------------------------")
+}
+
+func testRawImage(cfg *config.Config, client *llm.Client, message, imagePath string) {
+	log.Printf("=== 画像認識テスト（最小プロンプト） ===")
+	log.Printf("テストメッセージ: %s", message)
+	if imagePath == "" {
+		log.Fatal("エラー: 画像ファイルパスが必要です (-image オプション)")
+	}
+	log.Printf("画像ファイル: %s", imagePath)
+	log.Println()
+
+	if cfg.AnthropicAuthToken == "" {
+		log.Fatal("エラー: ANTHROPIC_AUTH_TOKEN環境変数が設定されていません")
+	}
+
+	// 画像読み込み
+	img, err := loadImage(imagePath)
+	if err != nil {
+		log.Fatalf("画像読み込みエラー: %v", err)
+	}
+	currentImages := []model.Image{*img}
+
+	// メッセージ作成
+	messages := []model.Message{{Role: "user", Content: message}}
+
+	// API呼び出し（システムプロンプトなし）
+	ctx := context.Background()
+	response := client.CallClaudeAPI(ctx, messages, "", cfg.MaxResponseTokens, currentImages)
+
+	if response == "" {
+		log.Fatal("エラー: Claudeからの応答がありません")
+	}
+
+	log.Println("成功: Claudeから応答を受信しました")
+	log.Println()
+	log.Println("--- Claude応答 ---")
+	log.Println(response)
+	log.Println("------------------")
 }
 
 func loadImage(path string) (*model.Image, error) {
