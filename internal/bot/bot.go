@@ -152,7 +152,12 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 		displayName = notification.Account.Username
 	}
 	sourceURL := string(notification.Status.URL)
+
+	// 1. メンション本文からのファクト抽出
 	go b.factService.ExtractAndSaveFacts(ctx, notification.Account.Acct, displayName, userMessage, "mention", sourceURL, notification.Account.Acct, displayName)
+
+	// 2. メンション内のURLからのファクト抽出
+	b.extractFactsFromMentionURLs(ctx, notification, displayName)
 
 	// 事実の検索と応答生成
 	relevantFacts := b.factService.QueryRelevantFacts(ctx, notification.Account.Acct, displayName, userMessage)
@@ -175,6 +180,36 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 
 	session.LastUpdated = time.Now()
 	return true
+}
+
+// extractFactsFromMentionURLs extracts facts from URLs in the mention
+func (b *Bot) extractFactsFromMentionURLs(ctx context.Context, notification *gomastodon.Notification, displayName string) {
+	content := string(notification.Status.Content)
+	urls := urlRegex.FindAllString(content, -1)
+
+	if len(urls) == 0 {
+		return
+	}
+
+	author := notification.Account.Acct
+
+	for _, u := range urls {
+		if err := fetcher.IsValidURL(u, b.config.URLBlacklist); err != nil {
+			continue
+		}
+
+		go func(url string) {
+			meta, err := fetcher.FetchPageContent(ctx, url)
+			if err != nil {
+				return
+			}
+
+			urlContent := fetcher.FormatPageContent(meta)
+
+			// URLコンテンツからファクト抽出
+			b.factService.ExtractAndSaveFacts(ctx, author, displayName, urlContent, "mention_url", url, author, displayName)
+		}(u)
+	}
 }
 
 func (b *Bot) extractURLContext(ctx context.Context, notification *gomastodon.Notification, content string) string {
