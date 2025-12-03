@@ -159,9 +159,20 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 	// 2. メンション内のURLからのファクト抽出
 	b.extractFactsFromMentionURLs(ctx, notification, displayName)
 
+	// 画像の取得（保存はせず、今回の応答生成にのみ使用）
+	var images []model.Image
+	if b.config.EnableImageRecognition {
+		_, imgs, imgErr := b.mastodonClient.ExtractContentFromStatus(notification.Status)
+		if imgErr != nil {
+			log.Printf("画像取得エラー: %v", imgErr)
+		} else {
+			images = imgs
+		}
+	}
+
 	// 事実の検索と応答生成
 	relevantFacts := b.factService.QueryRelevantFacts(ctx, notification.Account.Acct, displayName, userMessage)
-	response := b.llmClient.GenerateResponse(ctx, session, conversation, relevantFacts)
+	response := b.llmClient.GenerateResponse(ctx, session, conversation, relevantFacts, images)
 
 	if response == "" {
 		store.RollbackLastMessages(conversation, 1)
@@ -170,7 +181,8 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 	}
 
 	store.AddMessage(conversation, "assistant", response)
-	err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
+	var err error
+	err = b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
 
 	if err != nil {
 		store.RollbackLastMessages(conversation, 2)

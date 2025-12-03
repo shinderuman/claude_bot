@@ -42,3 +42,8 @@ type SearchQuery struct {
 	TargetCandidates []string `json:"target_candidates"`
 	Keys             []string `json:"keys"`
 }
+
+type Image struct {
+	Data      string
+	MediaType string
+}

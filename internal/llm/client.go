@@ -28,25 +28,25 @@ func NewClient(cfg *config.Config) *Client {
 	}
 }
 
-func (c *Client) GenerateResponse(ctx context.Context, session *model.Session, conversation *model.Conversation, relevantFacts string) string {
+func (c *Client) GenerateResponse(ctx context.Context, session *model.Session, conversation *model.Conversation, relevantFacts string, currentImages []model.Image) string {
 	var sessionSummary string
 	if session != nil {
 		sessionSummary = session.Summary
 	}
 	systemPrompt := BuildSystemPrompt(c.config.CharacterPrompt, sessionSummary, relevantFacts, true)
-	return c.CallClaudeAPI(ctx, conversation.Messages, systemPrompt, c.config.MaxResponseTokens)
+	return c.CallClaudeAPI(ctx, conversation.Messages, systemPrompt, c.config.MaxResponseTokens, currentImages)
 }
 
 func (c *Client) CallClaudeAPIForSummary(ctx context.Context, messages []model.Message, summary string) string {
 	systemPrompt := BuildSystemPrompt(c.config.CharacterPrompt, summary, "", false)
-	return c.CallClaudeAPI(ctx, messages, systemPrompt, c.config.MaxSummaryTokens)
+	return c.CallClaudeAPI(ctx, messages, systemPrompt, c.config.MaxSummaryTokens, nil)
 }
 
-func (c *Client) CallClaudeAPI(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64) string {
+func (c *Client) CallClaudeAPI(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, currentImages []model.Image) string {
 	params := anthropic.MessageNewParams{
 		Model:     anthropic.Model(c.config.AnthropicModel),
 		MaxTokens: maxTokens,
-		Messages:  convertMessages(messages),
+		Messages:  convertMessages(messages, currentImages),
 	}
 
 	if systemPrompt != "" {
@@ -71,13 +71,24 @@ func extractResponseText(msg *anthropic.Message) string {
 	return ""
 }
 
-func convertMessages(messages []model.Message) []anthropic.MessageParam {
+func convertMessages(messages []model.Message, currentImages []model.Image) []anthropic.MessageParam {
 	result := make([]anthropic.MessageParam, len(messages))
 	for i, msg := range messages {
 		if msg.Role == "assistant" {
 			result[i] = anthropic.NewAssistantMessage(anthropic.NewTextBlock(msg.Content))
 		} else {
-			result[i] = anthropic.NewUserMessage(anthropic.NewTextBlock(msg.Content))
+			// 最後のユーザーメッセージに画像を添付
+			if i == len(messages)-1 && len(currentImages) > 0 {
+				content := []anthropic.ContentBlockParamUnion{
+					anthropic.NewTextBlock(msg.Content),
+				}
+				for _, img := range currentImages {
+					content = append(content, anthropic.NewImageBlockBase64(img.MediaType, img.Data))
+				}
+				result[i] = anthropic.NewUserMessage(content...)
+			} else {
+				result[i] = anthropic.NewUserMessage(anthropic.NewTextBlock(msg.Content))
+			}
 		}
 	}
 	return result

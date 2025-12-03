@@ -188,7 +188,7 @@ func (fc *FactCollector) determineSourceType(status *gomastodon.Status) string {
 
 // extractFactsFromContent は投稿本文からファクトを抽出します
 func (fc *FactCollector) extractFactsFromContent(ctx context.Context, status *gomastodon.Status, sourceType, sourceURL, postAuthor, postAuthorUserName string) {
-	content := fc.mastodonClient.ExtractContentFromStatus(status)
+	content, _, _ := fc.mastodonClient.ExtractContentFromStatus(status)
 
 	if content == "" {
 		return
@@ -198,7 +198,7 @@ func (fc *FactCollector) extractFactsFromContent(ctx context.Context, status *go
 	prompt := llm.BuildFactExtractionPrompt(postAuthorUserName, postAuthor, content)
 	messages := []model.Message{{Role: "user", Content: prompt}}
 
-	response := fc.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactExtraction, fc.config.MaxResponseTokens)
+	response := fc.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactExtraction, fc.config.MaxResponseTokens, nil)
 	if response == "" {
 		return
 	}
@@ -291,7 +291,7 @@ func (fc *FactCollector) extractFactsFromURLs(ctx context.Context, status *gomas
 		prompt := llm.BuildURLContentFactExtractionPrompt(urlContent)
 		messages := []model.Message{{Role: "user", Content: prompt}}
 
-		response := fc.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactExtraction, fc.config.MaxResponseTokens)
+		response := fc.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactExtraction, fc.config.MaxResponseTokens, nil)
 		if response == "" {
 			continue
 		}

@@ -33,6 +33,7 @@ type Config struct {
 	MaxSummaryTokens  int64
 	MaxPostChars      int
 
+	// URL filtering
 	URLBlacklist []string
 
 	// ファクト収集設定
@@ -42,6 +43,9 @@ type Config struct {
 	FactCollectionMaxWorkers      int
 	FactCollectionMaxPerHour      int
 	FactCollectionFromPostContent bool
+
+	// 画像認識設定
+	EnableImageRecognition bool
 }
 
 func LoadEnvironment() {
@@ -83,6 +87,8 @@ func LoadConfig() *Config {
 		FactCollectionMaxWorkers:      parseIntRequired(os.Getenv("FACT_COLLECTION_MAX_WORKERS")),
 		FactCollectionMaxPerHour:      parseIntRequired(os.Getenv("FACT_COLLECTION_MAX_PER_HOUR")),
 		FactCollectionFromPostContent: parseBool(os.Getenv("FACT_COLLECTION_FROM_POST_CONTENT"), false),
+
+		EnableImageRecognition: parseBool(os.Getenv("ENABLE_IMAGE_RECOGNITION"), false),
 	}
 }
 

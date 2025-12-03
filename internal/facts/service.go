@@ -37,7 +37,7 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, author, authorUse
 	prompt := llm.BuildFactExtractionPrompt(authorUserName, author, message)
 	messages := []model.Message{{Role: "user", Content: prompt}}
 
-	response := s.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactExtraction, s.config.MaxResponseTokens)
+	response := s.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactExtraction, s.config.MaxResponseTokens, nil)
 	if response == "" {
 		return
 	}
@@ -91,7 +91,7 @@ func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, url
 	prompt := llm.BuildURLContentFactExtractionPrompt(urlContent)
 	messages := []model.Message{{Role: "user", Content: prompt}}
 
-	response := s.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactExtraction, s.config.MaxResponseTokens)
+	response := s.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactExtraction, s.config.MaxResponseTokens, nil)
 	if response == "" {
 		return
 	}
@@ -136,7 +136,7 @@ func (s *FactService) QueryRelevantFacts(ctx context.Context, author, authorUser
 	prompt := llm.BuildFactQueryPrompt(authorUserName, author, message)
 	messages := []model.Message{{Role: "user", Content: prompt}}
 
-	response := s.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactQuery, s.config.MaxResponseTokens)
+	response := s.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactQuery, s.config.MaxResponseTokens, nil)
 	if response == "" {
 		return ""
 	}

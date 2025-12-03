@@ -2,8 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"flag"
+	"fmt"
+	"io"
 	"log"
+	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"claude_bot/internal/config"
@@ -14,6 +20,7 @@ import (
 func main() {
 	mode := flag.String("mode", "response", "テストモード: response, summary, fact")
 	message := flag.String("message", "Hello", "テストメッセージ")
+	imagePath := flag.String("image", "", "画像ファイルパス (responseモード用)")
 	existingSummary := flag.String("existing-summary", "", "既存の要約（summaryモード用）")
 	flag.Parse()
 
@@ -27,7 +34,7 @@ func main() {
 
 	switch *mode {
 	case "response":
-		testResponse(cfg, llmClient, *message)
+		testResponse(cfg, llmClient, *message, *imagePath)
 	case "summary":
 		testSummary(cfg, llmClient, *message, *existingSummary)
 	case "fact":
@@ -62,9 +69,12 @@ func printConfig(cfg *config.Config) {
 	log.Println()
 }
 
-func testResponse(cfg *config.Config, client *llm.Client, message string) {
+func testResponse(cfg *config.Config, client *llm.Client, message, imagePath string) {
 	log.Printf("=== 通常応答テスト ===")
 	log.Printf("テストメッセージ: %s", message)
+	if imagePath != "" {
+		log.Printf("画像ファイル: %s", imagePath)
+	}
 	log.Println()
 
 	if cfg.AnthropicAuthToken == "" {
@@ -85,8 +95,17 @@ func testResponse(cfg *config.Config, client *llm.Client, message string) {
 	}
 	session.Conversations = append(session.Conversations, *conversation)
 
+	var currentImages []model.Image
+	if imagePath != "" {
+		img, err := loadImage(imagePath)
+		if err != nil {
+			log.Fatalf("画像読み込みエラー: %v", err)
+		}
+		currentImages = append(currentImages, *img)
+	}
+
 	ctx := context.Background()
-	response := client.GenerateResponse(ctx, session, conversation, "")
+	response := client.GenerateResponse(ctx, nil, conversation, "", currentImages)
 
 	if response == "" {
 		log.Fatal("エラー: Claudeからの応答がありません")
@@ -157,7 +176,7 @@ func testFactExtraction(cfg *config.Config, client *llm.Client, message string) 
 	// 事実抽出
 	messages := []model.Message{{Role: "user", Content: prompt}}
 	ctx := context.Background()
-	response := client.CallClaudeAPI(ctx, messages, llm.SystemPromptFactExtraction, cfg.MaxResponseTokens)
+	response := client.CallClaudeAPI(ctx, messages, llm.SystemPromptFactExtraction, cfg.MaxResponseTokens, nil)
 
 	if response == "" {
 		log.Fatal("エラー: 事実抽出に失敗しました")
@@ -168,4 +187,29 @@ func testFactExtraction(cfg *config.Config, client *llm.Client, message string) 
 	log.Println("--- 抽出された事実 (JSON) ---")
 	log.Println(response)
 	log.Println("----------------------------")
+}
+
+func loadImage(path string) (*model.Image, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return nil, err
+	}
+
+	mimeType := http.DetectContentType(data)
+	if !strings.HasPrefix(mimeType, "image/") {
+		return nil, fmt.Errorf("not an image: %s", mimeType)
+	}
+
+	log.Printf("画像読み込み成功: MIMEタイプ=%s, サイズ=%d bytes", mimeType, len(data))
+
+	return &model.Image{
+		Data:      base64.StdEncoding.EncodeToString(data),
+		MediaType: mimeType,
+	}, nil
 }

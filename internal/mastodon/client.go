@@ -2,9 +2,14 @@ package mastodon
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"strings"
+
+	"claude_bot/internal/model"
 
 	"github.com/mattn/go-mastodon"
 	"golang.org/x/net/html"
@@ -128,11 +133,12 @@ func (c *Client) convertToIDAndFetchStatus(ctx context.Context, inReplyToID any)
 // Message extraction and HTML parsing
 
 func (c *Client) ExtractUserMessage(notification *mastodon.Notification) string {
-	return c.ExtractContentFromStatus(notification.Status)
+	content, _, _ := c.ExtractContentFromStatus(notification.Status)
+	return content
 }
 
-// ExtractContentFromStatus extracts clean text content from a status
-func (c *Client) ExtractContentFromStatus(status *mastodon.Status) string {
+// ExtractContentFromStatus extracts clean text content and images from a status
+func (c *Client) ExtractContentFromStatus(status *mastodon.Status) (string, []model.Image, error) {
 	content := stripHTML(string(status.Content))
 	words := strings.Fields(content)
 
@@ -143,7 +149,49 @@ func (c *Client) ExtractContentFromStatus(status *mastodon.Status) string {
 		}
 	}
 
-	return strings.Join(filtered, " ")
+	text := strings.Join(filtered, " ")
+
+	var images []model.Image
+	for _, attachment := range status.MediaAttachments {
+		if attachment.Type == "image" {
+			base64Image, mediaType, err := c.downloadImage(attachment.URL)
+			if err != nil {
+				log.Printf("画像ダウンロードエラー (%s): %v", attachment.URL, err)
+				continue
+			}
+			images = append(images, model.Image{
+				Data:      base64Image,
+				MediaType: mediaType,
+			})
+		}
+	}
+
+	return text, images, nil
+}
+
+func (c *Client) downloadImage(url string) (string, string, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("HTTP error: %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", "", err
+	}
+
+	// メディアタイプ判定
+	mimeType := http.DetectContentType(data)
+	if !strings.HasPrefix(mimeType, "image/") {
+		return "", "", fmt.Errorf("not an image: %s", mimeType)
+	}
+
+	return base64.StdEncoding.EncodeToString(data), mimeType, nil
 }
 
 func stripHTML(htmlStr string) string {
