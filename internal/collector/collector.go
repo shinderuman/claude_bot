@@ -346,7 +346,7 @@ func (fc *FactCollector) extractFactsFromURLs(ctx context.Context, status *gomas
 					Value:              item.Value,
 					Timestamp:          time.Now(),
 					SourceType:         sourceType,
-					SourceURL:          urlStr, // 実際のURL
+					SourceURL:          meta.URL, // リダイレクト後の最終URL
 					PostAuthor:         postAuthor,
 					PostAuthorUserName: postAuthorUserName,
 				}
@@ -355,7 +355,7 @@ func (fc *FactCollector) extractFactsFromURLs(ctx context.Context, status *gomas
 
 				// 成功ログの詳細出力
 				log.Printf("✅ ファクト保存(URL): PostURL=%s, TargetURL=%s, Target=%s(%s), Key=%s, Value=%v, Source=%s",
-					sourceURL, urlStr, target, targetUserName, item.Key, item.Value, sourceType)
+					sourceURL, meta.URL, target, targetUserName, item.Key, item.Value, sourceType)
 			}
 			fc.factStore.Save()
 		}
