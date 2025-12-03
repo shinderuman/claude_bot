@@ -5,6 +5,19 @@ import (
 	"strings"
 )
 
+// Common instructions for fact extraction prompts
+const (
+	compactJSONInstruction = `出力形式:
+**重要**: インデントや改行を含めず、1行のコンパクトなJSON配列として出力してください。
+例: [{"target":"user_id","target_username":"username","key":"項目名","value":"値"}]`
+
+	compactJSONObjectInstruction = `出力形式:
+**重要**: インデントや改行を含めず、1行のコンパクトなJSONオブジェクトとして出力してください。
+例: {"target_candidates":["ID1","ID2"],"keys":["key1","key2"]}`
+
+	emptyArrayInstruction = "抽出するものがない場合は空配列 [] を返してください。"
+)
+
 // BuildFactExtractionPrompt creates a prompt for extracting facts from user messages
 func BuildFactExtractionPrompt(authorUserName, author, message string) string {
 	return fmt.Sprintf(`以下のユーザーの発言から、永続的に保存すべき「事実」を抽出してください。
@@ -28,17 +41,14 @@ func BuildFactExtractionPrompt(authorUserName, author, message string) string {
 3. 質問文は無視する（「〜は好きですか？」は事実ではない）
 4. 挨拶や感想は無視する
 
-出力形式（JSON配列のみ）:
-[
-  {"target": "対象者のID(Acct)", "target_username": "対象者のUserName(分かれば)", "key": "項目名", "value": "値"}
-]
+%s
 
 targetについて:
 - 発言者自身のことなら、targetは "%s" としてください
 - 他のユーザーのことなら、そのユーザーのID(Acct)を指定してください（分かる場合）
 - target_usernameは分かる範囲で入力してください
 
-抽出するものがない場合は空配列 [] を返してください。`, authorUserName, author, author, message, author)
+%s`, authorUserName, author, author, message, compactJSONInstruction, author, emptyArrayInstruction)
 }
 
 // BuildURLContentFactExtractionPrompt creates a prompt for extracting facts from URL content
@@ -65,16 +75,13 @@ func BuildURLContentFactExtractionPrompt(urlContent string) string {
 Webページの内容:
 %s
 
-出力形式（JSON配列のみ）:
-[
-  {"target": "__general__", "target_username": "ドメイン名またはサイト名", "key": "項目名", "value": "値"}
-]
+%s
 
 重要:
 - targetは必ず "__general__" としてください（一般知識として保存）
 - target_usernameにはWebサイトのドメイン名やサイト名を入力してください
 - keyには情報の種類（例: "リリース情報", "技術情報", "製品名"など）を指定してください
-- 抽出するものがない場合は空配列 [] を返してください`, urlContent)
+- %s`, urlContent, compactJSONInstruction, emptyArrayInstruction)
 }
 
 // BuildFactQueryPrompt creates a prompt for generating search queries for facts
@@ -95,13 +102,9 @@ func BuildFactQueryPrompt(authorUserName, author, message string) string {
 - 「誕生日は？」→ "誕生日", "生年月日" など
 - 文脈から広めに推測してください
 
-出力形式（JSONのみ）:
-{
-  "target_candidates": ["ID1", "ID2"],
-  "keys": ["key1", "key2", "key3"]
-}
+%s
 
-target_candidatesには、可能性のあるユーザーID(Acct)をリストアップしてください。発言者本人の場合は "%s" を含めてください。`, authorUserName, author, message, author, author)
+target_candidatesには、可能性のあるユーザーID(Acct)をリストアップしてください。発言者本人の場合は "%s" を含めてください。`, authorUserName, author, message, author, compactJSONObjectInstruction, author)
 }
 
 // BuildSummaryPrompt creates a prompt for summarizing conversation history

@@ -212,7 +212,7 @@ func (fc *FactCollector) extractFactsFromContent(ctx context.Context, status *go
 	prompt := llm.BuildFactExtractionPrompt(postAuthorUserName, postAuthor, content)
 	messages := []model.Message{{Role: "user", Content: prompt}}
 
-	response := fc.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactExtraction, fc.config.MaxResponseTokens, nil)
+	response := fc.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactExtraction, fc.config.MaxFactTokens, nil)
 	if response == "" {
 		return
 	}
@@ -311,7 +311,7 @@ func (fc *FactCollector) extractFactsFromURLs(ctx context.Context, status *gomas
 		prompt := llm.BuildURLContentFactExtractionPrompt(urlContent)
 		messages := []model.Message{{Role: "user", Content: prompt}}
 
-		response := fc.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactExtraction, fc.config.MaxResponseTokens, nil)
+		response := fc.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactExtraction, fc.config.MaxFactTokens, nil)
 		if response == "" {
 			continue
 		}

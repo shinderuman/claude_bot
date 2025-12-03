@@ -31,6 +31,7 @@ type Config struct {
 	// LLM & Post Settings
 	MaxResponseTokens int64
 	MaxSummaryTokens  int64
+	MaxFactTokens     int64
 	MaxPostChars      int
 
 	// URL filtering
@@ -77,6 +78,7 @@ func LoadConfig() *Config {
 
 		MaxResponseTokens: int64(parseIntRequired(os.Getenv("MAX_RESPONSE_TOKENS"))),
 		MaxSummaryTokens:  int64(parseIntRequired(os.Getenv("MAX_SUMMARY_TOKENS"))),
+		MaxFactTokens:     int64(parseIntRequired(os.Getenv("MAX_FACT_TOKENS"))),
 		MaxPostChars:      parseIntRequired(os.Getenv("MAX_POST_CHARS")),
 
 		URLBlacklist: loadURLBlacklist(),
