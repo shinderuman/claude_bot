@@ -59,7 +59,7 @@ go run ./cmd/claude_bot
 ### 🖼️ 画像認識（実験的）
 - **画像の理解**: メンションに添付された画像を認識し、内容を踏まえた応答を生成（Claude API使用時のみ）。
 - **MIMEタイプ自動判定**: JPEG、PNG、WebPなど、様々な画像形式に対応。
-- **オンオフ切り替え**: `.env`で簡単に有効/無効を切り替え可能（デフォルト: 無効）。
+- **オンオフ切り替え**: `.env`で簡単に有効/無効を切り替え可能。
 
 ### ⚙️ 柔軟な制御
 - **キャラクター設定**: プロンプトで人格を自由にカスタマイズ可能。
@@ -71,30 +71,59 @@ go run ./cmd/claude_bot
 
 `data/.env` ファイルで以下の設定を行います。
 
-### 必須設定
+> [!IMPORTANT]
+> **すべての設定値は明示的に指定する必要があります。**  
+> コード内にデフォルト値を持たせず、すべて設定ファイルで管理する設計思想を採用しています。
+> これにより、どの設定値が実際に使用されているかが常に明確になります。
+
+### Mastodon接続設定（必須）
 | 変数名 | 説明 |
 | :--- | :--- |
-| `MASTODON_SERVER` | MastodonインスタンスのURL |
+| `MASTODON_SERVER` | MastodonインスタンスのURL（例: `https://mastodon.social`） |
 | `MASTODON_ACCESS_TOKEN` | Mastodonのアクセストークン |
+| `BOT_USERNAME` | Botのユーザー名（メンション判定に使用） |
+
+### Claude API設定（必須）
+| 変数名 | 説明 |
+| :--- | :--- |
 | `ANTHROPIC_AUTH_TOKEN` | Claude APIキー |
+| `ANTHROPIC_BASE_URL` | Claude APIのベースURL（例: `https://api.anthropic.com`） |
+| `ANTHROPIC_DEFAULT_MODEL` | 使用するモデル名（例: `claude-3-5-sonnet-20241022`） |
 
-### 機能設定
-| 変数名 | デフォルト | 説明 |
+### Bot動作設定
+| 変数名 | 推奨値 | 説明 |
 | :--- | :--- | :--- |
-| `CHARACTER_PROMPT` | (なし) | Botの人格設定プロンプト |
-| `ALLOW_REMOTE_USERS` | `false` | 外部インスタンスのユーザーに応答するか |
-| `ENABLE_FACT_STORE` | `true` | 事実記憶機能を有効にするか |
-| `ENABLE_IMAGE_RECOGNITION` | `false` | 画像認識機能を有効にするか（Claude API推奨） |
-| `FACT_COLLECTION_ENABLED` | `false` | タイムラインからの自動ファクト収集を有効にするか |
+| `CHARACTER_PROMPT` | (任意) | Botの人格設定プロンプト。空文字列も可 |
+| `ALLOW_REMOTE_USERS` | `false` | `true`: 他インスタンスからのメンションも受け付ける<br>`false`: 同一インスタンスのみ |
+| `ENABLE_FACT_STORE` | `true` | `true`: ユーザー情報を記憶する<br>`false`: 記憶機能を無効化 |
+| `ENABLE_IMAGE_RECOGNITION` | `false` | `true`: 画像認識を有効化（Claude API推奨）<br>`false`: 画像認識を無効化 |
 
-### パラメータ調整
-| 変数名 | デフォルト | 説明 |
+### 会話管理パラメータ
+| 変数名 | 推奨値 | 説明 |
 | :--- | :--- | :--- |
-| `MAX_RESPONSE_TOKENS` | `512` | 応答の最大トークン数 |
-| `CONVERSATION_IDLE_HOURS` | `3` | 会話を要約するまでのアイドル時間(h) |
-| `CONVERSATION_RETENTION_HOURS` | `24` | 会話を保持する最大時間(h) |
-| `FACT_COLLECTION_MAX_WORKERS` | `3` | ファクト収集の並列処理数 |
-| `FACT_COLLECTION_MAX_PER_HOUR` | `100` | 1時間あたりの最大処理数 |
+| `CONVERSATION_MESSAGE_COMPRESS_THRESHOLD` | `20` | この数を超えたら会話履歴を圧縮 |
+| `CONVERSATION_MESSAGE_KEEP_COUNT` | `10` | 圧縮後に保持する最新メッセージ数 |
+| `CONVERSATION_MIN_KEEP_COUNT` | `3` | 最低限保持するメッセージ数 |
+| `CONVERSATION_IDLE_HOURS` | `3` | この時間アイドル状態なら要約 |
+| `CONVERSATION_RETENTION_HOURS` | `24` | 会話を完全に削除するまでの時間 |
+
+### LLM・投稿パラメータ
+| 変数名 | 推奨値 | 説明 |
+| :--- | :--- | :--- |
+| `MAX_RESPONSE_TOKENS` | `512` | 応答生成の最大トークン数 |
+| `MAX_SUMMARY_TOKENS` | `512` | 要約生成の最大トークン数 |
+| `MAX_POST_CHARS` | `480` | 1投稿あたりの最大文字数（分割投稿の閾値） |
+
+### ファクト収集設定
+| 変数名 | 推奨値 | 説明 |
+| :--- | :--- | :--- |
+| `FACT_COLLECTION_ENABLED` | `false` | `true`: タイムラインから自動収集<br>`false`: メンションのみ |
+| `FACT_COLLECTION_FEDERATED` | `true` | 連合タイムラインから収集するか |
+| `FACT_COLLECTION_HOME` | `true` | ホームタイムラインから収集するか |
+| `FACT_COLLECTION_FROM_POST_CONTENT` | `false` | 投稿本文からもファクトを抽出するか（`false`推奨） |
+| `URL_BLACKLIST` | `localhost,*.local,*.localhost` | メタデータ取得をスキップするURLパターン（カンマ区切り、ワイルドカード可） |
+| `FACT_COLLECTION_MAX_WORKERS` | `3` | 並列処理数（同時処理する投稿数） |
+| `FACT_COLLECTION_MAX_PER_HOUR` | `100` | 1時間あたりの最大処理数（レート制限） |
 
 <details>
 <summary>Mastodon Access Tokenの取得方法</summary>
@@ -136,7 +165,8 @@ claude_bot/
 │   ├── llm/          # Claude API連携
 │   ├── mastodon/     # Mastodon API連携
 │   ├── model/        # データ構造
-│   └── store/        # データ永続化 (JSON)
+│   ├── store/        # データ永続化 (JSON)
+│   └── utils/        # ユーティリティ関数
 └── data/             # 設定・データファイル
 ```
 

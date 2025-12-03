@@ -4,7 +4,8 @@ data/sessions.json
 data/facts.json
 
 # ビルド成果物
-mastodon-bot
+claude_bot
+test_claude
 *.exe
 *.exe~
 *.dll
