@@ -119,7 +119,7 @@ go run ./cmd/claude_bot
 | 変数名 | 推奨値 | 説明 |
 | :--- | :--- | :--- |
 | `AUTO_POST_INTERVAL_HOURS` | `0` | 自動投稿の間隔（時間単位）。`0`で無効化 |
-| `AUTO_POST_VISIBILITY` | `unlisted` | 自動投稿の公開範囲（`public`, `unlisted`, `private`, `direct`） |
+| `AUTO_POST_VISIBILITY` | `unlisted` | 自動投稿の公開範囲（`public`, `unlisted`, `private`） |
 
 ### ファクト管理設定
 | 変数名 | 推奨値 | 説明 |
