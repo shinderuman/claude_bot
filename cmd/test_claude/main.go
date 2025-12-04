@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"claude_bot/internal/config"
+	"claude_bot/internal/facts"
 	"claude_bot/internal/llm"
 	"claude_bot/internal/model"
 	"claude_bot/internal/store"
@@ -33,9 +34,13 @@ func main() {
 
 	llmClient := llm.NewClient(cfg)
 
+	// FactStore & FactService初期化
+	factStore := store.InitializeFactStore()
+	factService := facts.NewFactService(cfg, factStore, llmClient)
+
 	switch *mode {
 	case "response":
-		testResponse(cfg, llmClient, *message, *imagePath)
+		testResponse(cfg, llmClient, factService, *message, *imagePath)
 	case "summary":
 		testSummary(cfg, llmClient, *message, *existingSummary)
 	case "fact":
@@ -85,7 +90,7 @@ func printConfig(cfg *config.Config) {
 	log.Println()
 }
 
-func testResponse(cfg *config.Config, client *llm.Client, message, imagePath string) {
+func testResponse(cfg *config.Config, client *llm.Client, factService *facts.FactService, message, imagePath string) {
 	log.Printf("=== 通常応答テスト ===")
 	log.Printf("テストメッセージ: %s", message)
 	if imagePath != "" {
@@ -98,6 +103,10 @@ func testResponse(cfg *config.Config, client *llm.Client, message, imagePath str
 	}
 
 	// テスト用セッション作成
+	// テストユーザー: asmodeus (facts.jsonにデータがあるユーザー)
+	testUser := "asmodeus"
+	testUserName := "グレートマグマカッター"
+
 	session := &model.Session{
 		Conversations: []model.Conversation{},
 		Summary:       "",
@@ -121,7 +130,19 @@ func testResponse(cfg *config.Config, client *llm.Client, message, imagePath str
 	}
 
 	ctx := context.Background()
-	response := client.GenerateResponse(ctx, nil, conversation, "", currentImages)
+
+	// 事実検索
+	log.Println("事実を検索中...")
+	relevantFacts := factService.QueryRelevantFacts(ctx, testUser, testUserName, message)
+	if relevantFacts != "" {
+		log.Println("--- 関連する事実 ---")
+		log.Println(relevantFacts)
+		log.Println("------------------")
+	} else {
+		log.Println("関連する事実は見つかりませんでした")
+	}
+
+	response := client.GenerateResponse(ctx, nil, conversation, relevantFacts, currentImages)
 
 	if response == "" {
 		log.Fatal("エラー: Claudeからの応答がありません")
