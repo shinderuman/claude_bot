@@ -72,10 +72,19 @@ func (b *Bot) Run(ctx context.Context) error {
 	log.Println("Botを起動しています...")
 	b.logStartupInfo()
 
+	// ファクトストアのメンテナンス（起動時）
+	if b.factStore != nil {
+		log.Println("ファクトストアのメンテナンスを実行中...")
+		b.factStore.PerformMaintenance(b.config.FactRetentionDays, b.config.MaxFacts)
+	}
+
 	// ファクト収集の開始
 	if b.factCollector != nil {
 		b.factCollector.Start(ctx)
 	}
+
+	// 定期的なファクトメンテナンス（1日1回）
+	go b.startFactMaintenanceLoop(ctx)
 
 	// メンションのストリーミング
 	eventChan := make(chan gomastodon.Event)
@@ -368,4 +377,24 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func (b *Bot) startFactMaintenanceLoop(ctx context.Context) {
+	if b.factStore == nil {
+		return
+	}
+
+	// 1日1回メンテナンスを実行
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			log.Println("定期ファクトメンテナンスを実行中...")
+			b.factStore.PerformMaintenance(b.config.FactRetentionDays, b.config.MaxFacts)
+		}
+	}
 }

@@ -50,6 +50,10 @@ type Config struct {
 
 	// 自動投稿設定
 	AutoPostIntervalHours int
+
+	// ファクト管理設定
+	FactRetentionDays int // ファクト保持期間（日数）
+	MaxFacts          int // 最大ファクト数
 }
 
 func LoadEnvironment() {
@@ -95,7 +99,10 @@ func LoadConfig() *Config {
 
 		EnableImageRecognition: parseBool(os.Getenv("ENABLE_IMAGE_RECOGNITION"), false),
 
-		AutoPostIntervalHours: parseIntWithDefault(os.Getenv("AUTO_POST_INTERVAL_HOURS"), 0),
+		AutoPostIntervalHours: parseIntRequired(os.Getenv("AUTO_POST_INTERVAL_HOURS")),
+
+		FactRetentionDays: parseIntRequired(os.Getenv("FACT_RETENTION_DAYS")),
+		MaxFacts:          parseIntRequired(os.Getenv("MAX_FACTS")),
 	}
 }
 
@@ -127,17 +134,6 @@ func parseIntRequired(value string) int {
 	parsed, err := strconv.Atoi(value)
 	if err != nil {
 		log.Fatal("エラー: 環境変数の値が無効です。数値を指定してください: ", value)
-	}
-	return parsed
-}
-
-func parseIntWithDefault(value string, defaultValue int) int {
-	if value == "" {
-		return defaultValue
-	}
-	parsed, err := strconv.Atoi(value)
-	if err != nil {
-		return defaultValue
 	}
 	return parsed
 }

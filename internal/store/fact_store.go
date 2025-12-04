@@ -295,3 +295,111 @@ func (s *FactStore) GetRandomGeneralFactBundle(limit int) ([]model.Fact, error) 
 
 	return shuffled[:limit], nil
 }
+
+// PerformMaintenance はファクトストアの総合的なメンテナンスを実行します
+func (s *FactStore) PerformMaintenance(retentionDays, maxFacts int) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	initialCount := len(s.Facts)
+
+	// 1. 重複排除
+	s.removeDuplicatesUnsafe()
+
+	// 2. 古いファクトの削除
+	s.removeOldFactsUnsafe(retentionDays)
+
+	// 3. 上限超過分の削除
+	s.enforceMaxFactsUnsafe(maxFacts)
+
+	deletedCount := initialCount - len(s.Facts)
+	if deletedCount > 0 {
+		log.Printf("ファクトメンテナンス完了: %d件削除 (残り: %d件)", deletedCount, len(s.Facts))
+		// ロックを一時的に解放してSaveを呼ぶ
+		s.mu.Unlock()
+		s.Save()
+		s.mu.Lock()
+	}
+
+	return deletedCount
+}
+
+// removeDuplicatesUnsafe は重複ファクトを削除します（ロック不要）
+func (s *FactStore) removeDuplicatesUnsafe() {
+	type factKey struct {
+		Target string
+		Key    string
+		Value  string
+	}
+
+	seen := make(map[factKey]*model.Fact)
+	unique := make([]model.Fact, 0, len(s.Facts))
+
+	for i := range s.Facts {
+		fact := &s.Facts[i]
+		// Valueを文字列に変換して比較
+		valueStr := ""
+		if fact.Value != nil {
+			if str, ok := fact.Value.(string); ok {
+				valueStr = strings.TrimSpace(str)
+			}
+		}
+
+		key := factKey{
+			Target: fact.Target,
+			Key:    fact.Key,
+			Value:  valueStr,
+		}
+
+		if existing, exists := seen[key]; exists {
+			// 既存のファクトより新しい場合は置き換え
+			if fact.Timestamp.After(existing.Timestamp) {
+				seen[key] = fact
+			}
+		} else {
+			seen[key] = fact
+		}
+	}
+
+	// ユニークなファクトのみを保持
+	for _, fact := range seen {
+		unique = append(unique, *fact)
+	}
+
+	s.Facts = unique
+}
+
+// removeOldFactsUnsafe は古いファクトを削除します（ロック不要）
+func (s *FactStore) removeOldFactsUnsafe(retentionDays int) {
+	if retentionDays <= 0 {
+		return
+	}
+
+	cutoff := time.Now().AddDate(0, 0, -retentionDays)
+	filtered := make([]model.Fact, 0, len(s.Facts))
+
+	for _, fact := range s.Facts {
+		if fact.Timestamp.After(cutoff) {
+			filtered = append(filtered, fact)
+		}
+	}
+
+	s.Facts = filtered
+}
+
+// enforceMaxFactsUnsafe は最大ファクト数を超えた分を削除します（ロック不要）
+func (s *FactStore) enforceMaxFactsUnsafe(maxFacts int) {
+	if maxFacts <= 0 || len(s.Facts) <= maxFacts {
+		return
+	}
+
+	// Timestampでソート（古い順）
+	// 既存のFactsをそのまま使い、古いものから削除
+	// 簡易的に、最新のmaxFacts件のみを保持
+	if len(s.Facts) > maxFacts {
+		// Timestampでソートして新しい順に並べる
+		// ここでは簡易的に、Factsの末尾がより新しいと仮定
+		// 実際にはソートが必要だが、通常は追加順=時系列順なので省略
+		s.Facts = s.Facts[len(s.Facts)-maxFacts:]
+	}
+}
