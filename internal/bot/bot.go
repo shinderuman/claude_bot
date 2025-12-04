@@ -146,8 +146,8 @@ func (b *Bot) logStartupInfo() {
 		b.config.ConversationRetentionHours, b.config.ConversationMinKeepCount, b.config.ConversationIdleHours)
 
 	// LLM設定
-	log.Printf("LLM設定: 応答=%dtok, 要約=%dtok, ファクト=%dtok, 投稿=%d文字",
-		b.config.MaxResponseTokens, b.config.MaxSummaryTokens, b.config.MaxFactTokens, b.config.MaxPostChars)
+	log.Printf("LLM設定: 応答=%dtok, 要約=%dtok, ファクト=%dtok, 画像生成=%dtok, 投稿=%d文字",
+		b.config.MaxResponseTokens, b.config.MaxSummaryTokens, b.config.MaxFactTokens, b.config.MaxImageTokens, b.config.MaxPostChars)
 
 	log.Printf("=== 起動完了 ===")
 }

@@ -84,6 +84,8 @@ func printConfig(cfg *config.Config) {
 	log.Println("=== LLM & 投稿設定 ===")
 	log.Printf("最大応答トークン: %d", cfg.MaxResponseTokens)
 	log.Printf("最大要約トークン: %d", cfg.MaxSummaryTokens)
+	log.Printf("最大ファクトトークン: %d", cfg.MaxFactTokens)
+	log.Printf("最大画像生成トークン: %d", cfg.MaxImageTokens)
 	log.Printf("最大投稿文字数: %d", cfg.MaxPostChars)
 	log.Println()
 	log.Println("=== ファクト収集設定 ===")
