@@ -339,3 +339,105 @@ func (s *FactService) QueryRelevantFacts(ctx context.Context, author, authorUser
 
 	return ""
 }
+
+// PerformMaintenance orchestrates the maintenance of the fact store, including archiving
+func (s *FactService) PerformMaintenance(ctx context.Context) error {
+	if !s.config.EnableFactStore {
+		return nil
+	}
+
+	log.Println("ファクトストアのメンテナンス（アーカイブ処理）を開始します...")
+
+	// 1. 全ターゲットの取得
+	targets := s.factStore.GetAllTargets()
+
+	// 2. ターゲットごとにチェック
+	archivedCount := 0
+	for _, target := range targets {
+		facts := s.factStore.GetFactsByTarget(target)
+		if len(facts) == 0 {
+			continue
+		}
+
+		// アーカイブが必要か判定
+		// 条件1: ファクト数が閾値を超えている (例: 5件以上)
+		// 条件2: 古いファクトが含まれている (例: 30日以上経過) - 今回は簡易的に件数ベースまたは全件対象
+		// ユーザーの要望「データ量を増やしたくない」→ 常に最新の1つにまとめるのが理想
+		// ただし毎回やるとコストが高いので、ある程度溜まったらやる
+		shouldArchive := false
+		if len(facts) >= 5 {
+			shouldArchive = true
+		} else {
+			// アーカイブ済みデータが含まれていない（＝まだ一度もアーカイブされていない）かつ、
+			// 古いデータがある場合はアーカイブする
+			hasOldFact := false
+			threshold := time.Now().AddDate(0, 0, -30) // 30日
+			for _, f := range facts {
+				if f.Timestamp.Before(threshold) {
+					hasOldFact = true
+					break
+				}
+			}
+			if hasOldFact && len(facts) >= 2 { // 最低2件はないと統合の意味がない
+				shouldArchive = true
+			}
+		}
+
+		if shouldArchive {
+			if err := s.archiveTargetFacts(ctx, target, facts); err != nil {
+				log.Printf("ターゲット %s のアーカイブ失敗: %v", target, err)
+			} else {
+				archivedCount++
+			}
+		}
+	}
+
+	log.Printf("メンテナンス完了: %d件のターゲットをアーカイブしました", archivedCount)
+	return s.factStore.Save()
+}
+
+func (s *FactService) archiveTargetFacts(ctx context.Context, target string, facts []model.Fact) error {
+	log.Printf("ターゲット %s の事実をアーカイブ中 (対象: %d件)...", target, len(facts))
+
+	// LLMでアーカイブ生成
+	prompt := llm.BuildFactArchivingPrompt(facts)
+	messages := []model.Message{{Role: "user", Content: prompt}}
+
+	// アーカイブ生成には少し長めのトークンを許可
+	response := s.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactExtraction, s.config.MaxSummaryTokens, nil)
+	if response == "" {
+		return fmt.Errorf("LLM応答が空です")
+	}
+
+	var archives []model.Fact
+	jsonStr := llm.ExtractJSON(response)
+	if err := json.Unmarshal([]byte(jsonStr), &archives); err != nil {
+		return fmt.Errorf("JSONパースエラー: %v", err)
+	}
+
+	if len(archives) == 0 {
+		return fmt.Errorf("有効なアーカイブが生成されませんでした")
+	}
+
+	// アーカイブデータの整形
+	for i := range archives {
+		archives[i].Target = target
+		// TargetUserNameは元のファクトから引き継ぐ（またはLLMが生成したものを使用）
+		if archives[i].TargetUserName == "" || archives[i].TargetUserName == "unknown" {
+			if len(facts) > 0 {
+				archives[i].TargetUserName = facts[0].TargetUserName
+			}
+		}
+		archives[i].Author = "system"
+		archives[i].AuthorUserName = "system"
+		archives[i].Timestamp = time.Now()
+		archives[i].SourceType = "archive"
+		archives[i].SourceURL = ""
+	}
+
+	// ストアのデータを置き換え
+	s.factStore.ReplaceFacts(target, archives)
+	log.Printf("ターゲット %s のアーカイブ完了: %d件 -> %d件に圧縮", target, len(facts), len(archives))
+
+	return nil
+}

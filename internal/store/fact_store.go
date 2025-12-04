@@ -403,3 +403,60 @@ func (s *FactStore) enforceMaxFactsUnsafe(maxFacts int) {
 		s.Facts = s.Facts[len(s.Facts)-maxFacts:]
 	}
 }
+
+// GetFactsByTarget gets all facts for a specific target
+func (s *FactStore) GetFactsByTarget(target string) []model.Fact {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var results []model.Fact
+	for _, fact := range s.Facts {
+		if fact.Target == target {
+			results = append(results, fact)
+		}
+	}
+	return results
+}
+
+// ReplaceFacts replaces all facts for a specific target with new facts
+func (s *FactStore) ReplaceFacts(target string, newFacts []model.Fact) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// 1. 対象ターゲット以外のファクトを保持
+	var keptFacts []model.Fact
+	for _, fact := range s.Facts {
+		if fact.Target != target {
+			keptFacts = append(keptFacts, fact)
+		}
+	}
+
+	// 2. 新しいファクトを追加
+	// タイムスタンプが未設定の場合は現在時刻を設定
+	now := time.Now()
+	for i := range newFacts {
+		if newFacts[i].Timestamp.IsZero() {
+			newFacts[i].Timestamp = now
+		}
+	}
+
+	keptFacts = append(keptFacts, newFacts...)
+	s.Facts = keptFacts
+}
+
+// GetAllTargets returns a list of all unique targets in the store
+func (s *FactStore) GetAllTargets() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	targetMap := make(map[string]bool)
+	for _, fact := range s.Facts {
+		targetMap[fact.Target] = true
+	}
+
+	var targets []string
+	for target := range targetMap {
+		targets = append(targets, target)
+	}
+	return targets
+}

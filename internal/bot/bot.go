@@ -73,9 +73,13 @@ func (b *Bot) Run(ctx context.Context) error {
 	b.logStartupInfo()
 
 	// ファクトストアのメンテナンス（起動時）
-	if b.factStore != nil {
+	if b.factService != nil {
 		log.Println("ファクトストアのメンテナンスを実行中...")
-		b.factStore.PerformMaintenance(b.config.FactRetentionDays, b.config.MaxFacts)
+		go func() {
+			if err := b.factService.PerformMaintenance(ctx); err != nil {
+				log.Printf("起動時ファクトメンテナンスエラー: %v", err)
+			}
+		}()
 	}
 
 	// ファクト収集の開始
@@ -412,7 +416,9 @@ func (b *Bot) startFactMaintenanceLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			log.Println("定期ファクトメンテナンスを実行中...")
-			b.factStore.PerformMaintenance(b.config.FactRetentionDays, b.config.MaxFacts)
+			if err := b.factService.PerformMaintenance(ctx); err != nil {
+				log.Printf("ファクトメンテナンスエラー: %v", err)
+			}
 		}
 	}
 }

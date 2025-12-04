@@ -165,6 +165,59 @@ func BuildAutoPostPrompt(facts []model.Fact) string {
 投稿文:`, source, factList.String())
 }
 
+// BuildFactArchivingPrompt creates a prompt for archiving and consolidating facts
+func BuildFactArchivingPrompt(facts []model.Fact) string {
+	var factList strings.Builder
+	var target string
+	var targetUserName string
+
+	for _, fact := range facts {
+		if target == "" {
+			target = fact.Target
+			targetUserName = fact.TargetUserName
+		}
+		factList.WriteString(fmt.Sprintf("- %s: %v (source: %s)\n", fact.Key, fact.Value, fact.SourceType))
+	}
+
+	instruction := ""
+	if target == "__general__" {
+		instruction = `これらの情報は「一般知識」や「ニュース」の断片です。
+これらを統合して、**「この時期のトレンド」「技術の進歩」「社会の動き」**などが分かるような、
+**1つの包括的なアーカイブ（知識のまとめ）**を作成してください。
+
+【作成の指針】
+1. **抽象化**: 個別の細かいニュースを、より大きなトレンドとしてまとめてください。
+2. **文脈の保存**: 「何が流行ったか」「何が話題になったか」という文脈を残してください。
+3. **重複排除**: 同じ話題に関する情報は1つにまとめてください。`
+	} else {
+		instruction = fmt.Sprintf(`これらの情報はユーザー @%s (%s) に関する事実の断片です。
+これらを統合して、**「このユーザーの包括的なプロフィール」**を作成してください。
+
+【作成の指針】
+1. **人物像の確立**: 断片的な行動ログ（〜を食べた、〜に行った）から、その人の嗜好や習慣（〜が好き、〜によく行く）を導き出してください。
+2. **矛盾の解消**: 情報に矛盾がある場合は、新しい情報（source: summary や archive の方が信頼度が高い場合があります）を優先しつつ、うまく統合してください。
+3. **コンパクト化**: 似たような情報は「〜など」としてまとめてください。`, targetUserName, target)
+	}
+
+	return fmt.Sprintf(`以下の事実リストを統合・要約して、長期保存用の「知識アーカイブ」を作成してください。
+目的は、データ量を削減しつつ、重要な情報の「エッセンス」を永続的に残すことです。
+
+【統合対象の事実】
+%s
+
+%s
+
+【出力形式】
+`+compactJSONInstruction+`
+
+重要:
+- targetは "%s" としてください
+- target_usernameは "%s" としてください
+- keyは、統合された情報のカテゴリ（例: "profile", "trends", "preferences" など）にしてください
+- valueには、統合された**詳細な説明文**を入れてください
+- 可能な限り少ない項目数（理想的には1つ、多くても3つ以内）にまとめてください`, factList.String(), instruction, target, targetUserName)
+}
+
 // BuildFactQueryPrompt creates a prompt for generating search queries for facts
 func BuildFactQueryPrompt(authorUserName, author, message string) string {
 	return fmt.Sprintf(`以下のユーザーの発言に対して適切に応答するために、データベースから参照すべき「事実のカテゴリ（キー）」と「対象者（target）」を推測してください。
