@@ -25,6 +25,7 @@ func main() {
 	message := flag.String("message", "Hello", "テストメッセージ")
 	imagePath := flag.String("image", "", "画像ファイルパス (responseモード用)")
 	existingSummary := flag.String("existing-summary", "", "既存の要約（summaryモード用）")
+	testFacts := flag.Bool("test-facts", false, "テスト用facts.jsonを使用（data/facts_test.json）")
 	flag.Parse()
 
 	config.LoadEnvironment()
@@ -35,8 +36,13 @@ func main() {
 
 	llmClient := llm.NewClient(cfg)
 
-	// FactStore & FactService初期化
-	factStore := store.InitializeFactStore()
+	// ファクトストア初期化（テストモードなら別ファイル）
+	factsFile := "data/facts.json"
+	if *testFacts {
+		factsFile = "data/facts_test.json"
+		log.Printf("テストモード: %s を使用します", factsFile)
+	}
+	factStore := store.NewFactStore(factsFile)
 	factService := facts.NewFactService(cfg, factStore, llmClient)
 
 	switch *mode {
@@ -157,6 +163,14 @@ func testResponse(cfg *config.Config, client *llm.Client, factService *facts.Fac
 	log.Println("--- Claude応答 ---")
 	log.Println(response)
 	log.Println("------------------")
+
+	// ファクト抽出と保存
+	if cfg.EnableFactStore {
+		log.Println()
+		log.Println("ファクトを抽出中...")
+		factService.ExtractAndSaveFacts(ctx, testUser, testUserName, message, "test", "", testUser, testUserName)
+		log.Println("ファクト抽出完了")
+	}
 }
 
 func testSummary(cfg *config.Config, client *llm.Client, newMessages, existingSummary string) {

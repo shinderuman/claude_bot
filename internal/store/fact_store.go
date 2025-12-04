@@ -20,10 +20,14 @@ type FactStore struct {
 
 func InitializeFactStore() *FactStore {
 	factsPath := utils.GetFilePath("facts.json")
+	return NewFactStore(factsPath)
+}
 
+// NewFactStore creates a new FactStore with a custom file path
+func NewFactStore(filePath string) *FactStore {
 	store := &FactStore{
 		Facts:        []model.Fact{},
-		saveFilePath: factsPath,
+		saveFilePath: filePath,
 	}
 
 	if err := store.load(); err != nil {
@@ -31,7 +35,7 @@ func InitializeFactStore() *FactStore {
 	} else {
 		// 起動時に古いデータを削除
 		deleted := store.Cleanup(30 * 24 * time.Hour)
-		log.Printf("事実データ読み込み成功: %d件 (削除: %d件, ファイル: %s)", len(store.Facts), deleted, factsPath)
+		log.Printf("事実データ読み込み成功: %d件 (削除: %d件, ファイル: %s)", len(store.Facts), deleted, filePath)
 	}
 
 	return store
