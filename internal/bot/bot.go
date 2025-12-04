@@ -171,7 +171,8 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 	conversation := b.history.GetOrCreateConversation(session, rootStatusID)
 
 	// 親投稿がある場合、その内容を取得してコンテキストに追加
-	if notification.Status.InReplyToID != nil {
+	// ただし、会話履歴が既にある場合は不要（Botの応答が既に履歴に含まれているため）
+	if notification.Status.InReplyToID != nil && len(conversation.Messages) == 0 {
 		parentStatusID := fmt.Sprintf("%v", notification.Status.InReplyToID)
 		parentStatus, err := b.mastodonClient.GetStatus(ctx, parentStatusID)
 		if err == nil && parentStatus != nil {
