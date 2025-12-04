@@ -14,6 +14,7 @@ import (
 
 	"claude_bot/internal/config"
 	"claude_bot/internal/facts"
+	"claude_bot/internal/image"
 	"claude_bot/internal/llm"
 	"claude_bot/internal/model"
 	"claude_bot/internal/store"
@@ -49,8 +50,11 @@ func main() {
 		testRawImage(cfg, llmClient, *message, *imagePath)
 	case "auto-post":
 		testAutoPost(cfg, llmClient)
+	case "generate-image":
+		imageGen := image.NewImageGenerator(cfg, llmClient)
+		testGenerateImage(cfg, imageGen, *message)
 	default:
-		log.Fatalf("不明なモード: %s (使用可能: response, summary, fact, raw-image, auto-post)", *mode)
+		log.Fatalf("不明なモード: %s (使用可能: response, summary, fact, raw-image, auto-post, generate-image)", *mode)
 	}
 }
 
@@ -340,4 +344,34 @@ func loadImage(path string) (*model.Image, error) {
 		Data:      base64.StdEncoding.EncodeToString(data),
 		MediaType: mimeType,
 	}, nil
+}
+
+func testGenerateImage(cfg *config.Config, imageGen *image.ImageGenerator, prompt string) {
+	log.Printf("=== SVG画像生成テスト ===")
+	log.Printf("プロンプト: %s", prompt)
+	log.Println()
+
+	ctx := context.Background()
+	svg, err := imageGen.GenerateSVG(ctx, prompt)
+	if err != nil {
+		log.Fatalf("画像生成エラー: %v", err)
+	}
+
+	// SVGファイルとして保存
+	filename := fmt.Sprintf("generated_image_%d.svg", time.Now().Unix())
+	if err := imageGen.SaveSVGToFile(svg, filename); err != nil {
+		log.Fatalf("ファイル保存エラー: %v", err)
+	}
+
+	log.Printf("成功: 画像を保存しました: %s", filename)
+	log.Printf("ファイルサイズ: %d bytes", len(svg))
+
+	// Base64エンコード版も保存
+	encoded := base64.StdEncoding.EncodeToString([]byte(svg))
+	base64Filename := fmt.Sprintf("generated_image_%d.base64.txt", time.Now().Unix())
+	if err := os.WriteFile(base64Filename, []byte(encoded), 0644); err != nil {
+		log.Printf("Base64ファイル保存エラー: %v", err)
+	} else {
+		log.Printf("Base64版も保存しました: %s", base64Filename)
+	}
 }

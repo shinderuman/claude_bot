@@ -33,6 +33,9 @@ go build -o test_claude ./cmd/test_claude
 
 # 画像認識のテスト（オプション）
 ./test_claude -message "この画像は何ですか？" -image /path/to/image.png
+
+# 画像生成のテスト（オプション）
+./test_claude -mode generate-image -message "赤い丸と青い四角を描いて"
 ```
 
 ### 4. ボットの起動
@@ -60,6 +63,11 @@ go run ./cmd/claude_bot
 - **画像の理解**: メンションに添付された画像を認識し、内容を踏まえた応答を生成（Claude API使用時のみ）。
 - **MIMEタイプ自動判定**: JPEG、PNG、WebPなど、様々な画像形式に対応。
 - **オンオフ切り替え**: `.env`で簡単に有効/無効を切り替え可能。
+
+### 🎨 画像生成（SVG）
+- **SVGイラスト生成**: ユーザーのリクエストに応じてSVG形式のイラストや図形を生成。
+- **メディア添付**: 生成されたSVGは画像としてMastodonに投稿されます。
+- **軽量・高品質**: ベクター形式なので軽量かつ拡大しても劣化しません。
 
 ### ⚙️ 柔軟な制御
 - **キャラクター設定**: プロンプトで人格を自由にカスタマイズ可能。
@@ -97,6 +105,7 @@ go run ./cmd/claude_bot
 | `ALLOW_REMOTE_USERS` | `false` | `true`: 他インスタンスからのメンションも受け付ける<br>`false`: 同一インスタンスのみ |
 | `ENABLE_FACT_STORE` | `true` | `true`: ユーザー情報を記憶する<br>`false`: 記憶機能を無効化 |
 | `ENABLE_IMAGE_RECOGNITION` | `false` | `true`: 画像認識を有効化（Claude API推奨）<br>`false`: 画像認識を無効化 |
+| `ENABLE_IMAGE_GENERATION` | `false` | `true`: SVG画像生成機能を有効化<br>`false`: 画像生成機能を無効化 |
 
 ### 会話管理パラメータ
 | 変数名 | 推奨値 | 説明 |
@@ -113,6 +122,7 @@ go run ./cmd/claude_bot
 | `MAX_RESPONSE_TOKENS` | `512` | 応答生成の最大トークン数 |
 | `MAX_SUMMARY_TOKENS` | `2048` | 要約生成の最大トークン数 |
 | `MAX_FACT_TOKENS` | `1024` | ファクト抽出の最大トークン数（URL事実抽出では多くのトークンが必要） |
+| `MAX_IMAGE_TOKENS` | `2048` | 画像生成の最大トークン数 |
 | `MAX_POST_CHARS` | `480` | 1投稿あたりの最大文字数（分割投稿の閾値） |
 
 ### 自動投稿設定

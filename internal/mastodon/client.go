@@ -192,6 +192,33 @@ func (c *Client) PostResponseWithSplit(ctx context.Context, inReplyToID, mention
 	return nil
 }
 
+// PostResponseWithMedia posts a response with media attachment
+func (c *Client) PostResponseWithMedia(ctx context.Context, inReplyToID, mention, response, visibility, mediaPath string) error {
+	// Upload media
+	attachment, err := c.client.UploadMedia(ctx, mediaPath)
+	if err != nil {
+		log.Printf("メディアアップロードエラー: %v", err)
+		return err
+	}
+
+	// Post with media
+	fullResponse := mention + " " + response
+	toot := &mastodon.Toot{
+		Status:      fullResponse,
+		InReplyToID: mastodon.ID(inReplyToID),
+		Visibility:  visibility,
+		MediaIDs:    []mastodon.ID{attachment.ID},
+	}
+
+	_, err = c.client.PostStatus(ctx, toot)
+	if err != nil {
+		log.Printf("投稿エラー: %v", err)
+		return err
+	}
+
+	return nil
+}
+
 func (c *Client) postReply(ctx context.Context, inReplyToID, content, visibility string) (*mastodon.Status, error) {
 	toot := &mastodon.Toot{
 		Status:      content,

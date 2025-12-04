@@ -2,14 +2,17 @@ package bot
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"claude_bot/internal/collector"
 	"claude_bot/internal/config"
 	"claude_bot/internal/facts"
 	"claude_bot/internal/fetcher"
+	"claude_bot/internal/image"
 	"claude_bot/internal/llm"
 	"claude_bot/internal/mastodon"
 	"claude_bot/internal/model"
@@ -29,6 +32,7 @@ type Bot struct {
 	mastodonClient *mastodon.Client
 	factCollector  *collector.FactCollector
 	factService    *facts.FactService
+	imageGenerator *image.ImageGenerator
 }
 
 // NewBot creates a new Bot instance
@@ -50,6 +54,11 @@ func NewBot(cfg *config.Config) *Bot {
 
 	factService := facts.NewFactService(cfg, factStore, llmClient)
 
+	var imageGen *image.ImageGenerator
+	if cfg.EnableImageGeneration {
+		imageGen = image.NewImageGenerator(cfg, llmClient)
+	}
+
 	bot := &Bot{
 		config:         cfg,
 		history:        history,
@@ -57,6 +66,7 @@ func NewBot(cfg *config.Config) *Bot {
 		llmClient:      llmClient,
 		mastodonClient: mastodonClient,
 		factService:    factService,
+		imageGenerator: imageGen,
 	}
 
 	// FactCollectorの初期化
@@ -228,6 +238,13 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 			log.Printf("画像取得エラー: %v", imgErr)
 		} else {
 			images = imgs
+		}
+	}
+
+	// 画像生成リクエストの検出
+	if b.imageGenerator != nil {
+		if isImageRequest, imagePrompt := b.isImageGenerationRequest(ctx, userMessage); isImageRequest {
+			return b.handleImageGeneration(ctx, session, conversation, notification, imagePrompt, statusID, mention, visibility)
 		}
 	}
 
@@ -421,4 +438,85 @@ func (b *Bot) startFactMaintenanceLoop(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// isImageGenerationRequest checks if the user message is requesting image generation using LLM
+func (b *Bot) isImageGenerationRequest(ctx context.Context, message string) (bool, string) {
+	prompt := llm.BuildImageRequestDetectionPrompt(message)
+	messages := []model.Message{{Role: "user", Content: prompt}}
+	response := b.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptImageRequestDetection, b.config.MaxResponseTokens, nil)
+
+	if response == "" {
+		return false, ""
+	}
+
+	// JSONをパース
+	jsonStr := llm.ExtractJSON(response)
+	var result struct {
+		IsImageRequest bool   `json:"is_image_request"`
+		ImagePrompt    string `json:"image_prompt"`
+	}
+
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		log.Printf("画像リクエスト判定JSONパースエラー: %v", err)
+		return false, ""
+	}
+
+	return result.IsImageRequest, result.ImagePrompt
+}
+
+// handleImageGeneration handles image generation requests
+func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session, conversation *model.Conversation, notification *gomastodon.Notification, imagePrompt, statusID, mention, visibility string) bool {
+	// SVG生成
+	svg, err := b.imageGenerator.GenerateSVG(ctx, imagePrompt)
+	if err != nil {
+		log.Printf("画像生成エラー: %v", err)
+		store.RollbackLastMessages(conversation, 1)
+		b.postErrorMessage(ctx, statusID, mention, visibility)
+		return false
+	}
+
+	// 一時ファイルに保存
+	tmpSvgFilename := fmt.Sprintf("%s/generated_image_%d.svg", os.TempDir(), time.Now().Unix())
+	if err := b.imageGenerator.SaveSVGToFile(svg, tmpSvgFilename); err != nil {
+		log.Printf("ファイル保存エラー: %v", err)
+		store.RollbackLastMessages(conversation, 1)
+		b.postErrorMessage(ctx, statusID, mention, visibility)
+		return false
+	}
+	defer os.Remove(tmpSvgFilename) // クリーンアップ
+
+	// PNGに変換
+	tmpPngFilename := fmt.Sprintf("%s/generated_image_%d.png", os.TempDir(), time.Now().Unix())
+	if err := image.ConvertSVGToPNG(tmpSvgFilename, tmpPngFilename); err != nil {
+		log.Printf("PNG変換エラー: %v", err)
+		// 変換失敗時はSVGのままアップロードを試みる（またはエラーにする）
+		// ここではエラーログを出してSVGを使用
+		tmpPngFilename = tmpSvgFilename
+	} else {
+		defer os.Remove(tmpPngFilename) // クリーンアップ
+	}
+
+	// 画像を添付して返信
+	// メッセージを生成
+	replyPrompt := llm.BuildImageGenerationReplyPrompt(imagePrompt, b.config.CharacterPrompt)
+	replyMessages := []model.Message{{Role: "user", Content: replyPrompt}}
+	response := b.llmClient.CallClaudeAPI(ctx, replyMessages, "", b.config.MaxResponseTokens, nil)
+
+	if response == "" {
+		response = "画像を生成しました！"
+	}
+
+	store.AddMessage(conversation, "assistant", response)
+
+	err = b.mastodonClient.PostResponseWithMedia(ctx, statusID, mention, response, visibility, tmpPngFilename)
+	if err != nil {
+		log.Printf("メディア投稿エラー: %v", err)
+		store.RollbackLastMessages(conversation, 2)
+		b.postErrorMessage(ctx, statusID, mention, visibility)
+		return false
+	}
+
+	session.LastUpdated = time.Now()
+	return true
 }

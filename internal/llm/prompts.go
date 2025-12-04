@@ -17,6 +17,12 @@ const (
 例: {"target_candidates":["ID1","ID2"],"keys":["key1","key2"]}`
 
 	emptyArrayInstruction = "抽出するものがない場合は空配列 [] を返してください。"
+
+	// SystemPromptImageGeneration is the system prompt for image generation
+	SystemPromptImageGeneration = `あなたはSVG画像を生成するアシスタントです。ユーザーのリクエストに基づいて、美しく完全なSVG画像を作成してください。`
+
+	// SystemPromptImageRequestDetection is the system prompt for detecting image requests
+	SystemPromptImageRequestDetection = `あなたは画像生成リクエストを判定するアシスタントです。ユーザーのメッセージが画像生成を依頼しているかを正確に判定してください。`
 )
 
 // BuildFactExtractionPrompt creates a prompt for extracting facts from user messages
@@ -323,6 +329,55 @@ func BuildSystemPrompt(characterPrompt, sessionSummary, relevantFacts string, in
 	}
 
 	return prompt.String()
+}
+
+// BuildImageGenerationPrompt creates a prompt for generating SVG images
+func BuildImageGenerationPrompt(userRequest string) string {
+	return fmt.Sprintf(`ユーザーのリクエストに基づいて、SVG形式の画像を作成してください。
+
+リクエスト: %s
+
+出力形式:
+{"svg":"完全なSVGコード"}
+
+重要:
+- SVGは完全で有効な形式であること
+- SVG内にコメント(<!-- -->)を含めないこと
+- JSONは1行で出力すること(改行・インデントなし)
+- SVGコードは文字列として正しくエスケープすること`, userRequest)
+}
+
+// BuildImageRequestDetectionPrompt creates a prompt for detecting image generation requests
+func BuildImageRequestDetectionPrompt(userMessage string) string {
+	return fmt.Sprintf(`以下のメッセージが画像生成リクエストかどうかを判定してください。
+
+メッセージ: %s
+
+判定基準:
+- 「画像を作って」「イラストを描いて」「〜の絵を生成して」など、明確に画像生成を依頼している
+- 単に「画像」という単語が含まれているだけでは不十分
+
+出力形式:
+{"is_image_request":true/false,"image_prompt":"画像生成用のプロンプト(リクエストの場合のみ)"}
+
+JSONは1行で出力すること(改行・インデントなし)`, userMessage)
+}
+
+// BuildImageGenerationReplyPrompt creates a prompt for generating a reply when sending an image
+func BuildImageGenerationReplyPrompt(userMessage, characterPrompt string) string {
+	return fmt.Sprintf(`あなたは以下のキャラクター設定を持つAIアシスタントです。
+キャラクター設定: %s
+
+ユーザーからの以下のリクエストに応えて、画像を生成しました。
+画像を添付して返信する際の、短く気の利いたメッセージを作成してください。
+
+ユーザーのリクエスト: %s
+
+条件:
+- キャラクターの口調を守ること
+- 「画像を生成しました」という事実を伝えること
+- 40文字以内で簡潔に
+- メッセージのみを出力すること（引用符などは不要）`, characterPrompt, userMessage)
 }
 
 // BuildErrorMessagePrompt creates a prompt for generating error messages in character voice
