@@ -112,7 +112,20 @@ go run ./cmd/claude_bot
 | :--- | :--- | :--- |
 | `MAX_RESPONSE_TOKENS` | `512` | 応答生成の最大トークン数 |
 | `MAX_SUMMARY_TOKENS` | `512` | 要約生成の最大トークン数 |
+| `MAX_FACT_TOKENS` | `1024` | ファクト抽出の最大トークン数（URL事実抽出では多くのトークンが必要） |
 | `MAX_POST_CHARS` | `480` | 1投稿あたりの最大文字数（分割投稿の閾値） |
+
+### 自動投稿設定
+| 変数名 | 推奨値 | 説明 |
+| :--- | :--- | :--- |
+| `AUTO_POST_INTERVAL_HOURS` | `0` | 自動投稿の間隔（時間単位）。`0`で無効化 |
+| `AUTO_POST_VISIBILITY` | `unlisted` | 自動投稿の公開範囲（`public`, `unlisted`, `private`, `direct`） |
+
+### ファクト管理設定
+| 変数名 | 推奨値 | 説明 |
+| :--- | :--- | :--- |
+| `FACT_RETENTION_DAYS` | `30` | ファクト保持期間（日数） |
+| `MAX_FACTS` | `10000` | 最大ファクト数 |
 
 ### ファクト収集設定
 | 変数名 | 推奨値 | 説明 |
@@ -122,7 +135,7 @@ go run ./cmd/claude_bot
 | `FACT_COLLECTION_HOME` | `true` | ホームタイムラインから収集するか |
 | `FACT_COLLECTION_FROM_POST_CONTENT` | `false` | 投稿本文からもファクトを抽出するか（`false`推奨） |
 | `URL_BLACKLIST` | `localhost,*.local,*.localhost` | メタデータ取得をスキップするURLパターン（カンマ区切り、ワイルドカード可） |
-| `FACT_COLLECTION_MAX_WORKERS` | `3` | 並列処理数（同時処理する投稿数） |
+| `FACT_COLLECTION_MAX_WORKERS` | `3` | LLMリクエストの並列数（ファクト収集時のLLM呼び出しを制限）<br>**注**: メンション応答には影響しません |
 | `FACT_COLLECTION_MAX_PER_HOUR` | `100` | 1時間あたりの最大処理数（レート制限） |
 
 <details>
