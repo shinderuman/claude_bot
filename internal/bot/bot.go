@@ -177,12 +177,10 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 		if err == nil && parentStatus != nil {
 			parentContent, _, _ := b.mastodonClient.ExtractContentFromStatus(parentStatus)
 			if parentContent != "" {
-				parentAuthor := parentStatus.Account.DisplayName
-				if parentAuthor == "" {
-					parentAuthor = parentStatus.Account.Username
-				}
+				// Acctを使用（一意性があり、変更されない）
+				parentAuthor := parentStatus.Account.Acct
 				// 親投稿の内容をコンテキストとして追加
-				contextMessage := fmt.Sprintf("[参照投稿 by %s]: %s", parentAuthor, parentContent)
+				contextMessage := fmt.Sprintf("[参照投稿 by @%s]: %s", parentAuthor, parentContent)
 				userMessage = contextMessage + "\n\n" + userMessage
 			}
 		}
