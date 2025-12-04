@@ -52,6 +52,14 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, author, authorUse
 
 	if len(extracted) > 0 {
 		for _, item := range extracted {
+			// 品質フィルタリング
+			if !s.isValidFact(item.Key, item.Value) {
+				continue
+			}
+
+			// キーの正規化
+			item.Key = s.normalizeKey(item.Key)
+
 			// Targetが空なら発言者をセット
 			target := item.Target
 			targetUserName := item.TargetUserName
@@ -82,6 +90,72 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, author, authorUse
 	}
 }
 
+// isValidFact checks if the fact is valid and worth saving
+func (s *FactService) isValidFact(key string, value interface{}) bool {
+	// キーのチェック
+	keyLower := strings.ToLower(key)
+	invalidKeys := []string{"username", "displayname", "display_name", "account", "id", "follower", "following"}
+	for _, k := range invalidKeys {
+		if strings.Contains(keyLower, k) {
+			return false
+		}
+	}
+
+	// 値のチェック (文字列の場合)
+	if strVal, ok := value.(string); ok {
+		// 極端に短い値は除外 (数値や特定の単語を除く)
+		if len([]rune(strVal)) < 2 {
+			return false
+		}
+		// "不明" "なし" などの無意味な値を除外
+		invalidValues := []string{"不明", "なし", "特になし", "unknown", "none", "n/a"}
+		valLower := strings.ToLower(strVal)
+		for _, v := range invalidValues {
+			if valLower == v {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+// normalizeKey normalizes the fact key
+func (s *FactService) normalizeKey(key string) string {
+	keyLower := strings.ToLower(key)
+
+	// マッピングルール
+	mappings := map[string]string{
+		"好きなもの": "preference",
+		"好き":    "preference",
+		"趣味":    "preference",
+		"推し":    "preference",
+		"好物":    "preference",
+		"職業":    "occupation",
+		"仕事":    "occupation",
+		"居住地":   "location",
+		"住まい":   "location",
+		"場所":    "location",
+		"出身":    "location",
+		"所有":    "possession",
+		"持ち物":   "possession",
+		"ペット":   "possession",
+		"経験":    "experience",
+		"資格":    "experience",
+		"経歴":    "experience",
+		"性格":    "attribute",
+		"特徴":    "attribute",
+	}
+
+	for k, v := range mappings {
+		if strings.Contains(keyLower, k) {
+			return v
+		}
+	}
+
+	return keyLower
+}
+
 // ExtractAndSaveFactsFromURLContent extracts facts from URL content and saves them to the store
 func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, urlContent, sourceType, sourceURL, postAuthor, postAuthorUserName string) {
 	if !s.config.EnableFactStore {
@@ -105,6 +179,14 @@ func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, url
 
 	if len(extracted) > 0 {
 		for _, item := range extracted {
+			// 品質フィルタリング
+			if !s.isValidFact(item.Key, item.Value) {
+				continue
+			}
+
+			// キーの正規化
+			item.Key = s.normalizeKey(item.Key)
+
 			// URLコンテンツからの抽出では、targetは常に__general__
 			fact := model.Fact{
 				Target:             item.Target,

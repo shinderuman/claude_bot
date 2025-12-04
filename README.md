@@ -111,7 +111,7 @@ go run ./cmd/claude_bot
 | 変数名 | 推奨値 | 説明 |
 | :--- | :--- | :--- |
 | `MAX_RESPONSE_TOKENS` | `512` | 応答生成の最大トークン数 |
-| `MAX_SUMMARY_TOKENS` | `512` | 要約生成の最大トークン数 |
+| `MAX_SUMMARY_TOKENS` | `2048` | 要約生成の最大トークン数 |
 | `MAX_FACT_TOKENS` | `1024` | ファクト抽出の最大トークン数（URL事実抽出では多くのトークンが必要） |
 | `MAX_POST_CHARS` | `480` | 1投稿あたりの最大文字数（分割投稿の閾値） |
 
