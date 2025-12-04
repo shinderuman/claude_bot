@@ -166,7 +166,7 @@ func (b *Bot) handleNotification(ctx context.Context, notification *gomastodon.N
 	success := b.processResponse(ctx, session, notification, userMessage, rootStatusID)
 	if success {
 		// 履歴の圧縮
-		b.history.CompressHistoryIfNeeded(ctx, session, b.config, b.llmClient)
+		b.history.CompressHistoryIfNeeded(ctx, session, notification.Account.Acct, b.config, b.llmClient, b.factService)
 		// 会話履歴の保存
 		b.history.Save()
 	}

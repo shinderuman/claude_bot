@@ -209,6 +209,68 @@ func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, url
 	}
 }
 
+// ExtractAndSaveFactsFromSummary extracts facts from a conversation summary and saves them to the store
+func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summary, userID string) {
+	if !s.config.EnableFactStore || summary == "" {
+		return
+	}
+
+	prompt := llm.BuildSummaryFactExtractionPrompt(summary)
+	messages := []model.Message{{Role: "user", Content: prompt}}
+
+	response := s.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactExtraction, s.config.MaxFactTokens, nil)
+	if response == "" {
+		return
+	}
+
+	var extracted []model.Fact
+	jsonStr := llm.ExtractJSON(response)
+	if err := json.Unmarshal([]byte(jsonStr), &extracted); err != nil {
+		log.Printf("サマリ事実抽出JSONパースエラー: %v\nResponse: %s", err, response)
+		return
+	}
+
+	if len(extracted) > 0 {
+		for _, item := range extracted {
+			// 品質フィルタリング
+			if !s.isValidFact(item.Key, item.Value) {
+				continue
+			}
+
+			// キーの正規化
+			item.Key = s.normalizeKey(item.Key)
+
+			// ターゲットの補正（要約からの抽出なので、基本は会話相手）
+			target := item.Target
+			targetUserName := item.TargetUserName
+
+			// targetがunknownまたは空の場合は、userIDを使用
+			if target == "" || target == "unknown" {
+				target = userID
+				targetUserName = userID // UserNameはIDと同じにしておく（正確なUserNameは不明な場合もあるため）
+			}
+
+			fact := model.Fact{
+				Target:             target,
+				TargetUserName:     targetUserName,
+				Author:             userID, // 情報源はユーザーとの会話
+				AuthorUserName:     userID,
+				Key:                item.Key,
+				Value:              item.Value,
+				Timestamp:          time.Now(),
+				SourceType:         "summary",
+				SourceURL:          "",
+				PostAuthor:         "",
+				PostAuthorUserName: "",
+			}
+
+			s.factStore.UpsertWithSource(fact)
+			log.Printf("事実保存(サマリ): [Target:%s] %s = %v", target, item.Key, item.Value)
+		}
+		s.factStore.Save()
+	}
+}
+
 // QueryRelevantFacts queries relevant facts based on the message
 func (s *FactService) QueryRelevantFacts(ctx context.Context, author, authorUserName, message string) string {
 	if !s.config.EnableFactStore {

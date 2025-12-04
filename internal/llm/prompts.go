@@ -97,6 +97,43 @@ Webページの内容:
 - 抽出するものがない場合は空配列 [] を返してください`, urlContent)
 }
 
+// BuildSummaryFactExtractionPrompt creates a prompt for extracting facts from conversation summaries
+func BuildSummaryFactExtractionPrompt(summary string) string {
+	return fmt.Sprintf(`以下の会話要約から、永続的に保存すべき「事実」を抽出してください。
+これは過去の会話の要約であり、ここから重要なユーザー情報を抽出してデータベースを更新します。
+
+【抽出対象となる事実】
+1. **永続的な属性**: 職業、居住地、出身地、年齢層、家族構成など
+2. **強い嗜好**: 「一番好き」「推し」「趣味は〜」など、明確な好み
+3. **経験・経歴**: 過去の重要な出来事、達成したこと、資格など
+4. **所有物**: ペット、車、特定の機材など
+
+【除外すべきノイズ（抽出禁止）】
+1. **一時的な状態**: 「お腹すいた」「眠い」など
+2. **一時的な行動**: 「〜食べた」「〜行った」（習慣でない場合）
+3. **すでに知っている可能性が高い一般的な情報**
+
+【キー（Key）の標準化】
+可能な限り以下の標準キーを使用してください：
+- **preference**: 好きなもの、趣味、推し
+- **attribute**: 性格、特徴、属性
+- **occupation**: 職業、仕事、役割
+- **location**: 居住地、出身地、活動場所
+- **possession**: 所有物、ペット
+- **experience**: 経験、経歴、資格
+
+会話要約:
+%s
+
+出力形式:
+`+compactJSONInstruction+`
+
+重要:
+- targetは要約の対象となっているユーザー（会話相手）としてください
+- target_usernameが不明な場合は "unknown" としてください
+- 抽出するものがない場合は空配列 [] を返してください`, summary)
+}
+
 // BuildAutoPostPrompt creates a prompt for generating an auto-post based on facts
 func BuildAutoPostPrompt(facts []model.Fact) string {
 	var factList strings.Builder

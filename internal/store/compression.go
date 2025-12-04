@@ -10,17 +10,22 @@ import (
 	"claude_bot/internal/model"
 )
 
-// Conversation compression and summarization
-
-func (h *ConversationHistory) CompressHistoryIfNeeded(ctx context.Context, session *model.Session, cfg *config.Config, llmClient *llm.Client) {
-	for i := range session.Conversations {
-		h.compressConversationIfNeeded(ctx, session, &session.Conversations[i], cfg, llmClient)
-	}
-
-	h.compressOldConversations(ctx, session, cfg, llmClient)
+// FactExtractor interface for extracting facts from summaries
+type FactExtractor interface {
+	ExtractAndSaveFactsFromSummary(ctx context.Context, summary, userID string)
 }
 
-func (h *ConversationHistory) compressConversationIfNeeded(ctx context.Context, session *model.Session, conversation *model.Conversation, cfg *config.Config, llmClient *llm.Client) {
+// Conversation compression and summarization
+
+func (h *ConversationHistory) CompressHistoryIfNeeded(ctx context.Context, session *model.Session, userID string, cfg *config.Config, llmClient *llm.Client, factExtractor FactExtractor) {
+	for i := range session.Conversations {
+		h.compressConversationIfNeeded(ctx, session, &session.Conversations[i], userID, cfg, llmClient, factExtractor)
+	}
+
+	h.compressOldConversations(ctx, session, userID, cfg, llmClient, factExtractor)
+}
+
+func (h *ConversationHistory) compressConversationIfNeeded(ctx context.Context, session *model.Session, conversation *model.Conversation, userID string, cfg *config.Config, llmClient *llm.Client, factExtractor FactExtractor) {
 	if len(conversation.Messages) <= cfg.ConversationMessageCompressThreshold {
 		return
 	}
@@ -37,10 +42,15 @@ func (h *ConversationHistory) compressConversationIfNeeded(ctx context.Context, 
 	conversation.Messages = conversation.Messages[compressCount:]
 	session.Summary = summary
 
+	// 要約から事実を抽出
+	if factExtractor != nil {
+		go factExtractor.ExtractAndSaveFactsFromSummary(ctx, summary, userID)
+	}
+
 	log.Printf("会話内圧縮完了: %d件のメッセージを削除、%d件を保持", compressCount, len(conversation.Messages))
 }
 
-func (h *ConversationHistory) compressOldConversations(ctx context.Context, session *model.Session, cfg *config.Config, llmClient *llm.Client) {
+func (h *ConversationHistory) compressOldConversations(ctx context.Context, session *model.Session, userID string, cfg *config.Config, llmClient *llm.Client, factExtractor FactExtractor) {
 	oldConversations := FindOldConversations(cfg, session)
 	if len(oldConversations) == 0 {
 		return
@@ -58,6 +68,13 @@ func (h *ConversationHistory) compressOldConversations(ctx context.Context, sess
 	}
 
 	UpdateSessionWithSummary(session, summary, oldConversations)
+	UpdateSessionWithSummary(session, summary, oldConversations)
+
+	// 要約から事実を抽出
+	if factExtractor != nil {
+		go factExtractor.ExtractAndSaveFactsFromSummary(ctx, summary, userID)
+	}
+
 	log.Printf("履歴圧縮完了: %d件の会話を要約に移行", len(oldConversations))
 }
 
