@@ -56,10 +56,6 @@ func (c *Client) StreamUser(ctx context.Context, eventChan chan<- mastodon.Event
 	log.Println("ユーザーストリーミング接続が切断されました")
 }
 
-func isRemoteUser(acct string) bool {
-	return strings.Contains(acct, "@")
-}
-
 func (c *Client) GetRootStatusID(ctx context.Context, notification *mastodon.Notification) string {
 	if notification.Status.InReplyToID == nil {
 		return string(notification.Status.ID)
@@ -79,7 +75,13 @@ func (c *Client) GetRootStatusID(ctx context.Context, notification *mastodon.Not
 }
 
 func (c *Client) convertToIDAndFetchStatus(ctx context.Context, inReplyToID any) (*mastodon.Status, error) {
-	id := mastodon.ID(fmt.Sprintf("%v", inReplyToID))
+	statusID := fmt.Sprintf("%v", inReplyToID)
+	return c.GetStatus(ctx, statusID)
+}
+
+// GetStatus retrieves a status by ID
+func (c *Client) GetStatus(ctx context.Context, statusID string) (*mastodon.Status, error) {
+	id := mastodon.ID(statusID)
 	return c.client.GetStatus(ctx, id)
 }
 

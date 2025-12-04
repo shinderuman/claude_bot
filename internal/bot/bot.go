@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 
@@ -168,6 +169,24 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 	visibility := string(notification.Status.Visibility)
 
 	conversation := b.history.GetOrCreateConversation(session, rootStatusID)
+
+	// 親投稿がある場合、その内容を取得してコンテキストに追加
+	if notification.Status.InReplyToID != nil {
+		parentStatusID := fmt.Sprintf("%v", notification.Status.InReplyToID)
+		parentStatus, err := b.mastodonClient.GetStatus(ctx, parentStatusID)
+		if err == nil && parentStatus != nil {
+			parentContent, _, _ := b.mastodonClient.ExtractContentFromStatus(parentStatus)
+			if parentContent != "" {
+				parentAuthor := parentStatus.Account.DisplayName
+				if parentAuthor == "" {
+					parentAuthor = parentStatus.Account.Username
+				}
+				// 親投稿の内容をコンテキストとして追加
+				contextMessage := fmt.Sprintf("[参照投稿 by %s]: %s", parentAuthor, parentContent)
+				userMessage = contextMessage + "\n\n" + userMessage
+			}
+		}
+	}
 
 	// URLメタデータの取得と追加
 	if urlContext := b.extractURLContext(ctx, notification, userMessage); urlContext != "" {
