@@ -107,13 +107,35 @@ func (fc *FactCollector) Start(ctx context.Context) {
 		go fc.mastodonClient.StreamPublic(ctx, eventChan)
 	}
 
-	// ホームタイムラインのストリーミング
-	if fc.config.FactCollectionHome {
-		go fc.mastodonClient.StreamUser(ctx, eventChan)
-	}
+	// ホームタイムラインはBot側から受け取るため、ここでは接続しない
 
 	// イベント処理ループ
 	go fc.processEvents(ctx, eventChan)
+}
+
+// ProcessHomeEvent はBot側から渡されたホームタイムラインのイベントを処理します
+func (fc *FactCollector) ProcessHomeEvent(event *gomastodon.UpdateEvent) {
+	if !fc.config.FactCollectionHome {
+		return
+	}
+
+	status := event.Status
+	if status == nil {
+		return
+	}
+
+	// ファクト収集対象かチェック
+	if !mastodon.ShouldCollectFactsFromStatus(status) {
+		return
+	}
+
+	// レート制限チェック
+	if !fc.canProcess() {
+		return
+	}
+
+	// 非同期で処理
+	go fc.processStatus(context.Background(), status)
 }
 
 // processEvents はイベントを受信してファクト収集を実行します

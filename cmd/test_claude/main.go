@@ -15,6 +15,7 @@ import (
 	"claude_bot/internal/config"
 	"claude_bot/internal/llm"
 	"claude_bot/internal/model"
+	"claude_bot/internal/store"
 )
 
 func main() {
@@ -41,8 +42,10 @@ func main() {
 		testFactExtraction(cfg, llmClient, *message)
 	case "raw-image":
 		testRawImage(cfg, llmClient, *message, *imagePath)
+	case "auto-post":
+		testAutoPost(cfg, llmClient)
 	default:
-		log.Fatalf("不明なモード: %s (使用可能: response, summary, fact, raw-image)", *mode)
+		log.Fatalf("不明なモード: %s (使用可能: response, summary, fact, raw-image, auto-post)", *mode)
 	}
 }
 
@@ -238,6 +241,59 @@ func testRawImage(cfg *config.Config, client *llm.Client, message, imagePath str
 	log.Println("--- Claude応答 ---")
 	log.Println(response)
 	log.Println("------------------")
+}
+
+func testAutoPost(cfg *config.Config, client *llm.Client) {
+	log.Printf("=== 自動投稿テスト ===")
+	log.Println()
+
+	if cfg.AnthropicAuthToken == "" {
+		log.Fatal("エラー: ANTHROPIC_AUTH_TOKEN環境変数が設定されていません")
+	}
+
+	// FactStore初期化
+	factStore := store.InitializeFactStore()
+
+	// ファクトバンドル取得
+	facts, err := factStore.GetRandomGeneralFactBundle(5)
+	if err != nil {
+		log.Fatalf("ファクト取得エラー: %v", err)
+	}
+	if len(facts) == 0 {
+		log.Fatal("エラー: 一般知識のファクトが見つかりません。facts.jsonを確認してください。")
+	}
+
+	log.Printf("取得したファクト数: %d件", len(facts))
+	log.Printf("情報源: %s", facts[0].TargetUserName)
+	for _, f := range facts {
+		log.Printf("- %s: %v", f.Key, f.Value)
+	}
+	log.Println()
+
+	// プロンプト作成
+	prompt := llm.BuildAutoPostPrompt(facts)
+	log.Println("--- 生成されたプロンプト ---")
+	log.Println(prompt)
+	log.Println("--------------------------")
+	log.Println()
+
+	// システムプロンプト（キャラクター設定のみ）
+	systemPrompt := llm.BuildSystemPrompt(cfg.CharacterPrompt, "", "", true)
+
+	// API呼び出し
+	ctx := context.Background()
+	response := client.CallClaudeAPI(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, int64(cfg.MaxPostChars), nil)
+
+	if response == "" {
+		log.Fatal("エラー: Claudeからの応答がありません")
+	}
+
+	log.Println("成功: 自動投稿文を生成しました")
+	log.Println()
+	log.Println("--- 生成された投稿文 ---")
+	log.Println(response)
+	log.Println("----------------------")
+	log.Printf("文字数: %d文字", len([]rune(response)))
 }
 
 func loadImage(path string) (*model.Image, error) {

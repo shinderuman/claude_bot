@@ -227,3 +227,71 @@ func (s *FactStore) GetRecentFacts(limit int) []model.Fact {
 	}
 	return result
 }
+
+// GetRandomGeneralFactBundle はランダムな一般知識のファクトバンドルを取得します
+// 同じ情報源(TargetUserName)から最大limit件のファクトを返します
+func (s *FactStore) GetRandomGeneralFactBundle(limit int) ([]model.Fact, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// 1. 一般知識のファクトを抽出
+	var generalFacts []model.Fact
+	for _, fact := range s.Facts {
+		if fact.Target == "__general__" {
+			generalFacts = append(generalFacts, fact)
+		}
+	}
+
+	if len(generalFacts) == 0 {
+		return nil, nil
+	}
+
+	// 2. ユニークな情報源(TargetUserName)を抽出
+	sourceMap := make(map[string][]model.Fact)
+	var sources []string
+
+	for _, fact := range generalFacts {
+		source := fact.TargetUserName
+		if source == "" {
+			source = "unknown"
+		}
+		if _, exists := sourceMap[source]; !exists {
+			sources = append(sources, source)
+		}
+		sourceMap[source] = append(sourceMap[source], fact)
+	}
+
+	// 3. ランダムに情報源を選択
+	// 注意: math/randは非推奨になりつつあるが、ここでは厳密な乱数は不要
+	// Go 1.20以降は crypto/rand または math/rand/v2 が推奨されるが、
+	// 既存コードに合わせて簡易的な実装にする（あるいはtimeベースで選択）
+	if len(sources) == 0 {
+		return nil, nil
+	}
+
+	// 簡易的なランダム選択 (mapの反復順序はランダムだが、ここでは明示的に選択)
+	// time.Now().UnixNano() をシードにするのは毎回呼ぶと偏るが、頻度が低いので許容
+	// しかし、テスト容易性のために単純にインデックスで選ぶ
+	// ここでは time.Now().UnixNano() を使ってインデックスを決定
+	idx := int(time.Now().UnixNano() % int64(len(sources)))
+	selectedSource := sources[idx]
+	selectedFacts := sourceMap[selectedSource]
+
+	// 4. 選択されたファクトから最大limit件を取得
+	if len(selectedFacts) <= limit {
+		return selectedFacts, nil
+	}
+
+	// ランダムにlimit件選ぶか、先頭から選ぶか
+	// ここではシャッフルして先頭から選ぶ
+	// シャッフル（Fisher-Yates）
+	shuffled := make([]model.Fact, len(selectedFacts))
+	copy(shuffled, selectedFacts)
+
+	for i := len(shuffled) - 1; i > 0; i-- {
+		j := int(time.Now().UnixNano() % int64(i+1))
+		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+	}
+
+	return shuffled[:limit], nil
+}

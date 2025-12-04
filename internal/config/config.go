@@ -47,6 +47,9 @@ type Config struct {
 
 	// 画像認識設定
 	EnableImageRecognition bool
+
+	// 自動投稿設定
+	AutoPostIntervalHours int
 }
 
 func LoadEnvironment() {
@@ -91,6 +94,8 @@ func LoadConfig() *Config {
 		FactCollectionFromPostContent: parseBool(os.Getenv("FACT_COLLECTION_FROM_POST_CONTENT"), false),
 
 		EnableImageRecognition: parseBool(os.Getenv("ENABLE_IMAGE_RECOGNITION"), false),
+
+		AutoPostIntervalHours: parseIntWithDefault(os.Getenv("AUTO_POST_INTERVAL_HOURS"), 0),
 	}
 }
 
@@ -122,6 +127,17 @@ func parseIntRequired(value string) int {
 	parsed, err := strconv.Atoi(value)
 	if err != nil {
 		log.Fatal("エラー: 環境変数の値が無効です。数値を指定してください: ", value)
+	}
+	return parsed
+}
+
+func parseIntWithDefault(value string, defaultValue int) int {
+	if value == "" {
+		return defaultValue
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return defaultValue
 	}
 	return parsed
 }

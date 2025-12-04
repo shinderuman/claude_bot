@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"claude_bot/internal/model"
 	"fmt"
 	"strings"
 )
@@ -75,13 +76,45 @@ func BuildURLContentFactExtractionPrompt(urlContent string) string {
 Webページの内容:
 %s
 
-%s
+出力形式:
+`+compactJSONInstruction+`
 
 重要:
 - targetは必ず "__general__" としてください（一般知識として保存）
 - target_usernameにはWebサイトのドメイン名やサイト名を入力してください
 - keyには情報の種類（例: "リリース情報", "技術情報", "製品名"など）を指定してください
-- %s`, urlContent, compactJSONInstruction, emptyArrayInstruction)
+- 抽出するものがない場合は空配列 [] を返してください`, urlContent)
+}
+
+// BuildAutoPostPrompt creates a prompt for generating an auto-post based on facts
+func BuildAutoPostPrompt(facts []model.Fact) string {
+	var factList strings.Builder
+	var source string
+	for _, fact := range facts {
+		factList.WriteString(fmt.Sprintf("- %s: %v\n", fact.Key, fact.Value))
+		if source == "" {
+			source = fact.TargetUserName
+		}
+	}
+
+	return fmt.Sprintf(`以下の情報を元に、SNSへの投稿文を作成してください。
+これはあなたがWebで見つけた情報についての「独り言」や「雑学の紹介」です。
+
+【情報源】
+%s
+
+【内容】
+%s
+
+【投稿のルール】
+1. キャラクターになりきって書いてください（親しみやすい口調、絵文字の使用など）。
+2. 「〜らしいよ」「〜なんだって」といった伝聞形式や、「へー」「知らなかった」といった感想を交えてください。
+3. 情報を単に羅列するのではなく、読んでいて面白い、または役に立つ内容にまとめてください。
+4. 130文字以内で簡潔にまとめてください（投稿時に #bot タグが自動で追加されます）。
+5. ハッシュタグは含めないでください。
+6. 嘘や誇張は避けてください。
+
+投稿文:`, source, factList.String())
 }
 
 // BuildFactQueryPrompt creates a prompt for generating search queries for facts

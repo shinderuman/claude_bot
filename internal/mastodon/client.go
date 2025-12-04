@@ -216,6 +216,20 @@ func (c *Client) postReply(ctx context.Context, inReplyToID, content, visibility
 	return status, nil
 }
 
+// PostStatus posts a new status (not a reply)
+func (c *Client) PostStatus(ctx context.Context, content, visibility, idempotencyKey string) error {
+	toot := &mastodon.Toot{
+		Status:     content,
+		Visibility: visibility,
+	}
+	// IdempotencyKey is not directly supported in go-mastodon's Toot struct in this version,
+	// but we include the parameter for future compatibility or if we wrap the client differently.
+	// For now, we just post the status.
+
+	_, err := c.client.PostStatus(ctx, toot)
+	return err
+}
+
 // Response splitting
 
 func splitResponse(response, mention string, maxChars int) []string {

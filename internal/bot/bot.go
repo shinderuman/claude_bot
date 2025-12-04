@@ -82,6 +82,9 @@ func (b *Bot) Run(ctx context.Context) error {
 
 	log.Println("メンションの監視を開始しました")
 
+	// 自動投稿ループの開始
+	go b.startAutoPostLoop(ctx)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -91,6 +94,11 @@ func (b *Bot) Run(ctx context.Context) error {
 			case *gomastodon.NotificationEvent:
 				if e.Notification.Type == "mention" && e.Notification.Status != nil {
 					b.handleNotification(ctx, e.Notification)
+				}
+			case *gomastodon.UpdateEvent:
+				// ファクト収集が有効な場合、ホームタイムラインの投稿を処理
+				if b.factCollector != nil && b.config.FactCollectionHome {
+					go b.factCollector.ProcessHomeEvent(e)
 				}
 			}
 		}
@@ -286,4 +294,60 @@ func (b *Bot) extractURLContext(ctx context.Context, notification *gomastodon.No
 	}
 
 	return ""
+}
+
+func (b *Bot) startAutoPostLoop(ctx context.Context) {
+	if b.config.AutoPostIntervalHours <= 0 {
+		return
+	}
+
+	log.Printf("自動投稿ループを開始しました (間隔: %d時間)", b.config.AutoPostIntervalHours)
+	ticker := time.NewTicker(time.Duration(b.config.AutoPostIntervalHours) * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			b.executeAutoPost(ctx)
+		}
+	}
+}
+
+func (b *Bot) executeAutoPost(ctx context.Context) {
+	// ランダムな一般知識のバンドルを取得（最大5件）
+	facts, err := b.factStore.GetRandomGeneralFactBundle(5)
+	if err != nil || len(facts) == 0 {
+		return
+	}
+
+	// プロンプト作成
+	prompt := llm.BuildAutoPostPrompt(facts)
+	// システムプロンプトはキャラクター設定のみを使用（要約などは不要）
+	systemPrompt := llm.BuildSystemPrompt(b.config.CharacterPrompt, "", "", true)
+
+	// 画像なしで呼び出し
+	response := b.llmClient.CallClaudeAPI(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, int64(b.config.MaxPostChars), nil)
+
+	if response != "" {
+		// #botタグを追加（AI生成コンテンツであることを明示）
+		response = response + "\n\n#bot"
+
+		// 公開投稿として送信
+		log.Printf("自動投稿を実行します: %s...", string([]rune(response))[:min(20, len([]rune(response)))])
+		err := b.mastodonClient.PostStatus(ctx, response, "public", "")
+		if err != nil {
+			log.Printf("自動投稿エラー: %v", err)
+		} else {
+			log.Println("自動投稿成功")
+		}
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
