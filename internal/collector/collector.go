@@ -191,10 +191,6 @@ func (fc *FactCollector) canProcess() bool {
 
 // processStatus は投稿からファクトを抽出します
 func (fc *FactCollector) processStatus(ctx context.Context, status *gomastodon.Status) {
-	// セマフォで並列数を制限
-	fc.semaphore <- struct{}{}
-	defer func() { <-fc.semaphore }()
-
 	// ソース情報
 	sourceType := fc.determineSourceType(status)
 	sourceURL := string(status.URL)
@@ -229,6 +225,10 @@ func (fc *FactCollector) extractFactsFromContent(ctx context.Context, status *go
 	if content == "" {
 		return
 	}
+
+	// セマフォで並列数を制限
+	fc.semaphore <- struct{}{}
+	defer func() { <-fc.semaphore }()
 
 	// LLMでファクト抽出
 	prompt := llm.BuildFactExtractionPrompt(postAuthorUserName, postAuthor, content)
@@ -319,68 +319,78 @@ func (fc *FactCollector) extractFactsFromURLs(ctx context.Context, status *gomas
 			continue
 		}
 
-		// ページコンテンツ取得
-		meta, err := fetcher.FetchPageContent(ctx, urlStr, fc.config.URLBlacklist)
-		if err != nil {
-			// 取得エラーはログに出さない
-			continue
-		}
+		// 各URLの処理を非同期で実行（セマフォで並列数を制限）
+		go fc.processURL(ctx, urlStr, urlDomain, sourceType, sourceURL, postAuthor, postAuthorUserName)
+	}
+}
 
-		// ページコンテンツからファクト抽出
-		urlContent := fetcher.FormatPageContent(meta)
+// processURL は単一のURLからファクトを抽出します
+func (fc *FactCollector) processURL(ctx context.Context, urlStr, urlDomain, sourceType, sourceURL, postAuthor, postAuthorUserName string) {
+	// セマフォで並列数を制限
+	fc.semaphore <- struct{}{}
+	defer func() { <-fc.semaphore }()
 
-		// LLMでファクト抽出（URLコンテンツ用のプロンプトを使用）
-		prompt := llm.BuildURLContentFactExtractionPrompt(urlContent)
-		messages := []model.Message{{Role: "user", Content: prompt}}
+	// ページコンテンツ取得
+	meta, err := fetcher.FetchPageContent(ctx, urlStr, fc.config.URLBlacklist)
+	if err != nil {
+		// 取得エラーはログに出さない
+		return
+	}
 
-		response := fc.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactExtraction, fc.config.MaxFactTokens, nil)
-		if response == "" {
-			continue
-		}
+	// ページコンテンツからファクト抽出
+	urlContent := fetcher.FormatPageContent(meta)
 
-		var extracted []model.Fact
-		jsonStr := llm.ExtractJSON(response)
-		if err := json.Unmarshal([]byte(jsonStr), &extracted); err != nil {
-			// JSONパースエラーはログに出さない
-			continue
-		}
+	// LLMでファクト抽出（URLコンテンツ用のプロンプトを使用）
+	prompt := llm.BuildURLContentFactExtractionPrompt(urlContent)
+	messages := []model.Message{{Role: "user", Content: prompt}}
 
-		if len(extracted) > 0 {
-			for _, item := range extracted {
-				target := item.Target
-				targetUserName := item.TargetUserName
-				if target == "" {
-					// ターゲットが不明な場合は「一般知識」として扱う
-					// これにより、特定の個人に紐付かない知識として保存される
-					target = "__general__"
-					targetUserName = "Web Knowledge"
-					if urlDomain != "" {
-						targetUserName = urlDomain
-					}
+	response := fc.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactExtraction, fc.config.MaxFactTokens, nil)
+	if response == "" {
+		return
+	}
+
+	var extracted []model.Fact
+	jsonStr := llm.ExtractJSON(response)
+	if err := json.Unmarshal([]byte(jsonStr), &extracted); err != nil {
+		// JSONパースエラーはログに出さない
+		return
+	}
+
+	if len(extracted) > 0 {
+		for _, item := range extracted {
+			target := item.Target
+			targetUserName := item.TargetUserName
+			if target == "" {
+				// ターゲットが不明な場合は「一般知識」として扱う
+				// これにより、特定の個人に紐付かない知識として保存される
+				target = "__general__"
+				targetUserName = "Web Knowledge"
+				if urlDomain != "" {
+					targetUserName = urlDomain
 				}
-
-				fact := model.Fact{
-					Target:             target,
-					TargetUserName:     targetUserName,
-					Author:             postAuthor,
-					AuthorUserName:     postAuthorUserName,
-					Key:                item.Key,
-					Value:              item.Value,
-					Timestamp:          time.Now(),
-					SourceType:         sourceType,
-					SourceURL:          meta.URL, // リダイレクト後の最終URL
-					PostAuthor:         postAuthor,
-					PostAuthorUserName: postAuthorUserName,
-				}
-
-				fc.factStore.UpsertWithSource(fact)
-
-				// 成功ログの詳細出力
-				log.Printf("✅ ファクト保存(URL): PostURL=%s, TargetURL=%s, Target=%s(%s), Key=%s, Value=%v, Source=%s",
-					sourceURL, meta.URL, target, targetUserName, item.Key, item.Value, sourceType)
 			}
-			fc.factStore.Save()
+
+			fact := model.Fact{
+				Target:             target,
+				TargetUserName:     targetUserName,
+				Author:             postAuthor,
+				AuthorUserName:     postAuthorUserName,
+				Key:                item.Key,
+				Value:              item.Value,
+				Timestamp:          time.Now(),
+				SourceType:         sourceType,
+				SourceURL:          meta.URL, // リダイレクト後の最終URL
+				PostAuthor:         postAuthor,
+				PostAuthorUserName: postAuthorUserName,
+			}
+
+			fc.factStore.UpsertWithSource(fact)
+
+			// 成功ログの詳細出力
+			log.Printf("✅ ファクト保存(URL): PostURL=%s, TargetURL=%s, Target=%s(%s), Key=%s, Value=%v, Source=%s",
+				sourceURL, meta.URL, target, targetUserName, item.Key, item.Value, sourceType)
 		}
+		fc.factStore.Save()
 	}
 }
 

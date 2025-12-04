@@ -230,3 +230,8 @@ func BuildSystemPrompt(characterPrompt, sessionSummary, relevantFacts string, in
 
 	return prompt.String()
 }
+
+// BuildErrorMessagePrompt creates a prompt for generating error messages in character voice
+func BuildErrorMessagePrompt() string {
+	return "「ごめんなさい、あなたに返事を送るのに失敗したのでいまのメッセージをもう一度送ってくれますか?」というメッセージを、あなたのキャラクターの口調で言い換えてください。説明は不要です。変換後のメッセージのみを返してください。"
+}

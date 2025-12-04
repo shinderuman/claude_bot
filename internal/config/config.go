@@ -50,6 +50,7 @@ type Config struct {
 
 	// 自動投稿設定
 	AutoPostIntervalHours int
+	AutoPostVisibility    string
 
 	// ファクト管理設定
 	FactRetentionDays int // ファクト保持期間（日数）
@@ -100,6 +101,7 @@ func LoadConfig() *Config {
 		EnableImageRecognition: parseBool(os.Getenv("ENABLE_IMAGE_RECOGNITION"), false),
 
 		AutoPostIntervalHours: parseIntRequired(os.Getenv("AUTO_POST_INTERVAL_HOURS")),
+		AutoPostVisibility:    parseString(os.Getenv("AUTO_POST_VISIBILITY"), "unlisted"),
 
 		FactRetentionDays: parseIntRequired(os.Getenv("FACT_RETENTION_DAYS")),
 		MaxFacts:          parseIntRequired(os.Getenv("MAX_FACTS")),
@@ -128,6 +130,13 @@ func parseBool(value string, defaultValue bool) bool {
 		return defaultValue
 	}
 	return value == "true" || value == "1"
+}
+
+func parseString(value string, defaultValue string) string {
+	if value == "" {
+		return defaultValue
+	}
+	return value
 }
 
 func parseIntRequired(value string) int {

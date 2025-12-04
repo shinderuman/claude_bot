@@ -233,7 +233,7 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 
 	if response == "" {
 		store.RollbackLastMessages(conversation, 1)
-		b.mastodonClient.PostErrorMessage(ctx, statusID, mention, visibility)
+		b.postErrorMessage(ctx, statusID, mention, visibility)
 		return false
 	}
 
@@ -243,12 +243,30 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 
 	if err != nil {
 		store.RollbackLastMessages(conversation, 2)
-		b.mastodonClient.PostErrorMessage(ctx, statusID, mention, visibility)
+		b.postErrorMessage(ctx, statusID, mention, visibility)
 		return false
 	}
 
 	session.LastUpdated = time.Now()
 	return true
+}
+
+// postErrorMessage generates and posts an error message using LLM with character voice
+func (b *Bot) postErrorMessage(ctx context.Context, statusID, mention, visibility string) {
+	log.Printf("応答生成失敗: エラーメッセージを投稿します")
+
+	// LLMを使ってキャラクターの口調でエラーメッセージを生成
+	prompt := llm.BuildErrorMessagePrompt()
+	systemPrompt := llm.BuildSystemPrompt(b.config.CharacterPrompt, "", "", true)
+
+	errorMsg := b.llmClient.CallClaudeAPI(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxResponseTokens, nil)
+
+	// LLM呼び出しが失敗した場合はデフォルトメッセージ
+	if errorMsg == "" {
+		errorMsg = "申し訳ありません。エラーが発生しました。もう一度お試しください。"
+	}
+
+	b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, errorMsg, visibility)
 }
 
 // extractFactsFromMentionURLs extracts facts from URLs in the mention
@@ -363,7 +381,7 @@ func (b *Bot) executeAutoPost(ctx context.Context) {
 
 		// 公開投稿として送信
 		log.Printf("自動投稿を実行します: %s...", string([]rune(response))[:min(20, len([]rune(response)))])
-		err := b.mastodonClient.PostStatus(ctx, response, "public", "")
+		err := b.mastodonClient.PostStatus(ctx, response, b.config.AutoPostVisibility, "")
 		if err != nil {
 			log.Printf("自動投稿エラー: %v", err)
 		} else {

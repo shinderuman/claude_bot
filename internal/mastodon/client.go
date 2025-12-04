@@ -175,15 +175,6 @@ func (c *Client) BuildMention(acct string) string {
 	return "@" + acct + " "
 }
 
-// Post operations
-
-func (c *Client) PostErrorMessage(ctx context.Context, statusID, mention, visibility string) {
-	log.Printf("応答生成失敗: エラーメッセージを投稿します")
-	// エラーメッセージは固定または簡易生成
-	errorMsg := "申し訳ありません。エラーが発生しました。"
-	c.PostResponseWithSplit(ctx, statusID, mention, errorMsg, visibility)
-}
-
 func (c *Client) PostResponseWithSplit(ctx context.Context, inReplyToID, mention, response, visibility string) error {
 	parts := splitResponse(response, mention, c.config.MaxPostChars)
 
