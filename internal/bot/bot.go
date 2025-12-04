@@ -405,8 +405,6 @@ func (b *Bot) executeAutoPost(ctx context.Context) {
 		err := b.mastodonClient.PostStatus(ctx, response, b.config.AutoPostVisibility, "")
 		if err != nil {
 			log.Printf("自動投稿エラー: %v", err)
-		} else {
-			log.Println("自動投稿成功")
 		}
 	}
 }

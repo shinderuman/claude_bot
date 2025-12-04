@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+const nodeInfoTimeout = 5 * time.Second
+
 // NodeInfoLinks represents the .well-known/nodeinfo response
 type NodeInfoLinks struct {
 	Links []NodeInfoLink `json:"links"`
@@ -29,8 +31,6 @@ type NodeInfoSoftware struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
 }
-
-const nodeInfoTimeout = 5 * time.Second
 
 var fediverseSoftware = map[string]bool{
 	"mastodon":   true,

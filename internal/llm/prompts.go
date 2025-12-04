@@ -23,6 +23,10 @@ const (
 
 	// SystemPromptImageRequestDetection is the system prompt for detecting image requests
 	SystemPromptImageRequestDetection = `あなたは画像生成リクエストを判定するアシスタントです。ユーザーのメッセージが画像生成を依頼しているかを正確に判定してください。`
+
+	// System prompts for different LLM tasks
+	SystemPromptFactExtraction = "あなたは事実抽出エンジンです。JSONのみを出力してください。"
+	SystemPromptFactQuery      = "あなたは検索クエリ生成エンジンです。JSONのみを出力してください。"
 )
 
 // BuildFactExtractionPrompt creates a prompt for extracting facts from user messages
@@ -295,12 +299,6 @@ func BuildSummaryPrompt(formattedMessages, existingSummary string) string {
 
 ` + content
 }
-
-// System prompts for different LLM tasks
-const (
-	SystemPromptFactExtraction = "あなたは事実抽出エンジンです。JSONのみを出力してください。"
-	SystemPromptFactQuery      = "あなたは検索クエリ生成エンジンです。JSONのみを出力してください。"
-)
 
 // BuildSystemPrompt creates the system prompt for conversation responses
 func BuildSystemPrompt(characterPrompt, sessionSummary, relevantFacts string, includeCharacterPrompt bool) string {
