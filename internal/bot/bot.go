@@ -285,7 +285,7 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 
 	case model.IntentDailySummary:
 		// 1日まとめ機能
-		return b.handleDailySummaryRequest(ctx, session, conversation, notification, targetDate, statusID, mention, visibility)
+		return b.handleDailySummaryRequest(ctx, session, conversation, notification, targetDate, userMessage, statusID, mention, visibility)
 	}
 
 	// 通常の会話処理（chat または フォールバック）
@@ -641,7 +641,7 @@ func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session
 }
 
 // handleDailySummaryRequest handles the daily summary request
-func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Session, conversation *model.Conversation, notification *gomastodon.Notification, targetDate, statusID, mention, visibility string) bool {
+func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Session, conversation *model.Conversation, notification *gomastodon.Notification, targetDate, userMessage, statusID, mention, visibility string) bool {
 	// リクエスト送信者のアカウントIDを取得
 	accountID := string(notification.Account.ID)
 
@@ -696,7 +696,7 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 	}
 
 	// LLMによるまとめ
-	prompt := llm.BuildDailySummaryPrompt(statuses, targetDateStr)
+	prompt := llm.BuildDailySummaryPrompt(statuses, targetDateStr, userMessage)
 	systemPrompt := llm.BuildSystemPrompt(b.config.CharacterPrompt, "", "", true)
 
 	response := b.llmClient.CallClaudeAPI(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil)

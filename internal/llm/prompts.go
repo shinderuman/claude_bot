@@ -190,7 +190,7 @@ func BuildAssistantAnalysisPrompt(statuses []*mastodon.Status, userRequest strin
 		sb.WriteString(fmt.Sprintf("- [%s] (ID: %s): %s\n", createdAt, status.ID, content))
 	}
 
-	sb.WriteString("\n【分析リクエスト】\n")
+	sb.WriteString("\n【ユーザーからのリクエスト】\n")
 	if userRequest != "" {
 		sb.WriteString(userRequest)
 	} else {
@@ -217,7 +217,7 @@ func BuildAutoPostPrompt(facts []model.Fact) string {
 }
 
 // BuildDailySummaryPrompt creates a prompt for summarizing daily activities
-func BuildDailySummaryPrompt(statuses []*mastodon.Status, targetDateStr string) string {
+func BuildDailySummaryPrompt(statuses []*mastodon.Status, targetDateStr, userRequest string) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("以下は **%s** のMastodon投稿ログです。この1日の活動をまとめてください。\n\n", targetDateStr))
 	sb.WriteString("【投稿ログ】\n")
@@ -228,6 +228,11 @@ func BuildDailySummaryPrompt(statuses []*mastodon.Status, targetDateStr string) 
 		content := re.ReplaceAllString(string(status.Content), "")
 		createdAt := status.CreatedAt.Format("15:04")
 		sb.WriteString(fmt.Sprintf("- [%s]: %s\n", createdAt, content))
+	}
+
+	if userRequest != "" {
+		sb.WriteString("\n【ユーザーからのリクエスト】\n")
+		sb.WriteString(userRequest + "\n")
 	}
 
 	sb.WriteString(Templates.DailySummary.Instruction)
