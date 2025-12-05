@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"claude_bot/internal/config"
+	"claude_bot/internal/facts"
 	"claude_bot/internal/fetcher"
 	"claude_bot/internal/llm"
 	"claude_bot/internal/mastodon"
@@ -270,10 +271,7 @@ func (fc *FactCollector) extractFactsFromContent(ctx context.Context, status *go
 			}
 
 			fc.factStore.UpsertWithSource(fact)
-
-			// 成功ログの詳細出力
-			log.Printf("✅ ファクト保存(投稿): URL=%s, Target=%s(%s), Key=%s, Value=%v, Source=%s",
-				sourceURL, target, targetUserName, item.Key, item.Value, sourceType)
+			facts.LogFactSaved(fact)
 		}
 		fc.factStore.Save()
 	}
@@ -385,10 +383,7 @@ func (fc *FactCollector) processURL(ctx context.Context, urlStr, urlDomain, sour
 			}
 
 			fc.factStore.UpsertWithSource(fact)
-
-			// 成功ログの詳細出力
-			log.Printf("✅ ファクト保存(URL): PostURL=%s, TargetURL=%s, Target=%s(%s), Key=%s, Value=%v, Source=%s",
-				sourceURL, meta.URL, target, targetUserName, item.Key, item.Value, sourceType)
+			facts.LogFactSaved(fact)
 		}
 		fc.factStore.Save()
 	}

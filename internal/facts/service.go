@@ -84,10 +84,59 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, author, authorUse
 			}
 
 			s.factStore.UpsertWithSource(fact)
-			log.Printf("事実保存: [Target:%s(%s)] %s = %v (by %s, source:%s)", target, targetUserName, item.Key, item.Value, author, sourceType)
+			LogFactSaved(fact)
 		}
 		s.factStore.Save()
 	}
+}
+
+// LogFactSaved outputs a standardized log message for saved facts
+func LogFactSaved(fact model.Fact) {
+	parts := []string{
+		formatTarget(fact),
+		fmt.Sprintf("Key=%s", fact.Key),
+		fmt.Sprintf("Value=%v", fact.Value),
+		fmt.Sprintf("Source=%s", fact.SourceType),
+	}
+
+	if fact.SourceURL != "" {
+		parts = append(parts, fmt.Sprintf("URL=%s", fact.SourceURL))
+	}
+
+	if authorInfo := formatAuthor(fact); authorInfo != "" {
+		parts = append(parts, authorInfo)
+	}
+
+	log.Printf("✅ ファクト保存: %s", strings.Join(parts, ", "))
+}
+
+// formatTarget formats the Target field with optional TargetUserName
+func formatTarget(fact model.Fact) string {
+	if fact.TargetUserName != "" {
+		return fmt.Sprintf("Target=%s(%s)", fact.Target, fact.TargetUserName)
+	}
+	return fmt.Sprintf("Target=%s", fact.Target)
+}
+
+// formatAuthor formats the Author or PostAuthor field based on source type
+func formatAuthor(fact model.Fact) string {
+	switch fact.SourceType {
+	case "mention", "test":
+		if fact.AuthorUserName != "" {
+			return fmt.Sprintf("By=%s(%s)", fact.Author, fact.AuthorUserName)
+		}
+		if fact.Author != "" {
+			return fmt.Sprintf("By=%s", fact.Author)
+		}
+	case "federated", "home":
+		if fact.PostAuthor != "" {
+			if fact.PostAuthorUserName != "" {
+				return fmt.Sprintf("PostBy=%s(%s)", fact.PostAuthor, fact.PostAuthorUserName)
+			}
+			return fmt.Sprintf("PostBy=%s", fact.PostAuthor)
+		}
+	}
+	return ""
 }
 
 // isValidFact checks if the fact is valid and worth saving
@@ -203,7 +252,7 @@ func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, url
 			}
 
 			s.factStore.UpsertWithSource(fact)
-			log.Printf("事実保存(URL): [Target:%s(%s)] %s = %v (source:%s, url:%s)", fact.Target, fact.TargetUserName, item.Key, item.Value, sourceType, sourceURL)
+			LogFactSaved(fact)
 		}
 		s.factStore.Save()
 	}
@@ -265,7 +314,7 @@ func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summar
 			}
 
 			s.factStore.UpsertWithSource(fact)
-			log.Printf("事実保存(サマリ): [Target:%s] %s = %v", target, item.Key, item.Value)
+			LogFactSaved(fact)
 		}
 		s.factStore.Save()
 	}
