@@ -422,6 +422,11 @@ func (c *Client) GetStatusesByRange(ctx context.Context, accountID string, start
 				continue
 			}
 
+			// リブートは除外
+			if status.Reblog != nil {
+				continue
+			}
+
 			allStatuses = append(allStatuses, status)
 		}
 
@@ -502,6 +507,11 @@ func (c *Client) GetStatusesByDateRange(ctx context.Context, accountID string, s
 
 			// 時刻範囲でフィルタリング
 			if createdAtJST.After(startTime) && createdAtJST.Before(endTime) {
+				// リブートは除外
+				if status.Reblog != nil {
+					continue
+				}
+
 				allStatuses = append(allStatuses, status)
 				count++
 				if count >= maxCount {
