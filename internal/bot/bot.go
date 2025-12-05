@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"claude_bot/internal/collector"
@@ -180,6 +181,9 @@ func (b *Bot) handleNotification(ctx context.Context, notification *gomastodon.N
 		return
 	}
 
+	// アシスタント機能（発言分析）のチェックはprocessResponse内のclassifyIntentで行うため、ここでは削除
+	// 以前のコードブロックは削除済み
+
 	// 応答生成と送信
 	success := b.processResponse(ctx, session, notification, userMessage, rootStatusID)
 	if success {
@@ -245,12 +249,46 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 		}
 	}
 
-	// 画像生成リクエストの検出
-	if b.imageGenerator != nil {
-		if isImageRequest, imagePrompt := b.isImageGenerationRequest(ctx, userMessage); isImageRequest {
+	// 意図判定（Intent Classification）
+	intent, imagePrompt, analysisURLs, targetDate := b.classifyIntent(ctx, userMessage)
+
+	switch intent {
+	case model.IntentAnalysis:
+		// 分析機能
+		if len(analysisURLs) >= 2 {
+			// メンション情報など必要なパラメータを渡す
+			mention := b.mastodonClient.BuildMention(notification.Account.Acct)
+			statusID := string(notification.Status.ID)
+			visibility := string(notification.Status.Visibility)
+
+			// URLからIDを抽出（classifyIntentで抽出されたURLを使用）
+			startID := extractIDFromURL(analysisURLs[0])
+			endID := extractIDFromURL(analysisURLs[1])
+
+			if startID != "" && endID != "" {
+				success := b.handleAssistantRequest(ctx, session, conversation, notification, startID, endID, userMessage, statusID, mention, visibility)
+				if success {
+					b.history.Save()
+				}
+				return true
+			}
+		}
+		// URLが不足している場合などは通常の会話として処理（フォールバック）
+		log.Println("分析リクエストですが、有効なURLが不足しているため通常会話として処理します")
+
+	case model.IntentImageGeneration:
+		// 画像生成機能
+		if b.imageGenerator != nil {
 			return b.handleImageGeneration(ctx, session, conversation, notification, imagePrompt, statusID, mention, visibility)
 		}
+		// 画像生成が無効な場合は通常会話へ
+
+	case model.IntentDailySummary:
+		// 1日まとめ機能
+		return b.handleDailySummaryRequest(ctx, session, conversation, notification, targetDate, statusID, mention, visibility)
 	}
+
+	// 通常の会話処理（chat または フォールバック）
 
 	// 事実の検索と応答生成
 	relevantFacts := b.factService.QueryRelevantFacts(ctx, notification.Account.Acct, displayName, userMessage)
@@ -258,17 +296,16 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 
 	if response == "" {
 		store.RollbackLastMessages(conversation, 1)
-		b.postErrorMessage(ctx, statusID, mention, visibility)
+		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.ResponseGeneration)
 		return false
 	}
 
 	store.AddMessage(conversation, "assistant", response)
-	var err error
-	err = b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
+	err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
 
 	if err != nil {
 		store.RollbackLastMessages(conversation, 2)
-		b.postErrorMessage(ctx, statusID, mention, visibility)
+		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.ResponsePost)
 		return false
 	}
 
@@ -277,18 +314,22 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 }
 
 // postErrorMessage generates and posts an error message using LLM with character voice
-func (b *Bot) postErrorMessage(ctx context.Context, statusID, mention, visibility string) {
-	log.Printf("応答生成失敗: エラーメッセージを投稿します")
+func (b *Bot) postErrorMessage(ctx context.Context, statusID, mention, visibility, errorDetail string) {
+	log.Printf("応答生成失敗: エラーメッセージを投稿します (詳細: %s)", errorDetail)
 
 	// LLMを使ってキャラクターの口調でエラーメッセージを生成
-	prompt := llm.BuildErrorMessagePrompt()
+	prompt := llm.BuildErrorMessagePrompt(errorDetail)
 	systemPrompt := llm.BuildSystemPrompt(b.config.CharacterPrompt, "", "", true)
 
 	errorMsg := b.llmClient.CallClaudeAPI(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxResponseTokens, nil)
 
 	// LLM呼び出しが失敗した場合はデフォルトメッセージ
 	if errorMsg == "" {
-		errorMsg = "申し訳ありません。エラーが発生しました。もう一度お試しください。"
+		if errorDetail != "" {
+			errorMsg = fmt.Sprintf(llm.Messages.Error.Default, errorDetail)
+		} else {
+			errorMsg = llm.Messages.Error.DefaultFallback
+		}
 	}
 
 	b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, errorMsg, visibility)
@@ -442,31 +483,6 @@ func (b *Bot) startFactMaintenanceLoop(ctx context.Context) {
 	}
 }
 
-// isImageGenerationRequest checks if the user message is requesting image generation using LLM
-func (b *Bot) isImageGenerationRequest(ctx context.Context, message string) (bool, string) {
-	prompt := llm.BuildImageRequestDetectionPrompt(message)
-	messages := []model.Message{{Role: "user", Content: prompt}}
-	response := b.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptImageRequestDetection, b.config.MaxResponseTokens, nil)
-
-	if response == "" {
-		return false, ""
-	}
-
-	// JSONをパース
-	jsonStr := llm.ExtractJSON(response)
-	var result struct {
-		IsImageRequest bool   `json:"is_image_request"`
-		ImagePrompt    string `json:"image_prompt"`
-	}
-
-	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
-		log.Printf("画像リクエスト判定JSONパースエラー: %v", err)
-		return false, ""
-	}
-
-	return result.IsImageRequest, result.ImagePrompt
-}
-
 // handleImageGeneration handles image generation requests
 func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session, conversation *model.Conversation, notification *gomastodon.Notification, imagePrompt, statusID, mention, visibility string) bool {
 	// SVG生成
@@ -474,7 +490,7 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 	if err != nil {
 		log.Printf("画像生成エラー: %v", err)
 		store.RollbackLastMessages(conversation, 1)
-		b.postErrorMessage(ctx, statusID, mention, visibility)
+		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.ImageGeneration)
 		return false
 	}
 
@@ -483,7 +499,7 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 	if err := b.imageGenerator.SaveSVGToFile(svg, tmpSvgFilename); err != nil {
 		log.Printf("ファイル保存エラー: %v", err)
 		store.RollbackLastMessages(conversation, 1)
-		b.postErrorMessage(ctx, statusID, mention, visibility)
+		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.ImageSave)
 		return false
 	}
 	defer os.Remove(tmpSvgFilename) // クリーンアップ
@@ -506,7 +522,7 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 	response := b.llmClient.CallClaudeAPI(ctx, replyMessages, "", b.config.MaxResponseTokens, nil)
 
 	if response == "" {
-		response = "画像を生成しました！"
+		response = llm.Messages.Success.ImageGeneration
 	}
 
 	store.AddMessage(conversation, "assistant", response)
@@ -515,7 +531,186 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 	if err != nil {
 		log.Printf("メディア投稿エラー: %v", err)
 		store.RollbackLastMessages(conversation, 2)
-		b.postErrorMessage(ctx, statusID, mention, visibility)
+		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.ImagePost)
+		return false
+	}
+
+	session.LastUpdated = time.Now()
+	return true
+}
+
+// classifyIntent classifies the user's intent using LLM
+func (b *Bot) classifyIntent(ctx context.Context, message string) (model.IntentType, string, []string, string) {
+	// JSTの現在時刻を取得（タイムゾーンロード失敗時はUTC）
+	now := time.Now()
+	if loc, err := time.LoadLocation("Asia/Tokyo"); err == nil {
+		now = now.In(loc)
+	}
+
+	prompt := llm.BuildIntentClassificationPrompt(message, now)
+	// システムプロンプトはシンプルに
+	systemPrompt := llm.Messages.System.IntentClassification
+
+	response := b.llmClient.CallClaudeAPI(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxResponseTokens, nil)
+	if response == "" {
+		return model.IntentChat, "", nil, ""
+	}
+
+	jsonStr := llm.ExtractJSON(response)
+	var result struct {
+		Intent       string   `json:"intent"`
+		ImagePrompt  string   `json:"image_prompt"`
+		AnalysisURLs []string `json:"analysis_urls"`
+		TargetDate   string   `json:"target_date"`
+	}
+
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		log.Printf("意図判定JSONパースエラー: %v", err)
+		return model.IntentChat, "", nil, ""
+	}
+
+	return model.IntentType(result.Intent), result.ImagePrompt, result.AnalysisURLs, result.TargetDate
+}
+
+func extractIDFromURL(url string) string {
+	parts := strings.Split(url, "/")
+	if len(parts) > 0 {
+		lastPart := parts[len(parts)-1]
+		// 数字のみかチェック（簡易的）
+		for _, r := range lastPart {
+			if r < '0' || r > '9' {
+				return ""
+			}
+		}
+		return lastPart
+	}
+	return ""
+}
+
+// handleAssistantRequest handles the assistant analysis request
+func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session, conversation *model.Conversation, notification *gomastodon.Notification, startID, endID, userMessage, statusID, mention, visibility string) bool {
+
+	// 1. 対象ユーザー（発言者）の特定
+	// URLからアカウント情報を取得するために、ステータスを取得してみるのが確実
+	// まずstartIDのステータスを取得して、その投稿者を特定する
+	targetStatus, err := b.mastodonClient.GetStatus(ctx, startID)
+	if err != nil {
+		log.Printf("開始ステータス取得失敗: %v", err)
+		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.UserPostNotFound)
+		return false
+	}
+
+	targetAccountID := string(targetStatus.Account.ID)
+
+	// 2. 発言範囲の取得
+	statuses, err := b.mastodonClient.GetStatusesByRange(ctx, targetAccountID, startID, endID)
+	if err != nil {
+		log.Printf("発言範囲取得失敗: %v", err)
+		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.AnalysisDataFetch)
+		return false
+	}
+
+	if len(statuses) == 0 {
+		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.AnalysisNoData)
+		return true
+	}
+
+	// 3. LLMによる分析
+	prompt := llm.BuildAssistantAnalysisPrompt(statuses, userMessage)
+	systemPrompt := llm.BuildSystemPrompt(b.config.CharacterPrompt, "", "", true)
+
+	// 分析には長文の可能性があるため、サマリー用のトークン数を使用
+	response := b.llmClient.CallClaudeAPI(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil)
+
+	if response == "" {
+		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.AnalysisGeneration)
+		return false
+	}
+
+	// 4. 結果の投稿
+	store.AddMessage(conversation, "assistant", response)
+	err = b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
+	if err != nil {
+		log.Printf("分析結果投稿エラー: %v", err)
+		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.AnalysisPost)
+		return false
+	}
+
+	session.LastUpdated = time.Now()
+	return true
+}
+
+// handleDailySummaryRequest handles the daily summary request
+func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Session, conversation *model.Conversation, notification *gomastodon.Notification, targetDate, statusID, mention, visibility string) bool {
+	// リクエスト送信者のアカウントIDを取得
+	accountID := string(notification.Account.ID)
+
+	log.Printf("Daily Summary Request: targetDate=%s", targetDate)
+
+	// JSTのタイムゾーンを取得
+	loc, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		log.Printf("JSTタイムゾーン読み込み失敗: %v", err)
+		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.TimeZone)
+		return false
+	}
+
+	// 対象日を計算
+	now := time.Now().In(loc)
+	var targetDay time.Time
+
+	// targetDateはLLMによって既に"YYYY-MM-DD"形式に変換されている前提
+	parsedDate, err := time.Parse("2006-01-02", targetDate)
+	if err != nil {
+		log.Printf("日付パース失敗: %s", targetDate)
+		b.postErrorMessage(ctx, statusID, mention, visibility, fmt.Sprintf(llm.Messages.Error.DateParse, targetDate))
+		return true
+	}
+	targetDay = parsedDate.In(loc)
+
+	// 3日前より過去かどうかチェック
+	// 今日の0時を基準にする
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	daysDiff := todayStart.Sub(time.Date(targetDay.Year(), targetDay.Month(), targetDay.Day(), 0, 0, 0, 0, loc)).Hours() / 24
+
+	if daysDiff > 3 {
+		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.DateLimit)
+		return true
+	}
+
+	startTime := time.Date(targetDay.Year(), targetDay.Month(), targetDay.Day(), 0, 0, 0, 0, loc)
+	endTime := startTime.Add(24 * time.Hour)
+	targetDateStr := targetDay.Format("2006/01/02")
+
+	// 発言を取得
+	statuses, err := b.mastodonClient.GetStatusesByDateRange(ctx, accountID, startTime, endTime)
+	if err != nil {
+		log.Printf("発言取得失敗: %v", err)
+		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.DataFetch)
+		return false
+	}
+
+	if len(statuses) == 0 {
+		b.postErrorMessage(ctx, statusID, mention, visibility, fmt.Sprintf(llm.Messages.Error.NoStatus, targetDay.Month(), targetDay.Day()))
+		return true
+	}
+
+	// LLMによるまとめ
+	prompt := llm.BuildDailySummaryPrompt(statuses, targetDateStr)
+	systemPrompt := llm.BuildSystemPrompt(b.config.CharacterPrompt, "", "", true)
+
+	response := b.llmClient.CallClaudeAPI(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil)
+
+	if response == "" {
+		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.SummaryGeneration)
+		return false
+	}
+
+	// 結果の投稿
+	store.AddMessage(conversation, "assistant", response)
+	err = b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
+	if err != nil {
+		log.Printf("まとめ結果投稿エラー: %v", err)
 		return false
 	}
 

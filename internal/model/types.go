@@ -4,6 +4,16 @@ import (
 	"time"
 )
 
+// IntentType represents the user's intent derived from the message
+type IntentType string
+
+const (
+	IntentChat            IntentType = "chat"
+	IntentImageGeneration IntentType = "image_generation"
+	IntentAnalysis        IntentType = "analysis"
+	IntentDailySummary    IntentType = "daily_summary"
+)
+
 type Conversation struct {
 	RootStatusID string
 	CreatedAt    time.Time
