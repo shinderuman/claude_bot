@@ -7,7 +7,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
+	"time"
 
 	"claude_bot/internal/model"
 
@@ -180,6 +182,11 @@ func (c *Client) PostResponseWithSplit(ctx context.Context, inReplyToID, mention
 
 	currentReplyID := inReplyToID
 	for i, part := range parts {
+		// 2投稿目以降は0.2秒待機して投稿順序を保証
+		if i > 0 {
+			time.Sleep(200 * time.Millisecond)
+		}
+
 		content := mention + part
 		status, err := c.postReply(ctx, currentReplyID, content, visibility)
 		if err != nil {
@@ -364,4 +371,169 @@ func ShouldCollectFactsFromStatus(status *mastodon.Status) bool {
 	// MediaAttachmentsやCardだけでは不十分(ハッシュタグなどもCardになるため)
 	// 実際のhttp://またはhttps://を含む投稿のみ対象
 	return strings.Contains(content, "http://") || strings.Contains(content, "https://")
+}
+
+// GetStatusesByRange retrieves statuses within a specified ID range
+func (c *Client) GetStatusesByRange(ctx context.Context, accountID string, startID, endID string) ([]*mastodon.Status, error) {
+	var allStatuses []*mastodon.Status
+
+	// IDの大小関係を確認し、必要なら入れ替える（startID < endID）
+	if startID > endID {
+		startID, endID = endID, startID
+	}
+
+	// Pagination設定
+	// SinceID: startIDより大きい（新しい）ものを取得
+	// MaxID: endID以下のものを取得したいが、APIの仕様上MaxIDは「それより古い」ものになるため、
+	// ページネーションしながら範囲内のものをフィルタリングする戦略をとる
+
+	// 戦略: endIDから始めて、startIDに到達するまで遡る
+	pg := &mastodon.Pagination{
+		MaxID: mastodon.ID(endID), // endIDより古いものを取得（endID自体は含まれない可能性があるため、別途取得を検討）
+		Limit: 40,                 // 一度の最大取得数
+	}
+
+	// endIDのステータス自体も含めるため、まずはendIDのステータスを取得
+	endStatus, err := c.GetStatus(ctx, endID)
+	if err == nil && endStatus != nil {
+		allStatuses = append(allStatuses, endStatus)
+	} else {
+		log.Printf("終了IDのステータス取得失敗（削除されている可能性があります）: %v", err)
+	}
+
+	for {
+		statuses, err := c.client.GetAccountStatuses(ctx, mastodon.ID(accountID), pg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get account statuses: %w", err)
+		}
+
+		if len(statuses) == 0 {
+			break
+		}
+
+		for _, status := range statuses {
+			// IDがstartIDより小さい（古い）場合は終了
+			if string(status.ID) < startID {
+				goto Done
+			}
+
+			// IDがendIDより大きい（新しい）場合はスキップ（通常MaxID指定ならありえないが念のため）
+			if string(status.ID) > endID {
+				continue
+			}
+
+			allStatuses = append(allStatuses, status)
+		}
+
+		// 次のページへ
+		pg.MaxID = mastodon.ID(statuses[len(statuses)-1].ID)
+
+		// 安全装置: 取得数が多すぎる場合は中断（例: 100件）
+		if len(allStatuses) >= 100 {
+			break
+		}
+	}
+
+Done:
+	// ID順（古い順）にソート
+	sort.Slice(allStatuses, func(i, j int) bool {
+		return string(allStatuses[i].ID) < string(allStatuses[j].ID)
+	})
+
+	// startIDのステータスが含まれていない場合、個別に取得して追加（範囲指定の始点も含めるため）
+	// ただし、すでにリストに含まれているかチェック
+	hasStartID := false
+	for _, s := range allStatuses {
+		if string(s.ID) == startID {
+			hasStartID = true
+			break
+		}
+	}
+
+	if !hasStartID {
+		startStatus, err := c.GetStatus(ctx, startID)
+		if err == nil && startStatus != nil {
+			// 先頭に追加
+			allStatuses = append([]*mastodon.Status{startStatus}, allStatuses...)
+		}
+	}
+
+	return allStatuses, nil
+}
+
+// GetStatusesByDateRange retrieves statuses within a specified date range (JST)
+func (c *Client) GetStatusesByDateRange(ctx context.Context, accountID string, startTime, endTime time.Time) ([]*mastodon.Status, error) {
+	var allStatuses []*mastodon.Status
+
+	pg := &mastodon.Pagination{
+		Limit: 40,
+	}
+
+	// 最大500件まで取得（まとめ対象として保持する件数）
+	maxCount := 500
+	count := 0
+
+	// API呼び出し回数制限（遡り制限）
+	// 1回40件取得 * 50回 = 最大2000件スキャン
+	maxAPICalls := 50
+	apiCalls := 0
+
+	for {
+		if apiCalls >= maxAPICalls {
+			log.Printf("API呼び出し回数制限(%d)に到達しました", maxAPICalls)
+			break
+		}
+
+		statuses, err := c.client.GetAccountStatuses(ctx, mastodon.ID(accountID), pg)
+		apiCalls++
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to get account statuses: %w", err)
+		}
+
+		if len(statuses) == 0 {
+			break
+		}
+
+		for _, status := range statuses {
+			// UTCからJSTに変換して比較
+			// startTime, endTimeは既にJST
+			createdAtJST := status.CreatedAt.In(startTime.Location())
+
+			// 時刻範囲でフィルタリング
+			if createdAtJST.After(startTime) && createdAtJST.Before(endTime) {
+				allStatuses = append(allStatuses, status)
+				count++
+				if count >= maxCount {
+					log.Printf("最大取得件数(%d)に到達しました", maxCount)
+					return allStatuses, nil
+				}
+			}
+
+			// endTimeより古い投稿に到達したら終了
+			// 固定ツイート（Pinned）がリストの先頭に来る可能性があるため、
+			// 固定ツイートの場合は終了判定を行わずにスキップする
+			if createdAtJST.Before(startTime) {
+				// Pinnedはinterface{}型なのでboolにキャスト
+				isPinned, ok := status.Pinned.(bool)
+				if ok && isPinned {
+					// 固定ツイートは無視して続行
+					continue
+				}
+				return allStatuses, nil
+			}
+		}
+
+		// ページネーション: 最後のステータスIDを次のMaxIDに設定
+		// go-mastodonがpg構造体にMinID/SinceID（前のページへのリンク情報）をセットしてしまう可能性があり、
+		// それが残っていると次回のクエリで範囲が限定されて0件になるため、必ず構造体を新規作成する
+		nextMaxID := statuses[len(statuses)-1].ID
+
+		pg = &mastodon.Pagination{
+			Limit: 40,
+			MaxID: nextMaxID,
+		}
+	}
+
+	return allStatuses, nil
 }

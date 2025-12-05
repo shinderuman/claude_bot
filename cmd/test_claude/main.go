@@ -59,8 +59,10 @@ func main() {
 	case "generate-image":
 		imageGen := image.NewImageGenerator(cfg, llmClient)
 		testGenerateImage(cfg, imageGen, *message)
+	case "error":
+		testErrorMessageGeneration(cfg, llmClient, *message)
 	default:
-		log.Fatalf("不明なモード: %s (使用可能: response, summary, fact, raw-image, auto-post, generate-image)", *mode)
+		log.Fatalf("不明なモード: %s (使用可能: response, summary, fact, raw-image, auto-post, generate-image, error)", *mode)
 	}
 }
 
@@ -233,7 +235,7 @@ func testFactExtraction(cfg *config.Config, client *llm.Client, message string) 
 	// 事実抽出
 	messages := []model.Message{{Role: "user", Content: prompt}}
 	ctx := context.Background()
-	response := client.CallClaudeAPI(ctx, messages, llm.SystemPromptFactExtraction, cfg.MaxResponseTokens, nil)
+	response := client.CallClaudeAPI(ctx, messages, llm.Messages.System.FactExtraction, cfg.MaxResponseTokens, nil)
 
 	if response == "" {
 		log.Fatal("エラー: 事実抽出に失敗しました")
@@ -390,4 +392,38 @@ func testGenerateImage(cfg *config.Config, imageGen *image.ImageGenerator, promp
 	} else {
 		log.Printf("Base64版も保存しました: %s", base64Filename)
 	}
+}
+
+func testErrorMessageGeneration(cfg *config.Config, client *llm.Client, errorDetail string) {
+	log.Printf("=== エラーメッセージ生成テスト ===")
+	log.Printf("エラー詳細: %s", errorDetail)
+	log.Println()
+
+	if cfg.AnthropicAuthToken == "" {
+		log.Fatal("エラー: ANTHROPIC_AUTH_TOKEN環境変数が設定されていません")
+	}
+
+	// プロンプト作成
+	prompt := llm.BuildErrorMessagePrompt(errorDetail)
+	log.Println("--- 生成されたプロンプト ---")
+	log.Println(prompt)
+	log.Println("--------------------------")
+	log.Println()
+
+	// システムプロンプト（キャラクター設定のみ）
+	systemPrompt := llm.BuildSystemPrompt(cfg.CharacterPrompt, "", "", true)
+
+	// API呼び出し
+	ctx := context.Background()
+	response := client.CallClaudeAPI(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, cfg.MaxResponseTokens, nil)
+
+	if response == "" {
+		log.Fatal("エラー: Claudeからの応答がありません")
+	}
+
+	log.Println("成功: エラーメッセージを生成しました")
+	log.Println()
+	log.Println("--- 生成されたメッセージ ---")
+	log.Println(response)
+	log.Println("--------------------------")
 }

@@ -37,7 +37,7 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, author, authorUse
 	prompt := llm.BuildFactExtractionPrompt(authorUserName, author, message)
 	messages := []model.Message{{Role: "user", Content: prompt}}
 
-	response := s.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactExtraction, s.config.MaxFactTokens, nil)
+	response := s.llmClient.CallClaudeAPI(ctx, messages, llm.Messages.System.FactExtraction, s.config.MaxFactTokens, nil)
 	if response == "" {
 		return
 	}
@@ -214,7 +214,7 @@ func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, url
 	prompt := llm.BuildURLContentFactExtractionPrompt(urlContent)
 	messages := []model.Message{{Role: "user", Content: prompt}}
 
-	response := s.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactExtraction, s.config.MaxFactTokens, nil)
+	response := s.llmClient.CallClaudeAPI(ctx, messages, llm.Messages.System.FactExtraction, s.config.MaxFactTokens, nil)
 	if response == "" {
 		return
 	}
@@ -267,7 +267,7 @@ func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summar
 	prompt := llm.BuildSummaryFactExtractionPrompt(summary)
 	messages := []model.Message{{Role: "user", Content: prompt}}
 
-	response := s.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactExtraction, s.config.MaxFactTokens, nil)
+	response := s.llmClient.CallClaudeAPI(ctx, messages, llm.Messages.System.FactExtraction, s.config.MaxFactTokens, nil)
 	if response == "" {
 		return
 	}
@@ -329,7 +329,7 @@ func (s *FactService) QueryRelevantFacts(ctx context.Context, author, authorUser
 	prompt := llm.BuildFactQueryPrompt(authorUserName, author, message)
 	messages := []model.Message{{Role: "user", Content: prompt}}
 
-	response := s.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactQuery, s.config.MaxResponseTokens, nil)
+	response := s.llmClient.CallClaudeAPI(ctx, messages, llm.Messages.System.FactQuery, s.config.MaxResponseTokens, nil)
 	if response == "" {
 		return ""
 	}
@@ -453,7 +453,7 @@ func (s *FactService) archiveTargetFacts(ctx context.Context, target string, fac
 	messages := []model.Message{{Role: "user", Content: prompt}}
 
 	// アーカイブ生成には少し長めのトークンを許可
-	response := s.llmClient.CallClaudeAPI(ctx, messages, llm.SystemPromptFactExtraction, s.config.MaxSummaryTokens, nil)
+	response := s.llmClient.CallClaudeAPI(ctx, messages, llm.Messages.System.FactExtraction, s.config.MaxSummaryTokens, nil)
 	if response == "" {
 		return fmt.Errorf("LLM応答が空です")
 	}
