@@ -12,26 +12,6 @@ import (
 
 const nodeInfoTimeout = 5 * time.Second
 
-// NodeInfoLinks represents the .well-known/nodeinfo response
-type NodeInfoLinks struct {
-	Links []NodeInfoLink `json:"links"`
-}
-
-type NodeInfoLink struct {
-	Rel  string `json:"rel"`
-	Href string `json:"href"`
-}
-
-// NodeInfo represents the NodeInfo document
-type NodeInfo struct {
-	Software NodeInfoSoftware `json:"software"`
-}
-
-type NodeInfoSoftware struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
-}
-
 var fediverseSoftware = map[string]bool{
 	"mastodon":   true,
 	"misskey":    true,
@@ -52,6 +32,26 @@ var fediverseSoftware = map[string]bool{
 	"iceshrimp":  true,
 	"foundkey":   true,
 	"cherrypick": true,
+}
+
+// NodeInfoLinks represents the .well-known/nodeinfo response
+type NodeInfoLinks struct {
+	Links []NodeInfoLink `json:"links"`
+}
+
+type NodeInfoLink struct {
+	Rel  string `json:"rel"`
+	Href string `json:"href"`
+}
+
+// NodeInfo represents the NodeInfo document
+type NodeInfo struct {
+	Software NodeInfoSoftware `json:"software"`
+}
+
+type NodeInfoSoftware struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
 }
 
 // IsFediverseServer checks if the given domain is a Fediverse server
