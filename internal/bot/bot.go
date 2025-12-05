@@ -80,6 +80,10 @@ func NewBot(cfg *config.Config) *Bot {
 // Run starts the bot
 func (b *Bot) Run(ctx context.Context) error {
 	log.Println("Botを起動しています...")
+
+	// Initialize URL Blacklist with file watching
+	b.config.URLBlacklist = config.InitializeURLBlacklist(ctx, os.Getenv("URL_BLACKLIST"))
+
 	b.logStartupInfo()
 
 	// ファクトストアのメンテナンス（起動時）

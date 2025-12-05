@@ -6,6 +6,7 @@ toolchain go1.24.2
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.19.0
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/joho/godotenv v1.5.1
 	github.com/mattn/go-mastodon v0.0.10
 	github.com/srwiley/oksvg v0.0.0-20221011165216-be6e8873101c
@@ -22,5 +23,6 @@ require (
 	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/tomnomnom/linkheader v0.0.0-20180905144013-02ca5825eb80 // indirect
 	golang.org/x/image v0.0.0-20211028202545-6944b10bf410 // indirect
+	golang.org/x/sys v0.38.0 // indirect
 	golang.org/x/text v0.31.0 // indirect
 )

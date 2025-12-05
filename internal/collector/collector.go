@@ -293,7 +293,7 @@ func (fc *FactCollector) extractFactsFromURLs(ctx context.Context, status *gomas
 		}
 
 		// URLの検証
-		if err := fetcher.IsValidURL(urlStr, fc.config.URLBlacklist); err != nil {
+		if err := fetcher.IsValidURL(urlStr, fc.config.URLBlacklist.Get()); err != nil {
 			// 検証エラーはログに出さない
 			continue
 		}
@@ -329,7 +329,7 @@ func (fc *FactCollector) processURL(ctx context.Context, urlStr, urlDomain, sour
 	defer func() { <-fc.semaphore }()
 
 	// ページコンテンツ取得
-	meta, err := fetcher.FetchPageContent(ctx, urlStr, fc.config.URLBlacklist)
+	meta, err := fetcher.FetchPageContent(ctx, urlStr, fc.config.URLBlacklist.Get())
 	if err != nil {
 		// 取得エラーはログに出さない
 		return

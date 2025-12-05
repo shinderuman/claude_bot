@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 	"strconv"
-	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -36,7 +35,7 @@ type Config struct {
 	MaxPostChars      int
 
 	// URL filtering
-	URLBlacklist []string
+	URLBlacklist *URLBlacklist
 
 	// ファクト収集設定
 	FactCollectionEnabled         bool
@@ -94,7 +93,7 @@ func LoadConfig() *Config {
 		MaxImageTokens:    int64(parseInt(os.Getenv("MAX_IMAGE_TOKENS"))),
 		MaxPostChars:      parseInt(os.Getenv("MAX_POST_CHARS")),
 
-		URLBlacklist: loadURLBlacklist(),
+		// URLBlacklist will be initialized separately with context
 
 		FactCollectionEnabled:         parseBool(os.Getenv("FACT_COLLECTION_ENABLED")),
 		FactCollectionFederated:       parseBool(os.Getenv("FACT_COLLECTION_FEDERATED")),
@@ -112,23 +111,6 @@ func LoadConfig() *Config {
 		FactRetentionDays: parseInt(os.Getenv("FACT_RETENTION_DAYS")),
 		MaxFacts:          parseInt(os.Getenv("MAX_FACTS")),
 	}
-}
-
-func loadURLBlacklist() []string {
-	var blacklist []string
-
-	// 環境変数から追加
-	if envList := os.Getenv("URL_BLACKLIST"); envList != "" {
-		parts := strings.Split(envList, ",")
-		for _, part := range parts {
-			part = strings.TrimSpace(part)
-			if part != "" {
-				blacklist = append(blacklist, part)
-			}
-		}
-	}
-
-	return blacklist
 }
 
 func parseBool(value string) bool {
