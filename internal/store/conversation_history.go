@@ -12,6 +12,11 @@ import (
 	"claude_bot/internal/utils"
 )
 
+const (
+	// Conversation
+	MinMessagesForIdleCheck = 4
+)
+
 type ConversationHistory struct {
 	mu           sync.RWMutex
 	Sessions     map[string]*model.Session
@@ -19,7 +24,7 @@ type ConversationHistory struct {
 }
 
 func InitializeHistory() *ConversationHistory {
-	sessionsPath := utils.GetFilePath("sessions.json")
+	sessionsPath := utils.GetFilePath(config.SessionFileName)
 
 	history := &ConversationHistory{
 		Sessions:     make(map[string]*model.Session),
@@ -78,7 +83,7 @@ func (h *ConversationHistory) Save() error {
 		return err
 	}
 
-	return os.WriteFile(h.saveFilePath, data, 0644)
+	return os.WriteFile(h.saveFilePath, data, config.DataFilePermission)
 }
 
 func (h *ConversationHistory) GetOrCreateConversation(session *model.Session, rootStatusID string) *model.Conversation {
@@ -135,7 +140,7 @@ func FindOldConversations(config *config.Config, session *model.Session) []model
 		// アイドル状態チェック (最後の更新からの経過時間)
 		// メッセージ数が一定以上ある場合のみアイドル判定を行う（短い会話は即サマリしない）
 		isIdle := false
-		if len(conv.Messages) >= 4 { // 最低2往復程度
+		if len(conv.Messages) >= MinMessagesForIdleCheck { // 最低2往復程度
 			isIdle = lastUpdated.Before(idleThreshold)
 		}
 

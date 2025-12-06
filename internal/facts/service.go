@@ -14,6 +14,22 @@ import (
 	"claude_bot/internal/store"
 )
 
+const (
+	// Validation
+	MinFactValueLength = 2
+
+	// Archive
+	ArchiveFactThreshold = 5
+	ArchiveMinFactCount  = 2
+	ArchiveAgeDays       = 30
+
+	// Query
+	RecentFactsCount = 5
+
+	// System Author
+	SystemAuthor = "system"
+)
+
 type FactService struct {
 	config    *config.Config
 	factStore *store.FactStore
@@ -121,14 +137,14 @@ func formatTarget(fact model.Fact) string {
 // formatAuthor formats the Author or PostAuthor field based on source type
 func formatAuthor(fact model.Fact) string {
 	switch fact.SourceType {
-	case "mention", "test":
+	case model.SourceTypeMention, model.SourceTypeTest:
 		if fact.AuthorUserName != "" {
 			return fmt.Sprintf("By=%s(%s)", fact.Author, fact.AuthorUserName)
 		}
 		if fact.Author != "" {
 			return fmt.Sprintf("By=%s", fact.Author)
 		}
-	case "federated", "home":
+	case model.SourceTypeFederated, model.SourceTypeHome:
 		if fact.PostAuthor != "" {
 			if fact.PostAuthorUserName != "" {
 				return fmt.Sprintf("PostBy=%s(%s)", fact.PostAuthor, fact.PostAuthorUserName)
@@ -153,7 +169,7 @@ func (s *FactService) isValidFact(key string, value interface{}) bool {
 	// 値のチェック (文字列の場合)
 	if strVal, ok := value.(string); ok {
 		// 極端に短い値は除外 (数値や特定の単語を除く)
-		if len([]rune(strVal)) < 2 {
+		if len([]rune(strVal)) < MinFactValueLength {
 			return false
 		}
 		// "不明" "なし" などの無意味な値を除外
@@ -294,7 +310,7 @@ func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summar
 			targetUserName := item.TargetUserName
 
 			// targetがunknownまたは空の場合は、userIDを使用
-			if target == "" || target == "unknown" {
+			if target == "" || target == model.UnknownTarget {
 				target = userID
 				targetUserName = userID // UserNameはIDと同じにしておく（正確なUserNameは不明な場合もあるため）
 			}
@@ -307,7 +323,7 @@ func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summar
 				Key:                item.Key,
 				Value:              item.Value,
 				Timestamp:          time.Now(),
-				SourceType:         "summary",
+				SourceType:         model.SourceTypeSummary,
 				SourceURL:          "",
 				PostAuthor:         "",
 				PostAuthorUserName: "",
@@ -348,13 +364,13 @@ func (s *FactService) QueryRelevantFacts(ctx context.Context, author, authorUser
 		}
 
 		// 一般知識も常に検索対象に含める
-		q.TargetCandidates = append(q.TargetCandidates, "__general__")
+		q.TargetCandidates = append(q.TargetCandidates, model.GeneralTarget)
 
 		// あいまい検索を使用
 		facts := s.factStore.SearchFuzzy(q.TargetCandidates, q.Keys)
 
 		// 最新のファクトも取得して追加（「最近なにを覚えた？」などの質問に対応するため）
-		recentFacts := s.factStore.GetRecentFacts(5)
+		recentFacts := s.factStore.GetRecentFacts(RecentFactsCount)
 
 		// 重複排除用マップ
 		seen := make(map[string]bool)
@@ -409,25 +425,25 @@ func (s *FactService) PerformMaintenance(ctx context.Context) error {
 		}
 
 		// アーカイブが必要か判定
-		// 条件1: ファクト数が閾値を超えている (例: 5件以上)
-		// 条件2: 古いファクトが含まれている (例: 30日以上経過) - 今回は簡易的に件数ベースまたは全件対象
+		// 条件1: ファクト数が閾値を超えている
+		// 条件2: 古いファクトが含まれている - 今回は簡易的に件数ベースまたは全件対象
 		// ユーザーの要望「データ量を増やしたくない」→ 常に最新の1つにまとめるのが理想
 		// ただし毎回やるとコストが高いので、ある程度溜まったらやる
 		shouldArchive := false
-		if len(facts) >= 5 {
+		if len(facts) >= ArchiveFactThreshold {
 			shouldArchive = true
 		} else {
 			// アーカイブ済みデータが含まれていない（＝まだ一度もアーカイブされていない）かつ、
 			// 古いデータがある場合はアーカイブする
 			hasOldFact := false
-			threshold := time.Now().AddDate(0, 0, -30) // 30日
+			threshold := time.Now().AddDate(0, 0, -ArchiveAgeDays)
 			for _, f := range facts {
 				if f.Timestamp.Before(threshold) {
 					hasOldFact = true
 					break
 				}
 			}
-			if hasOldFact && len(facts) >= 2 { // 最低2件はないと統合の意味がない
+			if hasOldFact && len(facts) >= ArchiveMinFactCount { // 最低2件はないと統合の意味がない
 				shouldArchive = true
 			}
 		}
@@ -472,15 +488,15 @@ func (s *FactService) archiveTargetFacts(ctx context.Context, target string, fac
 	for i := range archives {
 		archives[i].Target = target
 		// TargetUserNameは元のファクトから引き継ぐ（またはLLMが生成したものを使用）
-		if archives[i].TargetUserName == "" || archives[i].TargetUserName == "unknown" {
+		if archives[i].TargetUserName == "" || archives[i].TargetUserName == model.UnknownTarget {
 			if len(facts) > 0 {
 				archives[i].TargetUserName = facts[0].TargetUserName
 			}
 		}
-		archives[i].Author = "system"
-		archives[i].AuthorUserName = "system"
+		archives[i].Author = SystemAuthor
+		archives[i].AuthorUserName = SystemAuthor
 		archives[i].Timestamp = time.Now()
-		archives[i].SourceType = "archive"
+		archives[i].SourceType = model.SourceTypeArchive
 		archives[i].SourceURL = ""
 	}
 

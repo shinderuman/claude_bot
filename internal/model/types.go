@@ -14,6 +14,36 @@ const (
 	IntentDailySummary    IntentType = "daily_summary"
 )
 
+// SourceType represents the source of a fact
+const (
+	// SourceTypeMention はメンションからのファクト抽出を示す
+	SourceTypeMention = "mention"
+
+	// SourceTypeSummary は会話要約からのファクト抽出を示す
+	SourceTypeSummary = "summary"
+
+	// SourceTypeArchive はアーカイブ処理によるファクトを示す
+	SourceTypeArchive = "archive"
+
+	// SourceTypeFederated は連合タイムラインからのファクト抽出を示す
+	SourceTypeFederated = "federated"
+
+	// SourceTypeHome はホームタイムラインからのファクト抽出を示す
+	SourceTypeHome = "home"
+
+	// SourceTypeMentionURL はメンション内URLからのファクト抽出を示す
+	SourceTypeMentionURL = "mention_url"
+
+	// SourceTypeTest はテスト用のソースタイプを示す
+	SourceTypeTest = "test"
+
+	// GeneralTarget は一般知識のターゲットを示す
+	GeneralTarget = "__general__"
+
+	// UnknownTarget は不明なターゲットを示す
+	UnknownTarget = "unknown"
+)
+
 type Conversation struct {
 	RootStatusID string
 	CreatedAt    time.Time

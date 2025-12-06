@@ -214,9 +214,9 @@ func (fc *FactCollector) processStatus(ctx context.Context, status *gomastodon.S
 func (fc *FactCollector) determineSourceType(status *gomastodon.Status) string {
 	// 簡易的な判定: ローカルユーザーならhome、それ以外はfederated
 	if strings.Contains(string(status.Account.Acct), "@") {
-		return "federated"
+		return model.SourceTypeFederated
 	}
-	return "home"
+	return model.SourceTypeHome
 }
 
 // extractFactsFromContent は投稿本文からファクトを抽出します
@@ -361,7 +361,7 @@ func (fc *FactCollector) processURL(ctx context.Context, urlStr, urlDomain, sour
 			if target == "" {
 				// ターゲットが不明な場合は「一般知識」として扱う
 				// これにより、特定の個人に紐付かない知識として保存される
-				target = "__general__"
+				target = model.GeneralTarget
 				targetUserName = "Web Knowledge"
 				if urlDomain != "" {
 					targetUserName = urlDomain

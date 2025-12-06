@@ -25,6 +25,40 @@ import (
 
 var urlRegex = xurls.Strict()
 
+const (
+	// Timezone
+	DefaultTimezone = "Asia/Tokyo"
+
+	// Date/Time Formats
+	DateFormatYMD      = "2006-01-02"          // YYYY-MM-DD
+	DateFormatYMDSlash = "2006/01/02"          // YYYY/MM/DD
+	DateFormatHM       = "15:04"               // HH:MM
+	DateTimeFormat     = "2006-01-02 15:04:05" // YYYY-MM-DD HH:MM:SS
+
+	// Notification Types (Mastodon API)
+	NotificationTypeMention = "mention"
+
+	// Auto Post
+	AutoPostFactCount = 5
+	AutoPostHashTag   = "\n\n#bot"
+
+	// Logging
+	LogContentMaxChars = 20
+
+	// Daily Summary
+	DailySummaryDaysLimit = 3
+
+	// Maintenance
+	FactMaintenanceInterval = 24 * time.Hour
+
+	// Rollback
+	RollbackCountSmall  = 1
+	RollbackCountMedium = 2
+
+	// Conversation
+	MinConversationMessagesForParent = 0
+)
+
 type Bot struct {
 	config         *config.Config
 	history        *store.ConversationHistory
@@ -121,7 +155,7 @@ func (b *Bot) Run(ctx context.Context) error {
 		case event := <-eventChan:
 			switch e := event.(type) {
 			case *gomastodon.NotificationEvent:
-				if e.Notification.Type == "mention" && e.Notification.Status != nil {
+				if e.Notification.Type == NotificationTypeMention && e.Notification.Status != nil {
 					b.handleNotification(ctx, e.Notification)
 				}
 			case *gomastodon.UpdateEvent:
@@ -233,7 +267,7 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 	sourceURL := string(notification.Status.URL)
 
 	// 1. メンション本文からのファクト抽出
-	go b.factService.ExtractAndSaveFacts(ctx, notification.Account.Acct, displayName, userMessage, "mention", sourceURL, notification.Account.Acct, displayName)
+	go b.factService.ExtractAndSaveFacts(ctx, notification.Account.Acct, displayName, userMessage, model.SourceTypeMention, sourceURL, notification.Account.Acct, displayName)
 
 	// 2. メンション内のURLからのファクト抽出
 	b.extractFactsFromMentionURLs(ctx, notification, displayName)
@@ -295,7 +329,7 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 	response := b.llmClient.GenerateResponse(ctx, session, conversation, relevantFacts, images)
 
 	if response == "" {
-		store.RollbackLastMessages(conversation, 1)
+		store.RollbackLastMessages(conversation, RollbackCountSmall)
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.ResponseGeneration)
 		return false
 	}
@@ -304,7 +338,7 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 	err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
 
 	if err != nil {
-		store.RollbackLastMessages(conversation, 2)
+		store.RollbackLastMessages(conversation, RollbackCountMedium)
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.ResponsePost)
 		return false
 	}
@@ -427,8 +461,8 @@ func (b *Bot) startAutoPostLoop(ctx context.Context) {
 }
 
 func (b *Bot) executeAutoPost(ctx context.Context) {
-	// ランダムな一般知識のバンドルを取得（最大5件）
-	facts, err := b.factStore.GetRandomGeneralFactBundle(5)
+	// ランダムな一般知識のバンドルを取得
+	facts, err := b.factStore.GetRandomGeneralFactBundle(AutoPostFactCount)
 	if err != nil || len(facts) == 0 {
 		return
 	}
@@ -443,10 +477,10 @@ func (b *Bot) executeAutoPost(ctx context.Context) {
 
 	if response != "" {
 		// #botタグを追加（AI生成コンテンツであることを明示）
-		response = response + "\n\n#bot"
+		response = response + AutoPostHashTag
 
 		// 公開投稿として送信
-		log.Printf("自動投稿を実行します: %s...", string([]rune(response))[:min(20, len([]rune(response)))])
+		log.Printf("自動投稿を実行します: %s...", string([]rune(response))[:min(LogContentMaxChars, len([]rune(response)))])
 		err := b.mastodonClient.PostStatus(ctx, response, b.config.AutoPostVisibility, "")
 		if err != nil {
 			log.Printf("自動投稿エラー: %v", err)
@@ -466,8 +500,8 @@ func (b *Bot) startFactMaintenanceLoop(ctx context.Context) {
 		return
 	}
 
-	// 1日1回メンテナンスを実行
-	ticker := time.NewTicker(24 * time.Hour)
+	// 定期的にメンテナンスを実行
+	ticker := time.NewTicker(FactMaintenanceInterval)
 	defer ticker.Stop()
 
 	for {
@@ -489,7 +523,7 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 	svg, err := b.imageGenerator.GenerateSVG(ctx, imagePrompt)
 	if err != nil {
 		log.Printf("画像生成エラー: %v", err)
-		store.RollbackLastMessages(conversation, 1)
+		store.RollbackLastMessages(conversation, RollbackCountSmall)
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.ImageGeneration)
 		return false
 	}
@@ -498,7 +532,7 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 	tmpSvgFilename := fmt.Sprintf("%s/generated_image_%d.svg", os.TempDir(), time.Now().Unix())
 	if err := b.imageGenerator.SaveSVGToFile(svg, tmpSvgFilename); err != nil {
 		log.Printf("ファイル保存エラー: %v", err)
-		store.RollbackLastMessages(conversation, 1)
+		store.RollbackLastMessages(conversation, RollbackCountSmall)
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.ImageSave)
 		return false
 	}
@@ -530,7 +564,7 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 	err = b.mastodonClient.PostResponseWithMedia(ctx, statusID, mention, response, visibility, tmpPngFilename)
 	if err != nil {
 		log.Printf("メディア投稿エラー: %v", err)
-		store.RollbackLastMessages(conversation, 2)
+		store.RollbackLastMessages(conversation, RollbackCountMedium)
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.ImagePost)
 		return false
 	}
@@ -543,7 +577,7 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 func (b *Bot) classifyIntent(ctx context.Context, message string) (model.IntentType, string, []string, string) {
 	// JSTの現在時刻を取得（タイムゾーンロード失敗時はUTC）
 	now := time.Now()
-	if loc, err := time.LoadLocation("Asia/Tokyo"); err == nil {
+	if loc, err := time.LoadLocation(DefaultTimezone); err == nil {
 		now = now.In(loc)
 	}
 
@@ -648,7 +682,7 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 	log.Printf("Daily Summary Request: targetDate=%s", targetDate)
 
 	// JSTのタイムゾーンを取得
-	loc, err := time.LoadLocation("Asia/Tokyo")
+	loc, err := time.LoadLocation(DefaultTimezone)
 	if err != nil {
 		log.Printf("JSTタイムゾーン読み込み失敗: %v", err)
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.TimeZone)
@@ -659,8 +693,8 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 	now := time.Now().In(loc)
 	var targetDay time.Time
 
-	// targetDateはLLMによって既に"YYYY-MM-DD"形式に変換されている前提
-	parsedDate, err := time.Parse("2006-01-02", targetDate)
+	// targetDateはLLMによって既にYYYY-MM-DD形式に変換されている前提
+	parsedDate, err := time.Parse(DateFormatYMD, targetDate)
 	if err != nil {
 		log.Printf("日付パース失敗: %s", targetDate)
 		b.postErrorMessage(ctx, statusID, mention, visibility, fmt.Sprintf(llm.Messages.Error.DateParse, targetDate))
@@ -673,14 +707,14 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	daysDiff := todayStart.Sub(time.Date(targetDay.Year(), targetDay.Month(), targetDay.Day(), 0, 0, 0, 0, loc)).Hours() / 24
 
-	if daysDiff > 3 {
+	if daysDiff > DailySummaryDaysLimit {
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.DateLimit)
 		return true
 	}
 
 	startTime := time.Date(targetDay.Year(), targetDay.Month(), targetDay.Day(), 0, 0, 0, 0, loc)
 	endTime := startTime.Add(24 * time.Hour)
-	targetDateStr := targetDay.Format("2006/01/02")
+	targetDateStr := targetDay.Format(DateFormatYMDSlash)
 
 	// 発言を取得
 	statuses, err := b.mastodonClient.GetStatusesByDateRange(ctx, accountID, startTime, endTime)

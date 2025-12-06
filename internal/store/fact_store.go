@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"claude_bot/internal/config"
 	"claude_bot/internal/model"
 	"claude_bot/internal/utils"
 )
@@ -19,7 +20,7 @@ type FactStore struct {
 }
 
 func InitializeFactStore() *FactStore {
-	factsPath := utils.GetFilePath("facts.json")
+	factsPath := utils.GetFilePath(config.FactStoreFileName)
 	return NewFactStore(factsPath)
 }
 
@@ -66,7 +67,7 @@ func (s *FactStore) Save() error {
 		return err
 	}
 
-	return os.WriteFile(s.saveFilePath, data, 0644)
+	return os.WriteFile(s.saveFilePath, data, config.DataFilePermission)
 }
 
 // Upsert は既存のメソッド(後方互換性のため)
@@ -79,7 +80,7 @@ func (s *FactStore) Upsert(target, targetUserName, author, authorUserName, key s
 		Key:            key,
 		Value:          value,
 		Timestamp:      time.Now(),
-		SourceType:     "mention", // デフォルトはメンション
+		SourceType:     model.SourceTypeMention, // デフォルトはメンション
 	})
 }
 
@@ -143,7 +144,7 @@ func (s *FactStore) Cleanup(retention time.Duration) int {
 		// 同期的に保存（非同期だとロック処理が複雑になるため）
 		data, err := json.MarshalIndent(s.Facts, "", "  ")
 		if err == nil {
-			os.WriteFile(s.saveFilePath, data, 0644)
+			os.WriteFile(s.saveFilePath, data, config.DataFilePermission)
 		}
 	}
 
@@ -241,7 +242,7 @@ func (s *FactStore) GetRandomGeneralFactBundle(limit int) ([]model.Fact, error) 
 	// 1. 一般知識のファクトを抽出
 	var generalFacts []model.Fact
 	for _, fact := range s.Facts {
-		if fact.Target == "__general__" {
+		if fact.Target == model.GeneralTarget {
 			generalFacts = append(generalFacts, fact)
 		}
 	}
@@ -257,7 +258,7 @@ func (s *FactStore) GetRandomGeneralFactBundle(limit int) ([]model.Fact, error) 
 	for _, fact := range generalFacts {
 		source := fact.TargetUserName
 		if source == "" {
-			source = "unknown"
+			source = model.UnknownTarget
 		}
 		if _, exists := sourceMap[source]; !exists {
 			sources = append(sources, source)

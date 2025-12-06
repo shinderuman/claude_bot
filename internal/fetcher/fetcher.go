@@ -16,6 +16,14 @@ const (
 	MaxBodySize = 500 * 1024 // 500KB limit (increased for content extraction)
 	Timeout     = 10 * time.Second
 	UserAgent   = "MastodonBot/1.0 (+https://github.com/shinderuman/claude_bot)"
+
+	// HTTP
+	MaxRedirects            = 10
+	MaxContentLength        = 2000
+	ContentTruncationSuffix = "..."
+
+	// Content-Type
+	ContentTypeHTML = "text/html"
 )
 
 type PageContent struct {
@@ -36,7 +44,7 @@ func FetchPageContent(ctx context.Context, urlStr string, blacklist []string) (*
 	// Custom client to handle redirect validation
 	client := &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 10 {
+			if len(via) >= MaxRedirects {
 				return errors.New("stopped after 10 redirects")
 			}
 			// Validate redirect URL
@@ -66,7 +74,7 @@ func FetchPageContent(ctx context.Context, urlStr string, blacklist []string) (*
 
 	// Content-Type check
 	contentType := resp.Header.Get("Content-Type")
-	if !strings.Contains(contentType, "text/html") {
+	if !strings.Contains(contentType, ContentTypeHTML) {
 		return nil, errors.New("HTMLコンテンツではありません")
 	}
 
@@ -191,8 +199,8 @@ func extractTextContent(n *html.Node) string {
 
 	// Limit content length to avoid token limit issues
 	content := sb.String()
-	if len(content) > 2000 {
-		return content[:2000] + "..."
+	if len(content) > MaxContentLength {
+		return content[:MaxContentLength] + ContentTruncationSuffix
 	}
 	return content
 }
