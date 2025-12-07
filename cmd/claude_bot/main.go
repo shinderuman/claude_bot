@@ -2,6 +2,10 @@ package main
 
 import (
 	"context"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"flag"
 
@@ -19,6 +23,13 @@ func main() {
 	// Initialize bot
 	b := bot.NewBot(cfg)
 
-	ctx := context.Background()
-	b.Run(ctx)
+	// シグナルハンドリング（SIGINT, SIGTERM）
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	log.Println("Botを開始します...")
+	if err := b.Run(ctx); err != nil && err != context.Canceled {
+		log.Printf("Bot停止エラー: %v", err)
+	}
+	log.Println("Botを停止しました (Shutdown signal received)")
 }
