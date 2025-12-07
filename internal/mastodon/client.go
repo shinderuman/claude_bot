@@ -481,9 +481,7 @@ func (c *Client) GetStatusesByRange(ctx context.Context, accountID string, start
 	}
 
 	// ID順（古い順）にソート
-	sort.Slice(allStatuses, func(i, j int) bool {
-		return string(allStatuses[i].ID) < string(allStatuses[j].ID)
-	})
+	c.sortStatusesByID(allStatuses)
 
 	// startIDのステータスが含まれていない場合、個別に取得して追加
 	hasStartID := false
@@ -546,5 +544,15 @@ func (c *Client) GetStatusesByDateRange(ctx context.Context, accountID string, s
 		return nil, err
 	}
 
+	// ID順（古い順）にソート
+	c.sortStatusesByID(allStatuses)
+
 	return allStatuses, nil
+}
+
+// sortStatusesByID sorts statuses by ID in ascending order (older to newer)
+func (c *Client) sortStatusesByID(statuses []*mastodon.Status) {
+	sort.Slice(statuses, func(i, j int) bool {
+		return string(statuses[i].ID) < string(statuses[j].ID)
+	})
 }
