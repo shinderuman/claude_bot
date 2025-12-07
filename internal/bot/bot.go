@@ -463,30 +463,41 @@ func (b *Bot) startAutoPostLoop(ctx context.Context) {
 
 	log.Printf("自動投稿ループを開始しました (間隔: %d時間 + ランダム遅延)", b.config.AutoPostIntervalHours)
 
+	// 起動時間を基準にする
+	windowStart := time.Now()
+
 	for {
-		// 次の実行時間を計算
-		now := time.Now()
-		// 現在の時間のXX時00分を基準にする
-		nextTime := now.Truncate(time.Hour)
+		// インターバル（時間）を分に変換して、その範囲内でランダムな時間を決定
+		// 例: 1時間なら0-59分、2時間なら0-119分
+		intervalMinutes := b.config.AutoPostIntervalHours * 60
+		randomMinutes := time.Duration(time.Now().UnixNano() % int64(intervalMinutes))
+		scheduledTime := windowStart.Add(randomMinutes * time.Minute)
 
-		// 0〜59分のランダムなオフセットを追加
-		// (シンプルなランダム実装)
-		randomMinutes := time.Duration(time.Now().UnixNano() % 60)
-		nextTime = nextTime.Add(randomMinutes * time.Minute)
+		log.Printf("次回の自動投稿予定: %s (ウィンドウ: %s 〜)",
+			scheduledTime.Format(DateTimeFormat), windowStart.Format(DateTimeFormat))
 
-		// もし計算結果が過去なら、次のサイクルへ
-		if nextTime.Before(now) {
-			nextTime = nextTime.Add(time.Duration(b.config.AutoPostIntervalHours) * time.Hour)
-		}
-
-		log.Printf("次回の自動投稿予定: %s", nextTime.Format(DateTimeFormat))
-
+		// 投稿時間まで待機
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(time.Until(nextTime)):
+		case <-time.After(time.Until(scheduledTime)):
 			b.executeAutoPost(ctx)
 		}
+
+		// 現在のウィンドウが終わる（＝次のウィンドウ開始）まで待機
+		windowEnd := windowStart.Add(time.Duration(b.config.AutoPostIntervalHours) * time.Hour)
+		if time.Now().Before(windowEnd) {
+			log.Printf("次のウィンドウ開始(%s)まで待機します", windowEnd.Format(DateTimeFormat))
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Until(windowEnd)):
+				// 待機完了
+			}
+		}
+
+		// 次のウィンドウへ
+		windowStart = windowEnd
 	}
 }
 
