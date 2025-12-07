@@ -31,12 +31,24 @@ func main() {
 	testFacts := flag.Bool("test-facts", false, "テスト用facts.jsonを使用（data/facts_test.json）")
 	flag.Parse()
 
-	// テスト用: .envを読み込む（存在する場合）
-	envPath := utils.GetFilePath(".env")
-	err := godotenv.Load(envPath)
-
-	if err != nil {
-		fmt.Printf(".envファイルが見つかりません（無視します）: %s\n", envPath)
+	// テスト用: .envを読み込む（引数で指定またはデフォルト）
+	var envPath string
+	if flag.NArg() > 0 {
+		envPath = flag.Arg(0)
+		err := godotenv.Load(envPath)
+		if err != nil {
+			log.Fatalf("指定された.envファイルの読み込みに失敗しました: %s (エラー: %v)", envPath, err)
+		}
+		log.Printf("設定ファイルを読み込みました: %s", envPath)
+	} else {
+		// デフォルト（存在する場合のみ）
+		envPath = utils.GetFilePath(".env")
+		err := godotenv.Load(envPath)
+		if err != nil {
+			fmt.Printf("デフォルトの.envファイルが見つかりません（無視します）: %s\n", envPath)
+		} else {
+			log.Printf("デフォルト設定ファイルを読み込みました: %s", envPath)
+		}
 	}
 
 	// config.LoadConfig()内で環境変数は参照される
