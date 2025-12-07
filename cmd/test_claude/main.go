@@ -82,8 +82,6 @@ func printConfig(cfg *config.Config) {
 	log.Println("=== 設定情報 ===")
 	log.Printf("Mastodonサーバー: %s", cfg.MastodonServer)
 	log.Printf("Botユーザー名: @%s", cfg.BotUsername)
-	log.Printf("Claude API: %s", cfg.AnthropicBaseURL)
-	log.Printf("Claudeモデル: %s", cfg.AnthropicModel)
 	log.Printf("リモートユーザー許可: %t", cfg.AllowRemoteUsers)
 	log.Printf("事実ストア有効: %t", cfg.EnableFactStore)
 	log.Printf("画像認識有効: %t", cfg.EnableImageRecognition)
@@ -96,6 +94,13 @@ func printConfig(cfg *config.Config) {
 	log.Printf("最小保持数: %d件", cfg.ConversationMinKeepCount)
 	log.Println()
 	log.Println("=== LLM & 投稿設定 ===")
+	log.Printf("プロバイダー: %s", cfg.LLMProvider)
+	if cfg.LLMProvider == "claude" {
+		log.Printf("Claude API: %s", cfg.AnthropicBaseURL)
+		log.Printf("Claudeモデル: %s", cfg.AnthropicModel)
+	} else if cfg.LLMProvider == "gemini" {
+		log.Printf("Geminiモデル: %s", cfg.GeminiModel)
+	}
 	log.Printf("最大応答トークン: %d", cfg.MaxResponseTokens)
 	log.Printf("最大要約トークン: %d", cfg.MaxSummaryTokens)
 	log.Printf("最大ファクトトークン: %d", cfg.MaxFactTokens)
@@ -124,8 +129,11 @@ func testResponse(cfg *config.Config, client *llm.Client, factService *facts.Fac
 	}
 	log.Println()
 
-	if cfg.AnthropicAuthToken == "" {
+	if cfg.LLMProvider == "claude" && cfg.AnthropicAuthToken == "" {
 		log.Fatal("エラー: ANTHROPIC_AUTH_TOKEN環境変数が設定されていません")
+	}
+	if cfg.LLMProvider == "gemini" && cfg.GeminiAPIKey == "" {
+		log.Fatal("エラー: GEMINI_API_KEY環境変数が設定されていません")
 	}
 
 	// テスト用セッション作成
