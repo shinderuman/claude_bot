@@ -320,7 +320,8 @@ JSONは1行で出力すること(改行・インデントなし)`,
 1. "chat": 通常の会話、質問、挨拶など
 2. "image_generation": 画像生成の依頼（「絵を描いて」「イラストにして」など）
 3. "analysis": Mastodonの投稿分析依頼（「ここからここまで分析して」「この発言をまとめて」など、URLが含まれる場合が多い）
-4. "daily_summary": 1日の活動まとめ依頼（「今日何してた？」「今日のまとめ」など）
+4. "daily_summary": タイムラインの投稿ログに基づく1日の活動まとめ依頼（「今日の私の発言まとめて」「今日何してた？」など）。
+   **重要**: 現在のメッセージに入力された内容についての計算や質問（例:「今日食べたこれのカロリー教えて」「今日の日記：〜」）は "chat" に分類すること。
 
 【出力形式 (JSON)】
 {"intent":"chat"|"image_generation"|"analysis"|"daily_summary","image_prompt":"...","analysis_urls":["url1","url2"],"target_date":"YYYY-MM-DD"}
