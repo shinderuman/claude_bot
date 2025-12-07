@@ -203,6 +203,12 @@ func (b *Bot) handleNotification(ctx context.Context, notification *gomastodon.N
 		return
 	}
 
+	// 他のBotからのメンションは無視（無限ループ防止）
+	if notification.Account.Bot {
+		log.Printf("Botからのメンションを無視しました: %s", notification.Account.Acct)
+		return
+	}
+
 	// 外部ユーザーのチェック
 	if !b.config.AllowRemoteUsers && notification.Account.Acct != notification.Account.Username {
 		log.Printf("外部ユーザーからのメンションを無視しました: %s", notification.Account.Acct)
