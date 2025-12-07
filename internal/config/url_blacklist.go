@@ -113,44 +113,7 @@ func (b *URLBlacklist) watchLoop(ctx context.Context) {
 			if !ok {
 				return
 			}
-
-			// Reload on write, create, or rename events
-			if event.Op&fsnotify.Write == fsnotify.Write ||
-				event.Op&fsnotify.Create == fsnotify.Create ||
-				event.Op&fsnotify.Rename == fsnotify.Rename ||
-				event.Op&fsnotify.Remove == fsnotify.Remove {
-
-				// If file was renamed or removed, re-add watch
-				if event.Op&fsnotify.Rename == fsnotify.Rename || event.Op&fsnotify.Remove == fsnotify.Remove {
-					// Wait a bit for the new file to be created
-					// (editors often remove and recreate files)
-					go func() {
-						// Try to re-add watch after a short delay
-						for i := 0; i < 5; i++ {
-							if _, err := os.Stat(b.filePath); err == nil {
-								if err := b.watcher.Add(b.filePath); err == nil {
-									log.Printf("URL Blacklistファイル監視を再設定しました")
-									if err := b.reload(); err != nil {
-										log.Printf("URL Blacklist再読み込みエラー: %v", err)
-									}
-									return
-								}
-							}
-							// Wait 100ms before retry
-							select {
-							case <-ctx.Done():
-								return
-							case <-time.After(100 * time.Millisecond):
-							}
-						}
-					}()
-				} else {
-					// Normal write or create event
-					if err := b.reload(); err != nil {
-						log.Printf("URL Blacklist再読み込みエラー: %v", err)
-					}
-				}
-			}
+			b.handleFileEvent(ctx, event)
 		case err, ok := <-b.watcher.Errors:
 			if !ok {
 				return
@@ -158,6 +121,58 @@ func (b *URLBlacklist) watchLoop(ctx context.Context) {
 			log.Printf("URL Blacklistファイル監視エラー: %v", err)
 		}
 	}
+}
+
+// handleFileEvent processes filesystem events for the blacklist file
+func (b *URLBlacklist) handleFileEvent(ctx context.Context, event fsnotify.Event) {
+	// Reload on write, create, or rename events
+	shouldReload := event.Op&fsnotify.Write == fsnotify.Write ||
+		event.Op&fsnotify.Create == fsnotify.Create
+
+	if shouldReload {
+		if err := b.reload(); err != nil {
+			log.Printf("URL Blacklist再読み込みエラー: %v", err)
+		}
+		return
+	}
+
+	// If file was renamed or removed, re-add watch
+	shouldRewatch := event.Op&fsnotify.Rename == fsnotify.Rename ||
+		event.Op&fsnotify.Remove == fsnotify.Remove
+
+	if shouldRewatch {
+		go b.attemptRewatch(ctx)
+	}
+}
+
+// attemptRewatch tries to re-establish the file watcher after a file move/delete
+func (b *URLBlacklist) attemptRewatch(ctx context.Context) {
+	// Wait a bit for the new file to be created
+	// (editors often remove and recreate files)
+	for range 5 {
+		if b.tryAddWatcher() {
+			// 監視再開成功時、一度読み込んでおく
+			if err := b.reload(); err != nil {
+				log.Printf("URL Blacklist再読み込みエラー: %v", err)
+			}
+			return
+		}
+
+		// Wait 100ms before retry
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+// tryAddWatcher attempts to valid file existence and add it to the watcher
+func (b *URLBlacklist) tryAddWatcher() bool {
+	if _, err := os.Stat(b.filePath); err != nil {
+		return false
+	}
+	return b.watcher.Add(b.filePath) == nil
 }
 
 // LoadFromEnv loads blacklist from environment variable (fallback)
