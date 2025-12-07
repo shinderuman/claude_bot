@@ -130,11 +130,8 @@ func FindOldConversations(config *config.Config, session *model.Session) []model
 	var oldConvs []model.Conversation
 
 	for _, conv := range session.Conversations {
-		// 最終更新日時がない場合は作成日時を使用（後方互換性）
+		// 最終更新日時を使用
 		lastUpdated := conv.LastUpdated
-		if lastUpdated.IsZero() {
-			lastUpdated = conv.CreatedAt
-		}
 
 		// 保持期間切れチェック (絶対的な寿命)
 		isExpired := conv.CreatedAt.Before(retentionThreshold)

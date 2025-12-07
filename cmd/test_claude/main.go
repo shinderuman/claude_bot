@@ -39,10 +39,7 @@ func main() {
 		fmt.Printf(".envファイルが見つかりません（無視します）: %s\n", envPath)
 	}
 
-	// 互換性のため、config.LoadEnvironmentも呼ぶが、ここではエラーになっても続行させるため自前でロードした
-	// config.LoadEnvironment("") 呼び出しは不要、あるいは空文字で呼べばデフォルトの.envを読む
-	// テスト用なので、config.LoadConfig()が環境変数を参照できれば良い
-	// ここでは何もしない（godotenv.Load済み）
+	// config.LoadConfig()内で環境変数は参照される
 
 	cfg := config.LoadConfig()
 
@@ -214,7 +211,7 @@ func testSummary(cfg *config.Config, client *llm.Client, newMessages, existingSu
 	// 要約生成
 	messages := []model.Message{{Role: "user", Content: summaryPrompt}}
 	ctx := context.Background()
-	summary := client.CallClaudeAPIForSummary(ctx, messages, existingSummary)
+	summary := client.GenerateSummary(ctx, messages, existingSummary)
 
 	if summary == "" {
 		log.Fatal("エラー: 要約生成に失敗しました")
@@ -250,7 +247,7 @@ func testFactExtraction(cfg *config.Config, client *llm.Client, message string) 
 	// 事実抽出
 	messages := []model.Message{{Role: "user", Content: prompt}}
 	ctx := context.Background()
-	response := client.CallClaudeAPI(ctx, messages, llm.Messages.System.FactExtraction, cfg.MaxResponseTokens, nil)
+	response := client.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, cfg.MaxResponseTokens, nil)
 
 	if response == "" {
 		log.Fatal("エラー: 事実抽出に失敗しました")
@@ -288,7 +285,7 @@ func testRawImage(cfg *config.Config, client *llm.Client, message, imagePath str
 
 	// API呼び出し（システムプロンプトなし）
 	ctx := context.Background()
-	response := client.CallClaudeAPI(ctx, messages, "", cfg.MaxResponseTokens, currentImages)
+	response := client.GenerateText(ctx, messages, "", cfg.MaxResponseTokens, currentImages)
 
 	if response == "" {
 		log.Fatal("エラー: Claudeからの応答がありません")
@@ -341,7 +338,7 @@ func testAutoPost(cfg *config.Config, client *llm.Client) {
 
 	// API呼び出し
 	ctx := context.Background()
-	response := client.CallClaudeAPI(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, int64(cfg.MaxPostChars), nil)
+	response := client.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, int64(cfg.MaxPostChars), nil)
 
 	if response == "" {
 		log.Fatal("エラー: Claudeからの応答がありません")
@@ -431,7 +428,7 @@ func testErrorMessageGeneration(cfg *config.Config, client *llm.Client, errorDet
 
 	// API呼び出し
 	ctx := context.Background()
-	response := client.CallClaudeAPI(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, cfg.MaxResponseTokens, nil)
+	response := client.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, cfg.MaxResponseTokens, nil)
 
 	if response == "" {
 		log.Fatal("エラー: Claudeからの応答がありません")

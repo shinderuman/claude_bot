@@ -26,10 +26,7 @@ func NewClient(cfg *config.Config) *Client {
 	case "gemini":
 		p = gemini.NewClient(cfg)
 	default:
-
-		// デフォルトはClaude（後方互換性のため、または明示的なエラーにしても良い）
-		log.Printf("警告: 未知のプロバイダー '%s' が指定されました。Claudeを使用します。", cfg.LLMProvider)
-		p = anthropic.NewClient(cfg)
+		log.Fatalf("エラー: 未知のプロバイダー '%s' が指定されました。'claude' または 'gemini' を指定してください。", cfg.LLMProvider)
 	}
 
 	return &Client{
@@ -44,16 +41,16 @@ func (c *Client) GenerateResponse(ctx context.Context, session *model.Session, c
 		sessionSummary = session.Summary
 	}
 	systemPrompt := BuildSystemPrompt(c.config.CharacterPrompt, sessionSummary, relevantFacts, true)
-	return c.CallClaudeAPI(ctx, conversation.Messages, systemPrompt, c.config.MaxResponseTokens, currentImages)
+	return c.GenerateText(ctx, conversation.Messages, systemPrompt, c.config.MaxResponseTokens, currentImages)
 }
 
-func (c *Client) CallClaudeAPIForSummary(ctx context.Context, messages []model.Message, summary string) string {
+func (c *Client) GenerateSummary(ctx context.Context, messages []model.Message, summary string) string {
 	systemPrompt := BuildSystemPrompt(c.config.CharacterPrompt, summary, "", false)
-	return c.CallClaudeAPI(ctx, messages, systemPrompt, c.config.MaxSummaryTokens, nil)
+	return c.GenerateText(ctx, messages, systemPrompt, c.config.MaxSummaryTokens, nil)
 }
 
-// CallClaudeAPI は互換性のために名前を残しているが、実際にはProviderを呼び出す
-func (c *Client) CallClaudeAPI(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, currentImages []model.Image) string {
+// GenerateText calls the configured LLM provider to generate text content
+func (c *Client) GenerateText(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, currentImages []model.Image) string {
 	content, err := c.provider.GenerateContent(ctx, messages, systemPrompt, maxTokens, currentImages)
 	if err != nil {
 		log.Printf("LLM生成エラー: %v", err)

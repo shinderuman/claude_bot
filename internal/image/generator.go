@@ -31,7 +31,7 @@ func (g *ImageGenerator) GenerateSVG(ctx context.Context, prompt string) (string
 
 	userPrompt := llm.BuildImageGenerationPrompt(prompt)
 	messages := []model.Message{{Role: "user", Content: userPrompt}}
-	response := g.llmClient.CallClaudeAPI(ctx, messages, llm.Messages.System.ImageGeneration, g.config.MaxImageTokens, nil)
+	response := g.llmClient.GenerateText(ctx, messages, llm.Messages.System.ImageGeneration, g.config.MaxImageTokens, nil)
 
 	if response == "" {
 		return "", fmt.Errorf("LLMからの応答がありません")

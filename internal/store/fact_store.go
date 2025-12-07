@@ -438,9 +438,9 @@ func (s *FactStore) enforceMaxFactsUnsafe(maxFacts int) {
 	}
 }
 
-// Upsert は既存のメソッド(後方互換性のため)
-func (s *FactStore) Upsert(target, targetUserName, author, authorUserName, key string, value interface{}) {
-	s.UpsertWithSource(model.Fact{
+// AddFact は引数からFact構造体を生成して追加する簡易メソッドです
+func (s *FactStore) AddFact(target, targetUserName, author, authorUserName, key string, value interface{}) {
+	s.AddFactWithSource(model.Fact{
 		Target:         target,
 		TargetUserName: targetUserName,
 		Author:         author,
@@ -452,8 +452,8 @@ func (s *FactStore) Upsert(target, targetUserName, author, authorUserName, key s
 	})
 }
 
-// UpsertWithSource はソース情報を含むFactを保存します
-func (s *FactStore) UpsertWithSource(fact model.Fact) {
+// AddFactWithSource はソース情報を含むFactを保存します
+func (s *FactStore) AddFactWithSource(fact model.Fact) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

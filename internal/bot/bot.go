@@ -361,7 +361,7 @@ func (b *Bot) postErrorMessage(ctx context.Context, statusID, mention, visibilit
 	prompt := llm.BuildErrorMessagePrompt(errorDetail)
 	systemPrompt := llm.BuildSystemPrompt(b.config.CharacterPrompt, "", "", true)
 
-	errorMsg := b.llmClient.CallClaudeAPI(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxResponseTokens, nil)
+	errorMsg := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxResponseTokens, nil)
 
 	// LLM呼び出しが失敗した場合はデフォルトメッセージ
 	if errorMsg == "" {
@@ -494,7 +494,7 @@ func (b *Bot) executeAutoPost(ctx context.Context) {
 	systemPrompt := llm.BuildSystemPrompt(b.config.CharacterPrompt, "", "", true)
 
 	// 画像なしで呼び出し
-	response := b.llmClient.CallClaudeAPI(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, int64(b.config.MaxPostChars), nil)
+	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, int64(b.config.MaxPostChars), nil)
 
 	if response != "" {
 		// #botタグを追加（AI生成コンテンツであることを明示）
@@ -502,7 +502,7 @@ func (b *Bot) executeAutoPost(ctx context.Context) {
 
 		// 公開投稿として送信
 		log.Printf("自動投稿を実行します: %s...", string([]rune(response))[:min(LogContentMaxChars, len([]rune(response)))])
-		err := b.mastodonClient.PostStatus(ctx, response, b.config.AutoPostVisibility, "")
+		err := b.mastodonClient.PostStatus(ctx, response, b.config.AutoPostVisibility)
 		if err != nil {
 			log.Printf("自動投稿エラー: %v", err)
 		}
@@ -574,7 +574,7 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 	// メッセージを生成
 	replyPrompt := llm.BuildImageGenerationReplyPrompt(imagePrompt, b.config.CharacterPrompt)
 	replyMessages := []model.Message{{Role: "user", Content: replyPrompt}}
-	response := b.llmClient.CallClaudeAPI(ctx, replyMessages, "", b.config.MaxResponseTokens, nil)
+	response := b.llmClient.GenerateText(ctx, replyMessages, "", b.config.MaxResponseTokens, nil)
 
 	if response == "" {
 		response = llm.Messages.Success.ImageGeneration
@@ -606,7 +606,7 @@ func (b *Bot) classifyIntent(ctx context.Context, message string) (model.IntentT
 	// システムプロンプトはシンプルに
 	systemPrompt := llm.Messages.System.IntentClassification
 
-	response := b.llmClient.CallClaudeAPI(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxResponseTokens, nil)
+	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxResponseTokens, nil)
 	if response == "" {
 		return model.IntentChat, "", nil, ""
 	}
@@ -675,7 +675,7 @@ func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session
 	systemPrompt := llm.BuildSystemPrompt(b.config.CharacterPrompt, "", "", true)
 
 	// 分析には長文の可能性があるため、サマリー用のトークン数を使用
-	response := b.llmClient.CallClaudeAPI(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil)
+	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil)
 
 	if response == "" {
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.AnalysisGeneration)
@@ -754,7 +754,7 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 	prompt := llm.BuildDailySummaryPrompt(statuses, targetDateStr, userMessage)
 	systemPrompt := llm.BuildSystemPrompt(b.config.CharacterPrompt, "", "", true)
 
-	response := b.llmClient.CallClaudeAPI(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil)
+	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil)
 
 	if response == "" {
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.SummaryGeneration)

@@ -82,7 +82,7 @@ func (h *ConversationHistory) generateSummary(ctx context.Context, messages []mo
 	formattedMessages := formatMessagesForSummary(messages)
 	summaryPrompt := llm.BuildSummaryPrompt(formattedMessages, existingSummary)
 	summaryMessages := []model.Message{{Role: "user", Content: summaryPrompt}}
-	return llmClient.CallClaudeAPIForSummary(ctx, summaryMessages, existingSummary)
+	return llmClient.GenerateSummary(ctx, summaryMessages, existingSummary)
 }
 
 func formatMessagesForSummary(messages []model.Message) string {
