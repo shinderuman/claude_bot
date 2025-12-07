@@ -309,9 +309,12 @@ main() {
             ssh "${REMOTE_HOST}" "sudo supervisorctl stop ${SERVICE}" || echo "  ⚠ ${SERVICE} の停止に失敗しました（プロセスが存在しない可能性があります）"
         done
 
-        # バイナリの転送
+        # バイナリの転送 (Text file busy回避のため一時ファイル経由)
         echo "バイナリを転送中..."
-        scp "${APP_NAME}" "${REMOTE_HOST}:${REMOTE_DIR}/"
+        scp "${APP_NAME}" "${REMOTE_HOST}:${REMOTE_DIR}/${APP_NAME}.new"
+        
+        # バイナリの置き換え (アトミック操作)
+        ssh "${REMOTE_HOST}" "mv '${REMOTE_DIR}/${APP_NAME}.new' '${REMOTE_DIR}/${APP_NAME}' && chmod +x '${REMOTE_DIR}/${APP_NAME}'"
 
         # Supervisorの開始
         for SERVICE in "${target_services[@]}"; do
