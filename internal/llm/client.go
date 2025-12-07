@@ -40,12 +40,12 @@ func (c *Client) GenerateResponse(ctx context.Context, session *model.Session, c
 	if session != nil {
 		sessionSummary = session.Summary
 	}
-	systemPrompt := BuildSystemPrompt(c.config.CharacterPrompt, sessionSummary, relevantFacts, true)
+	systemPrompt := BuildSystemPrompt(c.config.CharacterPrompt, sessionSummary, relevantFacts, true, c.config.MaxPostChars)
 	return c.GenerateText(ctx, conversation.Messages, systemPrompt, c.config.MaxResponseTokens, currentImages)
 }
 
 func (c *Client) GenerateSummary(ctx context.Context, messages []model.Message, summary string) string {
-	systemPrompt := BuildSystemPrompt(c.config.CharacterPrompt, summary, "", false)
+	systemPrompt := BuildSystemPrompt(c.config.CharacterPrompt, summary, "", false, c.config.MaxPostChars)
 	return c.GenerateText(ctx, messages, systemPrompt, c.config.MaxSummaryTokens, nil)
 }
 

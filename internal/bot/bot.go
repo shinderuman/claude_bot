@@ -365,7 +365,8 @@ func (b *Bot) postErrorMessage(ctx context.Context, statusID, mention, visibilit
 
 	// LLMを使ってキャラクターの口調でエラーメッセージを生成
 	prompt := llm.BuildErrorMessagePrompt(errorDetail)
-	systemPrompt := llm.BuildSystemPrompt(b.config.CharacterPrompt, "", "", true)
+	// エラーメッセージも文字数制限を守る
+	systemPrompt := llm.BuildSystemPrompt(b.config.CharacterPrompt, "", "", true, b.config.MaxPostChars)
 
 	errorMsg := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxResponseTokens, nil)
 
@@ -511,7 +512,8 @@ func (b *Bot) executeAutoPost(ctx context.Context) {
 	// プロンプト作成
 	prompt := llm.BuildAutoPostPrompt(facts)
 	// システムプロンプトはキャラクター設定のみを使用（要約などは不要）
-	systemPrompt := llm.BuildSystemPrompt(b.config.CharacterPrompt, "", "", true)
+	// AutoPostの場合はMaxPostChars制限を適用
+	systemPrompt := llm.BuildSystemPrompt(b.config.CharacterPrompt, "", "", true, b.config.MaxPostChars)
 
 	// 画像なしで呼び出し
 	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, int64(b.config.MaxPostChars), nil)
@@ -702,7 +704,7 @@ func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session
 
 	// 3. LLMによる分析
 	prompt := llm.BuildAssistantAnalysisPrompt(statuses, userMessage)
-	systemPrompt := llm.BuildSystemPrompt(b.config.CharacterPrompt, "", "", true)
+	systemPrompt := llm.BuildSystemPrompt(b.config.CharacterPrompt, "", "", true, b.config.MaxPostChars)
 
 	// 分析には長文の可能性があるため、サマリー用のトークン数を使用
 	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil)
@@ -782,7 +784,7 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 
 	// LLMによるまとめ
 	prompt := llm.BuildDailySummaryPrompt(statuses, targetDateStr, userMessage)
-	systemPrompt := llm.BuildSystemPrompt(b.config.CharacterPrompt, "", "", true)
+	systemPrompt := llm.BuildSystemPrompt(b.config.CharacterPrompt, "", "", true, b.config.MaxPostChars)
 
 	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil)
 
