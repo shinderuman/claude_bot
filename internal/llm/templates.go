@@ -20,6 +20,8 @@ var Templates = struct {
 	ImageGeneration       string
 	ImageRequestDetection string
 	ImageGenerationReply  string
+	FollowResponse        string
+	FollowResponseAlready string
 	ErrorMessage          string
 	AssistantAnalysis     struct {
 		OutputFormat string
@@ -286,6 +288,32 @@ JSONは1行で出力すること(改行・インデントなし)`,
 - 「画像を生成しました」という事実を伝えること
 - 40文字以内で簡潔に
 - メッセージのみを出力すること（引用符などは不要）`,
+	FollowResponse: `あなたは以下のキャラクター設定を持つAIアシスタントです。
+キャラクター設定: %s
+
+以下のユーザーをフォローしました。そのことを伝える短く親しみやすいメッセージを作成してください。
+
+ユーザー名: @%s
+
+条件:
+- キャラクターの口調を守ること
+- フォローしたことを伝えること（「フォローバックしました」「つながりましたね」など）
+- 仲良くしたいという気持ちを込めること
+- メッセージのみを出力すること
+- メッセージのみを出力すること`,
+	FollowResponseAlready: `あなたは以下のキャラクター設定を持つAIアシスタントです。
+キャラクター設定: %s
+
+以下のユーザーからフォローリクエストがありましたが、あなたは既にそのユーザーをフォローしています。
+「もうフォローしていますよ」「とっくに仲良しですよ」といった内容を、短く親しみやすく伝えてください。
+
+ユーザー名: @%s
+
+条件:
+- キャラクターの口調を守ること
+- 既にフォロー済みであることを伝えること
+- 40文字以内で簡潔に
+- メッセージのみを出力すること`,
 	ErrorMessage: `以下のシステムエラーが発生しました。この状況をユーザーに伝える返信メッセージを、あなたのキャラクターの口調で作成してください。
 
 【エラー内容】
@@ -320,11 +348,11 @@ JSONは1行で出力すること(改行・インデントなし)`,
 1. "chat": 通常の会話、質問、挨拶など
 2. "image_generation": 画像生成の依頼（「絵を描いて」「イラストにして」など）
 3. "analysis": Mastodonの投稿分析依頼（「ここからここまで分析して」「この発言をまとめて」など、URLが含まれる場合が多い）
-4. "daily_summary": タイムラインの投稿ログに基づく1日の活動まとめ依頼（「今日の私の発言まとめて」「今日何してた？」など）。
    **重要**: 現在のメッセージに入力された内容についての計算や質問（例:「今日食べたこれのカロリー教えて」「今日の日記：〜」）は "chat" に分類すること。
+5. "follow_request": Botに対するフォローリクエスト（「フォローして」「フォロバして」など）
 
 【出力形式 (JSON)】
-{"intent":"chat"|"image_generation"|"analysis"|"daily_summary","image_prompt":"...","analysis_urls":["url1","url2"],"target_date":"YYYY-MM-DD"}
+{"intent":"chat"|"image_generation"|"analysis"|"daily_summary"|"follow_request","image_prompt":"...","analysis_urls":["url1","url2"],"target_date":"YYYY-MM-DD"}
 
 【注意点】
 - JSONのみを出力してください。Markdownのコードブロックは不要です。

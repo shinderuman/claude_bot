@@ -63,6 +63,9 @@ type Config struct {
 	AutoPostIntervalHours int
 	AutoPostVisibility    string
 
+	// ブロードキャストコマンド設定
+	BroadcastCommand string
+
 	// ファクト管理設定
 	FactRetentionDays int // ファクト保持期間（日数）
 	MaxFacts          int // 最大ファクト数
@@ -127,6 +130,8 @@ func LoadConfig() *Config {
 
 		AutoPostIntervalHours: parseInt(os.Getenv("AUTO_POST_INTERVAL_HOURS")),
 		AutoPostVisibility:    parseString(os.Getenv("AUTO_POST_VISIBILITY")),
+
+		BroadcastCommand: parseString(os.Getenv("BROADCAST_COMMAND")),
 
 		FactRetentionDays: parseInt(os.Getenv("FACT_RETENTION_DAYS")),
 		MaxFacts:          parseInt(os.Getenv("MAX_FACTS")),

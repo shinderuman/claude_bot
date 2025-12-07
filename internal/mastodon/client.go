@@ -179,6 +179,11 @@ func stripHTML(htmlStr string) string {
 	return buf.String()
 }
 
+// StripHTML exposes stripHTML as a public method
+func (c *Client) StripHTML(htmlStr string) string {
+	return stripHTML(htmlStr)
+}
+
 func extractText(n *html.Node, buf *strings.Builder) {
 	if n.Type == html.TextNode {
 		buf.WriteString(n.Data)
@@ -269,6 +274,24 @@ func (c *Client) PostStatus(ctx context.Context, content, visibility string) err
 
 	_, err := c.client.PostStatus(ctx, toot)
 	return err
+}
+
+// FollowAccount follows the specified account
+func (c *Client) FollowAccount(ctx context.Context, accountID string) error {
+	_, err := c.client.AccountFollow(ctx, mastodon.ID(accountID))
+	return err
+}
+
+// IsFollowing checks if the bot is following the specified account
+func (c *Client) IsFollowing(ctx context.Context, accountID string) (bool, error) {
+	relationships, err := c.client.GetAccountRelationships(ctx, []string{accountID})
+	if err != nil {
+		return false, err
+	}
+	if len(relationships) == 0 {
+		return false, fmt.Errorf("no relationship found for account %s", accountID)
+	}
+	return relationships[0].Following, nil
 }
 
 // Response splitting

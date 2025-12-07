@@ -12,6 +12,7 @@ const (
 	IntentImageGeneration IntentType = "image_generation"
 	IntentAnalysis        IntentType = "analysis"
 	IntentDailySummary    IntentType = "daily_summary"
+	IntentFollowRequest   IntentType = "follow_request"
 )
 
 // SourceType represents the source of a fact

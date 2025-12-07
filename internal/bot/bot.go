@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode"
 
 	"claude_bot/internal/collector"
 	"claude_bot/internal/config"
@@ -159,6 +160,12 @@ func (b *Bot) Run(ctx context.Context) error {
 					b.handleNotification(ctx, e.Notification)
 				}
 			case *gomastodon.UpdateEvent:
+				// Check for Broadcast Command
+				if b.shouldHandleBroadcastCommand(e.Status) {
+					go b.handleBroadcastCommand(ctx, e.Status)
+					continue
+				}
+
 				// ファクト収集が有効な場合、ホームタイムラインの投稿を処理
 				if b.factCollector != nil && b.config.FactCollectionHome {
 					go b.factCollector.ProcessHomeEvent(e)
@@ -299,6 +306,8 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 	intent, imagePrompt, analysisURLs, targetDate := b.classifyIntent(ctx, userMessage)
 
 	switch intent {
+	case model.IntentFollowRequest:
+		return b.handleFollowRequest(ctx, session, conversation, notification, statusID, mention, visibility)
 	case model.IntentAnalysis:
 		// 分析機能
 		if len(analysisURLs) >= 2 {
@@ -672,6 +681,128 @@ func cleanURL(url string) string {
 		}
 	}
 	return url
+}
+
+// Broadcast and Follow handlers
+
+func (b *Bot) shouldHandleBroadcastCommand(status *gomastodon.Status) bool {
+	// コマンドが設定されていない場合は無視
+	if b.config.BroadcastCommand == "" {
+		return false
+	}
+
+	// HTMLを除去したテキストを取得 (ExtractUserMessageはメンションを除去してしまうため、直接変換する)
+	content := strings.TrimSpace(b.mastodonClient.StripHTML(string(status.Content)))
+	cmd := b.config.BroadcastCommand
+
+	// コマンドで始まっているかチェック (!allfoo を弾くためにスペース等の区切りが必要)
+	if !strings.HasPrefix(content, cmd) {
+		return false
+	}
+
+	// コマンドの直後が空白、または改行であるかをチェック（コマンドそのものが単語の一部でないこと）
+	// 例: !all -> NG (中身がないため)
+	// 例: !allfoo -> NG (区切りがないため)
+	// 例: !all hello -> OK
+
+	rest := content[len(cmd):]
+	if len(rest) == 0 {
+		// コマンドのみの場合は意味がない（中身が空になる）ので無視
+		return false
+	}
+
+	// 次の文字が空白文字かチェック
+	firstChar := rune(rest[0])
+	if !unicode.IsSpace(firstChar) {
+		return false
+	}
+
+	// 残りの文字列が空白のみでないかチェック（"!all   " みたいなケース）
+	if strings.TrimSpace(rest) == "" {
+		return false
+	}
+
+	return true
+}
+
+func (b *Bot) handleBroadcastCommand(ctx context.Context, status *gomastodon.Status) {
+	log.Printf("ブロードキャストコマンドを受信: %s (by %s)", status.Content, status.Account.Acct)
+
+	// ステータスのコピーを作成（元のステータスを変更しないため）
+	statusCopy := *status
+
+	// コンテンツからコマンドを除去（単純な置換）
+	// 注意: HTMLタグを考慮していないが、!allのような単純なコマンドなら通常は問題ない
+	// 将来的にはより堅牢なHTML解析が必要になる可能性あり
+	statusCopy.Content = strings.Replace(status.Content, b.config.BroadcastCommand, "", 1)
+
+	// 擬似的なメンション通知を作成して処理を委譲
+	// Type: Mention として扱い、通常の応答フローに乗せる
+	notification := &gomastodon.Notification{
+		Type:    "mention",
+		Status:  &statusCopy,
+		Account: status.Account,
+	}
+
+	// handleNotificationを呼び出して処理
+	b.handleNotification(ctx, notification)
+}
+
+func (b *Bot) handleFollowRequest(ctx context.Context, session *model.Session, conversation *model.Conversation, notification *gomastodon.Notification, statusID, mention, visibility string) bool {
+
+	targetAccountID := string(notification.Account.ID)
+	targetAcct := notification.Account.Acct
+
+	log.Printf("フォローリクエスト受信: %s (ID: %s)", targetAcct, targetAccountID)
+
+	// 既にフォロー済みかチェック
+	isFollowing, err := b.mastodonClient.IsFollowing(ctx, targetAccountID)
+	if err != nil {
+		log.Printf("フォロー状態確認エラー: %v", err)
+		// エラーが発生しても処理は続行し、未フォローとして扱う
+		isFollowing = false
+	}
+
+	var replyMessage string
+
+	if isFollowing {
+		log.Printf("既にフォロー済みです: %s", targetAcct)
+		// 既にフォロー済みのメッセージ生成
+		replyPrompt := fmt.Sprintf(llm.Templates.FollowResponseAlready, b.config.CharacterPrompt, targetAcct)
+		systemPrompt := llm.BuildSystemPrompt(b.config.CharacterPrompt, "", "", true, b.config.MaxPostChars)
+		replyMessage = b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: replyPrompt}}, systemPrompt, b.config.MaxResponseTokens, nil)
+
+		if replyMessage == "" {
+			replyMessage = fmt.Sprintf("もうフォローしていますよ！ @%s さん", targetAcct)
+		}
+	} else {
+		// フォロー実行
+		if err := b.mastodonClient.FollowAccount(ctx, targetAccountID); err != nil {
+			log.Printf("フォロー実行エラー: %v", err)
+			b.postErrorMessage(ctx, statusID, mention, visibility, "フォローに失敗しました...ごめんなさい！")
+			return true
+		}
+
+		log.Printf("アカウントをフォローしました: %s", targetAcct)
+
+		// フォロー完了メッセージ生成
+		replyPrompt := fmt.Sprintf(llm.Templates.FollowResponse, b.config.CharacterPrompt, targetAcct)
+		systemPrompt := llm.BuildSystemPrompt(b.config.CharacterPrompt, "", "", true, b.config.MaxPostChars)
+		replyMessage = b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: replyPrompt}}, systemPrompt, b.config.MaxResponseTokens, nil)
+
+		// 生成失敗時はデフォルトメッセージ
+		if replyMessage == "" {
+			replyMessage = fmt.Sprintf("フォローしました！よろしくね @%s さん！", targetAcct)
+		}
+	}
+
+	store.AddMessage(conversation, "assistant", replyMessage)
+
+	if err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, replyMessage, visibility); err != nil {
+		log.Printf("フォロー完了返信エラー: %v", err)
+	}
+
+	return true
 }
 
 // handleAssistantRequest handles the assistant analysis request

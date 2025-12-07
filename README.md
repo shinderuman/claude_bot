@@ -69,6 +69,11 @@ go run ./cmd/claude_bot
 - **メディア添付**: 生成されたSVGは画像としてMastodonに投稿されます。
 - **軽量・高品質**: ベクター形式なので軽量かつ拡大しても劣化しません。
 
+### 📢 一斉送信コマンド
+- **`!all` コマンド**: Botがフォローしているユーザー（信頼済みユーザー）が、投稿の先頭に `!all` （設定可）を付けて投稿すると、全Botが一斉に応答します。
+- **ファクト除外**: このコマンドによる投稿はファクト収集（学習）の対象から自動的に除外されます。
+- **自動フォロー**: Botからフォローされていないユーザーは、まず「@bot フォローして」とリクエストすることで、Botにフォローバックさせ、このコマンド権限を獲得できます。
+
 ### ⚙️ 柔軟な制御
 - **キャラクター設定**: プロンプトで人格を自由にカスタマイズ可能。
 - **リモート制御**: 他インスタンスからのメンション受け入れ可否を設定可能。
@@ -111,6 +116,11 @@ go run ./cmd/claude_bot
 | `ENABLE_FACT_STORE` | `true` | `true`: ユーザー情報を記憶する<br>`false`: 記憶機能を無効化 |
 | `ENABLE_IMAGE_RECOGNITION` | `false` | `true`: 画像認識を有効化（ Claude/Gemini 共に対応）<br>`false`: 画像認識を無効化 |
 | `ENABLE_IMAGE_GENERATION` | `false` | `true`: SVG画像生成機能を有効化<br>`false`: 画像生成機能を無効化 |
+
+### コマンド設定
+| 変数名 | 推奨値 | 説明 |
+| :--- | :--- | :--- |
+| `BROADCAST_COMMAND` | `!all` | Botがフォローしているユーザーが使用できる一斉呼び出しコマンド（Botはファクト収集を行わず即座に応答します） |
 
 ### 会話管理パラメータ
 | 変数名 | 推奨値 | 説明 |
@@ -157,7 +167,8 @@ go run ./cmd/claude_bot
 <summary>Mastodon Access Tokenの取得方法</summary>
 
 1. Mastodonインスタンスの設定 → 開発 → 新規アプリケーション
-2. 権限: `read:notifications`, `read:statuses`, `write:statuses` を選択
+2. 権限: `read:notifications`, `read:statuses`, `write:statuses`, `read:follows`, `write:follows` を選択
+   - ※ `follows` 権限は自動フォロー機能に必要です
 3. 作成後にアクセストークンをコピー
 </details>
 
