@@ -23,8 +23,8 @@ type ConversationHistory struct {
 	saveFilePath string
 }
 
-func InitializeHistory() *ConversationHistory {
-	sessionsPath := utils.GetFilePath(config.SessionFileName)
+func InitializeHistory(cfg *config.Config) *ConversationHistory {
+	sessionsPath := utils.GetFilePath(cfg.SessionFileName)
 
 	history := &ConversationHistory{
 		Sessions:     make(map[string]*model.Session),
@@ -83,7 +83,9 @@ func (h *ConversationHistory) Save() error {
 		return err
 	}
 
-	return os.WriteFile(h.saveFilePath, data, config.DataFilePermission)
+	// 0644: User(RW), Group(R), Other(R)
+	return os.WriteFile(h.saveFilePath, data, 0644)
+
 }
 
 func (h *ConversationHistory) GetOrCreateConversation(session *model.Session, rootStatusID string) *model.Conversation {

@@ -1,7 +1,11 @@
 # データディレクトリ内の設定と履歴（.env.exampleは除く）
 data/.env
+data/.env.claude
+data/.env.gemini
 data/sessions.json
+data/sessions_gemini.json
 data/facts.json
+data/facts.json.lock
 data/url_blacklist.txt
 
 # ビルド成果物

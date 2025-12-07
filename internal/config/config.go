@@ -12,13 +12,21 @@ import (
 type Config struct {
 	MastodonServer      string
 	MastodonAccessToken string
-	AnthropicAuthToken  string
-	AnthropicBaseURL    string
-	AnthropicModel      string
-	BotUsername         string
-	CharacterPrompt     string
-	AllowRemoteUsers    bool
-	EnableFactStore     bool
+
+	// LLM Provider Settings
+	LLMProvider  string // "claude" or "gemini"
+	GeminiAPIKey string
+	GeminiModel  string
+
+	// Claude Settings
+	AnthropicAuthToken string
+	AnthropicBaseURL   string
+	AnthropicModel     string
+
+	BotUsername      string
+	CharacterPrompt  string
+	AllowRemoteUsers bool
+	EnableFactStore  bool
 
 	// 会話管理設定
 	ConversationMessageCompressThreshold int
@@ -58,28 +66,40 @@ type Config struct {
 	// ファクト管理設定
 	FactRetentionDays int // ファクト保持期間（日数）
 	MaxFacts          int // 最大ファクト数
+
+	// Storage Settings
+	SessionFileName   string
+	FactStoreFileName string
 }
 
-func LoadEnvironment() {
-	envPath := utils.GetFilePath(".env")
+func LoadEnvironment(envPath string) {
+	if envPath == "" {
+		envPath = utils.GetFilePath(".env")
+	}
 
 	if err := godotenv.Load(envPath); err != nil {
-		log.Fatal(".envファイルが見つかりません: ", envPath)
+		log.Fatal("環境設定ファイルが見つかりません: ", envPath)
 	}
-	log.Printf(".envファイルを読み込みました: %s", envPath)
+	log.Printf("環境設定ファイルを読み込みました: %s", envPath)
 }
 
 func LoadConfig() *Config {
-	return &Config{
+	cfg := &Config{
+		LLMProvider:  parseString(os.Getenv("LLM_PROVIDER")),
+		GeminiAPIKey: os.Getenv("GEMINI_API_KEY"),
+		GeminiModel:  os.Getenv("GEMINI_MODEL"),
+
+		AnthropicAuthToken: os.Getenv("ANTHROPIC_AUTH_TOKEN"),
+		AnthropicBaseURL:   os.Getenv("ANTHROPIC_BASE_URL"),
+		AnthropicModel:     os.Getenv("ANTHROPIC_DEFAULT_MODEL"),
+
 		MastodonServer:      os.Getenv("MASTODON_SERVER"),
 		MastodonAccessToken: os.Getenv("MASTODON_ACCESS_TOKEN"),
-		AnthropicAuthToken:  os.Getenv("ANTHROPIC_AUTH_TOKEN"),
-		AnthropicBaseURL:    os.Getenv("ANTHROPIC_BASE_URL"),
-		AnthropicModel:      os.Getenv("ANTHROPIC_DEFAULT_MODEL"),
-		BotUsername:         os.Getenv("BOT_USERNAME"),
-		CharacterPrompt:     os.Getenv("CHARACTER_PROMPT"),
-		AllowRemoteUsers:    parseBool(os.Getenv("ALLOW_REMOTE_USERS")),
-		EnableFactStore:     parseBool(os.Getenv("ENABLE_FACT_STORE")),
+
+		BotUsername:      os.Getenv("BOT_USERNAME"),
+		CharacterPrompt:  os.Getenv("CHARACTER_PROMPT"),
+		AllowRemoteUsers: parseBool(os.Getenv("ALLOW_REMOTE_USERS")),
+		EnableFactStore:  parseBool(os.Getenv("ENABLE_FACT_STORE")),
 
 		ConversationMessageCompressThreshold: parseInt(os.Getenv("CONVERSATION_MESSAGE_COMPRESS_THRESHOLD")),
 		ConversationMessageKeepCount:         parseInt(os.Getenv("CONVERSATION_MESSAGE_KEEP_COUNT")),
@@ -110,7 +130,29 @@ func LoadConfig() *Config {
 
 		FactRetentionDays: parseInt(os.Getenv("FACT_RETENTION_DAYS")),
 		MaxFacts:          parseInt(os.Getenv("MAX_FACTS")),
+
+		SessionFileName:   parseString(os.Getenv("SESSION_FILE")),
+		FactStoreFileName: parseString(os.Getenv("FACT_STORE_FILE")),
 	}
+
+	// プロバイダー固有のバリデーション
+	switch cfg.LLMProvider {
+	case "gemini":
+		if cfg.GeminiAPIKey == "" {
+			log.Fatal("エラー: Geminiプロバイダーが選択されていますが、GEMINI_API_KEYが設定されていません")
+		}
+		if cfg.GeminiModel == "" {
+			log.Fatal("エラー: Geminiプロバイダーが選択されていますが、GEMINI_MODELが設定されていません")
+		}
+	case "claude":
+		if cfg.AnthropicAuthToken == "" {
+			log.Fatal("エラー: Claudeプロバイダーが選択されていますが、ANTHROPIC_AUTH_TOKENが設定されていません")
+		}
+	default:
+		log.Fatal("エラー: 未対応のLLMプロバイダーです: ", cfg.LLMProvider)
+	}
+
+	return cfg
 }
 
 func parseBool(value string) bool {

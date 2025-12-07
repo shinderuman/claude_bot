@@ -45,6 +45,181 @@ sync_data_dir() {
     fi
 }
 
+# キー入力取得関数
+read_key() {
+    local key
+    old_stty_cfg=$(stty -g)
+    stty raw -echo
+    key=$(dd bs=1 count=1 2>/dev/null)
+    stty "$old_stty_cfg"
+    
+    # エスケープシーケンスの処理
+    if [ "$key" = $'\x1b' ]; then
+        stty raw -echo
+        local next_char=$(dd bs=1 count=2 2>/dev/null)
+        stty "$old_stty_cfg"
+        key="${key}${next_char}"
+    # UTF-8 3バイト文字の処理 (例: 全角スペース \xe3\x80\x80)
+    elif [ "$key" = $'\xe3' ]; then
+        stty raw -echo
+        local next_char=$(dd bs=1 count=2 2>/dev/null)
+        stty "$old_stty_cfg"
+        key="${key}${next_char}"
+    fi
+    echo -n "$key"
+}
+
+
+# Yes/No 選択プロンプト（矢印キー対応・縦配置）
+confirm_action() {
+    local prompt="$1"
+    local default_yes="${2:-false}" # true for Yes default, false for No default
+    local selected=$([ "$default_yes" = true ] && echo 0 || echo 1) # 0: Yes, 1: No
+    
+    # カーソル非表示
+    tput civis >&2
+    
+    echo "$prompt" >&2
+    
+    while true; do
+        if [ "$selected" -eq 0 ]; then
+            printf "\r\033[K > \033[7m[ Yes ]\033[0m\n\r\033[K   [ No  ]\n" >&2
+        else
+            printf "\r\033[K   [ Yes ]\n\r\033[K > \033[7m[ No  ]\033[0m\n" >&2
+        fi
+        
+        local key=$(read_key)
+        
+        case "$key" in
+            $'\x1b\x5b\x41'|$'\x1b\x5b\x42') # Up or Down Arrow
+                selected=$((1 - selected))
+                ;;
+            "") # Enter
+                break
+                ;;
+            $'\x0a'|$'\x0d') # Enter
+                break
+                ;;
+        esac
+        
+        # カーソルをメニューの先頭に戻す (2行分)
+        printf "\033[2A" >&2
+    done
+    
+    # カーソル表示再開と改行
+    tput cnorm >&2
+    echo "" >&2
+    
+    if [ "$selected" -eq 0 ]; then
+        return 0 # True (Yes)
+    else
+        return 1 # False (No)
+    fi
+}
+
+# サービス多重選択メニュー
+multiselect_services() {
+    local -a files=()
+    local -a services=()
+    local -a selected=()
+    
+    # .envファイルの検出とリスト化
+    # data/.env* -> claude_bot OR claude_bot_suffix
+    for f in data/.env*; do
+        [ -e "$f" ] || continue
+        [[ "$f" == *"example"* ]] && continue # exampleは除外
+        
+        local filename=$(basename "$f")
+        local suffix="${filename#.env}"
+        local svc_name="claude_bot${suffix//./_}"
+        
+        files+=("$f")
+        services+=("$svc_name")
+        selected+=(true)
+    done
+    
+    if [ ${#services[@]} -eq 0 ]; then
+        echo "デプロイ可能なサービスが見つかりません" >&2
+        return
+    fi
+    
+    local cursor=0
+    local key=""
+    
+    # カーソル非表示
+    tput civis >&2
+    
+    echo "デプロイするサービスを選択してください (Space: 切替, Enter: 決定):" >&2
+    
+    # 選択ループ
+    while true; do
+        # リストの描画
+        for i in "${!services[@]}"; do
+            local prefix="   "
+            if [ "$i" -eq "$cursor" ]; then
+                prefix=" > "
+            fi
+            
+            local checkbox="[ ]"
+            if [ "${selected[$i]}" = true ]; then
+                checkbox="[x]"
+            fi
+            
+            # 色付きで表示（選択行はハイライト）
+            if [ "$i" -eq "$cursor" ]; then
+                printf "\r\033[K%s\033[7m%s %s\033[0m\n" "$prefix" "$checkbox" "${services[$i]}" >&2
+            else
+                printf "\r\033[K%s%s %s\n" "$prefix" "$checkbox" "${services[$i]}" >&2
+            fi
+        done
+        
+        # キー入力待機
+        key=$(read_key)
+        
+        case "$key" in
+            $'\x1b\x5b\x41') # Up Arrow
+                if [ "$cursor" -gt 0 ]; then
+                    cursor=$((cursor - 1))
+                fi
+                ;;
+            $'\x1b\x5b\x42') # Down Arrow
+                if [ "$cursor" -lt $((${#services[@]} - 1)) ]; then
+                    cursor=$((cursor + 1))
+                fi
+                ;;
+            " "|$'\xe3\x80\x80') # Space (半角/全角)
+                if [ "${selected[$cursor]}" = true ]; then
+                    selected[$cursor]=false
+                else
+                    selected[$cursor]=true
+                fi
+                ;;
+            "") # Enter
+                break
+                ;;
+            $'\x0a'|$'\x0d') # Enter
+                break
+                ;;
+        esac
+        
+        # カーソルをリストの先頭に戻す
+        printf "\033[%dA" "${#services[@]}" >&2
+    done
+    
+    # カーソル表示再開
+    tput cnorm >&2
+    
+    # 選択されたサービスを出力
+    local output_services=()
+    for i in "${!services[@]}"; do
+        if [ "${selected[$i]}" = true ]; then
+            output_services+=("${services[$i]}")
+        fi
+    done
+    
+    echo "${output_services[*]}"
+}
+
 # ========================================
 # メイン処理
 # ========================================
@@ -64,18 +239,28 @@ main() {
     echo "=== Mastodon Claude Bot デプロイスクリプト ==="
     echo ""
 
+    # デプロイ対象サービスの初期化
+    local target_services=()
+
     # 質問と計画の実行
-    echo -n "プログラムをデプロイしますか？ [y/N]: "
-    read -r response
-    case $response in
-        [yY]|[yY][eE][sS])
-            DEPLOY_PROGRAM=true
-            echo "  → プログラムをデプロイします"
-            ;;
-        *)
-            DEPLOY_PROGRAM=false
-            ;;
-    esac
+    if confirm_action "プログラムをデプロイしますか？"; then
+        DEPLOY_PROGRAM=true
+        echo ""
+        
+        # 多重選択メニューの実行
+        local selected_str=$(multiselect_services)
+        IFS=' ' read -r -a target_services <<< "$selected_str"
+        
+        if [ ${#target_services[@]} -eq 0 ]; then
+             echo "  ⚠ サービスが選択されませんでした。デプロイを中止します。"
+             exit 1
+        fi
+        
+        echo ""
+        echo "  → 対象サービス: ${target_services[*]}"
+    else
+        DEPLOY_PROGRAM=false
+    fi
 
     echo ""
     echo "実行計画:"
@@ -119,24 +304,28 @@ main() {
     # ========================================
     if [ "$DEPLOY_PROGRAM" = true ]; then
         # Supervisorの停止
-        echo "Supervisorを停止中..."
-        ssh "${REMOTE_HOST}" "sudo supervisorctl stop ${APP_NAME}"
+        for SERVICE in "${target_services[@]}"; do
+            echo "Supervisor (${SERVICE}) を停止中..."
+            ssh "${REMOTE_HOST}" "sudo supervisorctl stop ${SERVICE}" || echo "  ⚠ ${SERVICE} の停止に失敗しました（プロセスが存在しない可能性があります）"
+        done
 
         # バイナリの転送
         echo "バイナリを転送中..."
         scp "${APP_NAME}" "${REMOTE_HOST}:${REMOTE_DIR}/"
 
         # Supervisorの開始
-        echo "Supervisorを開始中..."
-        ssh "${REMOTE_HOST}" "sudo supervisorctl start ${APP_NAME}"
-        echo "  ✓ Supervisor開始完了"
+        for SERVICE in "${target_services[@]}"; do
+            echo "Supervisor (${SERVICE}) を開始中..."
+            ssh "${REMOTE_HOST}" "sudo supervisorctl start ${SERVICE}"
+        done
+        echo "  ✓ Supervisor操作完了"
 
         # ローカルのバイナリを削除
         rm "${APP_NAME}"
 
         echo ""
         echo "=== デプロイ完了 ==="
-        echo "ステータス確認: ssh ${REMOTE_HOST} 'supervisorctl status ${APP_NAME}'"
+        echo "ステータス確認: ssh ${REMOTE_HOST} 'supervisorctl status ${target_services[*]}'"
     else
         echo ""
         echo "=== ファイル同期完了 ==="

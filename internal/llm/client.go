@@ -6,25 +6,35 @@ import (
 	"strings"
 
 	"claude_bot/internal/config"
+	"claude_bot/internal/llm/provider"
+	"claude_bot/internal/llm/provider/anthropic"
+	"claude_bot/internal/llm/provider/gemini"
 	"claude_bot/internal/model"
-
-	anthropic "github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/option"
 )
 
 type Client struct {
-	client anthropic.Client
-	config *config.Config
+	provider provider.Provider
+	config   *config.Config
 }
 
 func NewClient(cfg *config.Config) *Client {
-	opts := []option.RequestOption{option.WithAPIKey(cfg.AnthropicAuthToken)}
-	if cfg.AnthropicBaseURL != "" {
-		opts = append(opts, option.WithBaseURL(cfg.AnthropicBaseURL))
+	var p provider.Provider
+
+	switch cfg.LLMProvider {
+	case "claude":
+		p = anthropic.NewClient(cfg)
+	case "gemini":
+		p = gemini.NewClient(cfg)
+	default:
+
+		// デフォルトはClaude（後方互換性のため、または明示的なエラーにしても良い）
+		log.Printf("警告: 未知のプロバイダー '%s' が指定されました。Claudeを使用します。", cfg.LLMProvider)
+		p = anthropic.NewClient(cfg)
 	}
+
 	return &Client{
-		client: anthropic.NewClient(opts...),
-		config: cfg,
+		provider: p,
+		config:   cfg,
 	}
 }
 
@@ -42,56 +52,14 @@ func (c *Client) CallClaudeAPIForSummary(ctx context.Context, messages []model.M
 	return c.CallClaudeAPI(ctx, messages, systemPrompt, c.config.MaxSummaryTokens, nil)
 }
 
+// CallClaudeAPI は互換性のために名前を残しているが、実際にはProviderを呼び出す
 func (c *Client) CallClaudeAPI(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, currentImages []model.Image) string {
-	params := anthropic.MessageNewParams{
-		Model:     anthropic.Model(c.config.AnthropicModel),
-		MaxTokens: maxTokens,
-		Messages:  convertMessages(messages, currentImages),
-	}
-
-	if systemPrompt != "" {
-		params.System = []anthropic.TextBlockParam{
-			{Type: "text", Text: systemPrompt},
-		}
-	}
-
-	msg, err := c.client.Messages.New(ctx, params)
+	content, err := c.provider.GenerateContent(ctx, messages, systemPrompt, maxTokens, currentImages)
 	if err != nil {
-		log.Printf("API呼び出しエラー: %v", err)
+		log.Printf("LLM生成エラー: %v", err)
 		return ""
 	}
-
-	return extractResponseText(msg)
-}
-
-func extractResponseText(msg *anthropic.Message) string {
-	if len(msg.Content) > 0 {
-		return msg.Content[0].Text
-	}
-	return ""
-}
-
-func convertMessages(messages []model.Message, currentImages []model.Image) []anthropic.MessageParam {
-	result := make([]anthropic.MessageParam, len(messages))
-	for i, msg := range messages {
-		if msg.Role == "assistant" {
-			result[i] = anthropic.NewAssistantMessage(anthropic.NewTextBlock(msg.Content))
-		} else {
-			// 最後のユーザーメッセージに画像を添付
-			if i == len(messages)-1 && len(currentImages) > 0 {
-				content := []anthropic.ContentBlockParamUnion{
-					anthropic.NewTextBlock(msg.Content),
-				}
-				for _, img := range currentImages {
-					content = append(content, anthropic.NewImageBlockBase64(img.MediaType, img.Data))
-				}
-				result[i] = anthropic.NewUserMessage(content...)
-			} else {
-				result[i] = anthropic.NewUserMessage(anthropic.NewTextBlock(msg.Content))
-			}
-		}
-	}
-	return result
+	return content
 }
 
 func ExtractJSON(s string) string {

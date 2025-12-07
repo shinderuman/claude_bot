@@ -1,6 +1,6 @@
-# Mastodon Claude Bot
+# Mastodon Claude / Gemini Bot
 
-Mastodonのメンション通知にリアルタイムで応答する、Claude API搭載の会話ボットです。
+Mastodonのメンション通知にリアルタイムで応答する、LLM (Claude / Gemini) 搭載の会話ボットです。
 文脈を理解した自然な会話、長期記憶、画像認識、キャラクター設定など、高度な対話機能を提供します。
 
 ## クイックスタート
@@ -24,7 +24,7 @@ go mod tidy
 ```
 
 ### 3. 動作確認
-Claude APIとの接続を確認するための専用コマンドが用意されています。
+LLM APIとの接続を確認するための専用コマンドが用意されています。
 
 ```bash
 # ビルドと実行
@@ -60,7 +60,7 @@ go run ./cmd/claude_bot
 - **Fediverse投稿の自動除外**: `.well-known/nodeinfo`を使用してFediverseサーバーを判定し、ローカル投稿URLを除外。
 
 ### 🖼️ 画像認識（実験的）
-- **画像の理解**: メンションに添付された画像を認識し、内容を踏まえた応答を生成（Claude API使用時のみ）。
+- **画像の理解**: メンションに添付された画像を認識し、内容を踏まえた応答を生成（Claude / Gemini 両対応）。
 - **MIMEタイプ自動判定**: JPEG、PNG、WebPなど、様々な画像形式に対応。
 - **オンオフ切り替え**: `.env`で簡単に有効/無効を切り替え可能。
 
@@ -91,12 +91,17 @@ go run ./cmd/claude_bot
 | `MASTODON_ACCESS_TOKEN` | Mastodonのアクセストークン |
 | `BOT_USERNAME` | Botのユーザー名（メンション判定に使用） |
 
-### Claude API設定（必須）
+### Claude/Gemini API設定（必須）
+`LLM_PROVIDER` で `claude` または `gemini` を指定します。
+
 | 変数名 | 説明 |
 | :--- | :--- |
-| `ANTHROPIC_AUTH_TOKEN` | Claude APIキー |
-| `ANTHROPIC_BASE_URL` | Claude APIのベースURL（例: `https://api.anthropic.com`） |
-| `ANTHROPIC_DEFAULT_MODEL` | 使用するモデル名（例: `claude-3-5-sonnet-20241022`） |
+| `LLM_PROVIDER` | `claude` または `gemini` |
+| `ANTHROPIC_AUTH_TOKEN` | (Claude用) APIキー |
+| `ANTHROPIC_BASE_URL` | (Claude用) APIのベースURL |
+| `ANTHROPIC_MODEL` | (Claude用) 使用モデル（例: `claude-3-5-sonnet-20241022`） |
+| `GEMINI_API_KEY` | (Gemini用) APIキー |
+| `GEMINI_MODEL` | (Gemini用) 使用モデル（例: `gemini-1.5-pro`） |
 
 ### Bot動作設定
 | 変数名 | 推奨値 | 説明 |
@@ -104,7 +109,7 @@ go run ./cmd/claude_bot
 | `CHARACTER_PROMPT` | (任意) | Botの人格設定プロンプト。空文字列も可 |
 | `ALLOW_REMOTE_USERS` | `false` | `true`: 他インスタンスからのメンションも受け付ける<br>`false`: 同一インスタンスのみ |
 | `ENABLE_FACT_STORE` | `true` | `true`: ユーザー情報を記憶する<br>`false`: 記憶機能を無効化 |
-| `ENABLE_IMAGE_RECOGNITION` | `false` | `true`: 画像認識を有効化（Claude API推奨）<br>`false`: 画像認識を無効化 |
+| `ENABLE_IMAGE_RECOGNITION` | `false` | `true`: 画像認識を有効化（ Claude/Gemini 共に対応）<br>`false`: 画像認識を無効化 |
 | `ENABLE_IMAGE_GENERATION` | `false` | `true`: SVG画像生成機能を有効化<br>`false`: 画像生成機能を無効化 |
 
 ### 会話管理パラメータ
@@ -199,7 +204,7 @@ claude_bot/
 - **collector**: ストリーミングAPIを使用したタイムラインからの自動ファクト収集
 - **facts**: ファクトの抽出、保存、検索、重複排除
 - **fetcher**: URLメタデータ取得、NodeInfoによるFediverseサーバー判定
-- **llm**: Claude APIとの通信、プロンプト管理、画像送信
+- **llm**: LLM (Claude / Gemini) APIとの通信、プロンプト管理、画像送信
 - **mastodon**: Mastodon APIとの通信、ストリーミング、画像ダウンロード
 - **store**: 会話履歴とファクトのJSON永続化
 

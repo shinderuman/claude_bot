@@ -1,12 +1,16 @@
 package store
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/gofrs/flock"
 
 	"claude_bot/internal/config"
 	"claude_bot/internal/model"
@@ -15,18 +19,20 @@ import (
 
 type FactStore struct {
 	mu           sync.RWMutex
+	fileLock     *flock.Flock
 	Facts        []model.Fact
 	saveFilePath string
 }
 
-func InitializeFactStore() *FactStore {
-	factsPath := utils.GetFilePath(config.FactStoreFileName)
+func InitializeFactStore(cfg *config.Config) *FactStore {
+	factsPath := utils.GetFilePath(cfg.FactStoreFileName)
 	return NewFactStore(factsPath)
 }
 
 // NewFactStore creates a new FactStore with a custom file path
 func NewFactStore(filePath string) *FactStore {
 	store := &FactStore{
+		fileLock:     flock.New(filePath + ".lock"),
 		Facts:        []model.Fact{},
 		saveFilePath: filePath,
 	}
@@ -46,6 +52,17 @@ func (s *FactStore) load() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// 読み込み時も簡易的にロック（待機なし）を試みるが、
+	// 読み込みは失敗してもファイルが壊れるわけではないので
+	// 厳密なファイルロックまでは必須ではないが、一貫性のためTryLockする
+	// ここではシンプルにos.ReadFileのみ行う（OSレベルのAtomic性は期待しない）
+
+	// ただし、もし厳密に行うなら:
+	// locked, err := s.fileLock.TryRLock()
+	// if err == nil && locked {
+	// 	 defer s.fileLock.Unlock()
+	// }
+
 	data, err := os.ReadFile(s.saveFilePath)
 	if err != nil {
 		return err
@@ -58,74 +75,87 @@ func (s *FactStore) load() error {
 	return nil
 }
 
+// Save はファイルロックを取得し、ディスク上のデータとメモリ上のデータをマージして保存します
+// コンテンツの重複のみを排除し、異なるValueは全て保持します（Gemini/Claudeの共存）
 func (s *FactStore) Save() error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	// タイムアウト付きでロック取得（0.5秒）
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
 
-	data, err := json.MarshalIndent(s.Facts, "", "  ")
+	locked, err := s.fileLock.TryLockContext(ctx, 10*time.Millisecond)
+	if err != nil || !locked {
+		// ロック取得失敗時は保存をスキップ（次回保存時にマージされるため安全）
+		log.Printf("ファイルロック取得失敗のため保存をスキップ: %v", err)
+		return fmt.Errorf("failed to acquire file lock")
+	}
+	defer s.fileLock.Unlock()
+
+	s.mu.RLock()
+	currentMemoryFacts := make([]model.Fact, len(s.Facts))
+	copy(currentMemoryFacts, s.Facts)
+	s.mu.RUnlock() // ディスク読み込み等のために一旦解除
+
+	// 1. ディスクから最新をロード
+	var diskFacts []model.Fact
+	data, err := os.ReadFile(s.saveFilePath)
+	if err == nil {
+		// ファイルが存在する場合のみパース
+		json.Unmarshal(data, &diskFacts)
+	}
+
+	// 2. マージ（重複排除: Target+Key+Valueが完全一致するもの）
+	mergedFacts := s.mergeFacts(diskFacts, currentMemoryFacts)
+
+	// 3. 保存
+	data, err = json.MarshalIndent(mergedFacts, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	return os.WriteFile(s.saveFilePath, data, config.DataFilePermission)
-}
+	if err := os.WriteFile(s.saveFilePath, data, 0644); err != nil {
+		return err
+	}
 
-// Upsert は既存のメソッド(後方互換性のため)
-func (s *FactStore) Upsert(target, targetUserName, author, authorUserName, key string, value interface{}) {
-	s.UpsertWithSource(model.Fact{
-		Target:         target,
-		TargetUserName: targetUserName,
-		Author:         author,
-		AuthorUserName: authorUserName,
-		Key:            key,
-		Value:          value,
-		Timestamp:      time.Now(),
-		SourceType:     model.SourceTypeMention, // デフォルトはメンション
-	})
-}
-
-// UpsertWithSource はソース情報を含むFactを保存します
-func (s *FactStore) UpsertWithSource(fact model.Fact) {
+	// 4. メモリも更新（他プロセスの変更を取り込む）
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.Facts = mergedFacts
+	s.mu.Unlock()
 
-	// 既存の事実を検索して更新
-	for i, existing := range s.Facts {
-		if existing.Target == fact.Target && existing.Key == fact.Key {
-			s.Facts[i].Value = fact.Value
-			s.Facts[i].Author = fact.Author
-			s.Facts[i].AuthorUserName = fact.AuthorUserName
-			if fact.TargetUserName != "" {
-				s.Facts[i].TargetUserName = fact.TargetUserName
+	return nil
+}
+
+// mergeFacts はディスク上のデータとメモリ上のデータをマージします
+// Target+Key+Valueが完全一致するもののみ重複排除します
+func (s *FactStore) mergeFacts(disk, memory []model.Fact) []model.Fact {
+	// 重複チェック用マップ
+	// キー: "Target|Key|Value"
+	seen := make(map[string]bool)
+	var result []model.Fact
+
+	// ヘルパー: ファクトを追加
+	add := func(list []model.Fact) {
+		for _, f := range list {
+			valStr := fmt.Sprintf("%v", f.Value)
+			uniqueKey := fmt.Sprintf("%s|%s|%s", f.Target, f.Key, valStr)
+
+			if !seen[uniqueKey] {
+				seen[uniqueKey] = true
+				result = append(result, f)
 			}
-			s.Facts[i].Timestamp = time.Now()
-			// ソース情報も更新
-			if fact.SourceType != "" {
-				s.Facts[i].SourceType = fact.SourceType
-			}
-			if fact.SourceURL != "" {
-				s.Facts[i].SourceURL = fact.SourceURL
-			}
-			if fact.PostAuthor != "" {
-				s.Facts[i].PostAuthor = fact.PostAuthor
-			}
-			if fact.PostAuthorUserName != "" {
-				s.Facts[i].PostAuthorUserName = fact.PostAuthorUserName
-			}
-			return
 		}
 	}
 
-	// 新規追加
-	if fact.Timestamp.IsZero() {
-		fact.Timestamp = time.Now()
-	}
-	s.Facts = append(s.Facts, fact)
+	// ディスクを優先（ベース）
+	add(disk)
+	// メモリを追加（差分のみ追加される）
+	add(memory)
+
+	return result
 }
 
 func (s *FactStore) Cleanup(retention time.Duration) int {
+	// CleanupはSaveを呼ぶため、ここではメモリ上の操作のみ行い、Saveに任せる
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	threshold := time.Now().Add(-retention)
 	var activeFacts []model.Fact
@@ -139,13 +169,12 @@ func (s *FactStore) Cleanup(retention time.Duration) int {
 		}
 	}
 
+	s.Facts = activeFacts
+	s.mu.Unlock()
+
 	if deletedCount > 0 {
-		s.Facts = activeFacts
-		// 同期的に保存（非同期だとロック処理が複雑になるため）
-		data, err := json.MarshalIndent(s.Facts, "", "  ")
-		if err == nil {
-			os.WriteFile(s.saveFilePath, data, config.DataFilePermission)
-		}
+		// 保存（ロック＆マージ付き）
+		s.Save()
 	}
 
 	return deletedCount
@@ -407,6 +436,56 @@ func (s *FactStore) enforceMaxFactsUnsafe(maxFacts int) {
 		// 実際にはソートが必要だが、通常は追加順=時系列順なので省略
 		s.Facts = s.Facts[len(s.Facts)-maxFacts:]
 	}
+}
+
+// Upsert は既存のメソッド(後方互換性のため)
+func (s *FactStore) Upsert(target, targetUserName, author, authorUserName, key string, value interface{}) {
+	s.UpsertWithSource(model.Fact{
+		Target:         target,
+		TargetUserName: targetUserName,
+		Author:         author,
+		AuthorUserName: authorUserName,
+		Key:            key,
+		Value:          value,
+		Timestamp:      time.Now(),
+		SourceType:     model.SourceTypeMention, // デフォルトはメンション
+	})
+}
+
+// UpsertWithSource はソース情報を含むFactを保存します
+func (s *FactStore) UpsertWithSource(fact model.Fact) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// メモリ上での簡易重複チェック（完全一致のみ排除）
+	// ディスクとのマージはSave時に行われるため、ここではメモリ内の重複だけ防ぐ
+	for i, existing := range s.Facts {
+		// TargetとKeyが一致し、かつValueも一致する場合のみ更新（Timestamp更新）
+		if existing.Target == fact.Target && existing.Key == fact.Key {
+			// Valueの比較（簡易的）
+			val1 := fmt.Sprintf("%v", existing.Value)
+			val2 := fmt.Sprintf("%v", fact.Value)
+
+			if val1 == val2 {
+				// 完全一致なら更新扱いで維持（新しいメタデータを反映）
+				s.Facts[i].Author = fact.Author
+				s.Facts[i].Timestamp = time.Now()
+				if fact.SourceType != "" {
+					s.Facts[i].SourceType = fact.SourceType
+				}
+				if fact.SourceURL != "" {
+					s.Facts[i].SourceURL = fact.SourceURL
+				}
+				return
+			}
+		}
+	}
+
+	// 新規追加（Valueが違うなら別ファクトとして追記）
+	if fact.Timestamp.IsZero() {
+		fact.Timestamp = time.Now()
+	}
+	s.Facts = append(s.Facts, fact)
 }
 
 // GetFactsByTarget gets all facts for a specific target

@@ -72,7 +72,7 @@ type Bot struct {
 
 // NewBot creates a new Bot instance
 func NewBot(cfg *config.Config) *Bot {
-	history := store.InitializeHistory()
+	history := store.InitializeHistory(cfg)
 
 	llmClient := llm.NewClient(cfg)
 
@@ -85,7 +85,7 @@ func NewBot(cfg *config.Config) *Bot {
 	}
 	mastodonClient := mastodon.NewClient(mastodonConfig)
 
-	factStore := store.InitializeFactStore()
+	factStore := store.InitializeFactStore(cfg)
 
 	factService := facts.NewFactService(cfg, factStore, llmClient)
 
@@ -172,8 +172,14 @@ func (b *Bot) logStartupInfo() {
 	log.Printf("=== Mastodon Bot 起動 ===")
 
 	// Bot基本情報
-	log.Printf("Bot: @%s @ %s | Claude: %s (%s)",
-		b.config.BotUsername, b.config.MastodonServer, b.config.AnthropicModel, b.config.AnthropicBaseURL)
+	var modelInfo string
+	if b.config.LLMProvider == "gemini" {
+		modelInfo = fmt.Sprintf("Gemini: %s", b.config.GeminiModel)
+	} else {
+		modelInfo = fmt.Sprintf("Claude: %s (%s)", b.config.AnthropicModel, b.config.AnthropicBaseURL)
+	}
+	log.Printf("Bot: @%s @ %s | Mode: %s | %s",
+		b.config.BotUsername, b.config.MastodonServer, strings.ToUpper(b.config.LLMProvider), modelInfo)
 
 	// 機能設定
 	log.Printf("機能: リモートユーザー=%t, 事実ストア=%t, 画像認識=%t, ファクト収集=%t",
@@ -446,15 +452,30 @@ func (b *Bot) startAutoPostLoop(ctx context.Context) {
 		return
 	}
 
-	log.Printf("自動投稿ループを開始しました (間隔: %d時間)", b.config.AutoPostIntervalHours)
-	ticker := time.NewTicker(time.Duration(b.config.AutoPostIntervalHours) * time.Hour)
-	defer ticker.Stop()
+	log.Printf("自動投稿ループを開始しました (間隔: %d時間 + ランダム遅延)", b.config.AutoPostIntervalHours)
 
 	for {
+		// 次の実行時間を計算
+		now := time.Now()
+		// 現在の時間のXX時00分を基準にする
+		nextTime := now.Truncate(time.Hour)
+
+		// 0〜59分のランダムなオフセットを追加
+		// (シンプルなランダム実装)
+		randomMinutes := time.Duration(time.Now().UnixNano() % 60)
+		nextTime = nextTime.Add(randomMinutes * time.Minute)
+
+		// もし計算結果が過去なら、次のサイクルへ
+		if nextTime.Before(now) {
+			nextTime = nextTime.Add(time.Duration(b.config.AutoPostIntervalHours) * time.Hour)
+		}
+
+		log.Printf("次回の自動投稿予定: %s", nextTime.Format(DateTimeFormat))
+
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-time.After(time.Until(nextTime)):
 			b.executeAutoPost(ctx)
 		}
 	}

@@ -18,6 +18,9 @@ import (
 	"claude_bot/internal/llm"
 	"claude_bot/internal/model"
 	"claude_bot/internal/store"
+	"claude_bot/internal/utils"
+
+	"github.com/joho/godotenv"
 )
 
 func main() {
@@ -28,7 +31,19 @@ func main() {
 	testFacts := flag.Bool("test-facts", false, "テスト用facts.jsonを使用（data/facts_test.json）")
 	flag.Parse()
 
-	config.LoadEnvironment()
+	// テスト用: .envを読み込む（存在する場合）
+	envPath := utils.GetFilePath(".env")
+	err := godotenv.Load(envPath)
+
+	if err != nil {
+		fmt.Printf(".envファイルが見つかりません（無視します）: %s\n", envPath)
+	}
+
+	// 互換性のため、config.LoadEnvironmentも呼ぶが、ここではエラーになっても続行させるため自前でロードした
+	// config.LoadEnvironment("") 呼び出しは不要、あるいは空文字で呼べばデフォルトの.envを読む
+	// テスト用なので、config.LoadConfig()が環境変数を参照できれば良い
+	// ここでは何もしない（godotenv.Load済み）
+
 	cfg := config.LoadConfig()
 
 	// 設定情報を出力
@@ -294,8 +309,9 @@ func testAutoPost(cfg *config.Config, client *llm.Client) {
 		log.Fatal("エラー: ANTHROPIC_AUTH_TOKEN環境変数が設定されていません")
 	}
 
-	// FactStore初期化
-	factStore := store.InitializeFactStore()
+	// Storeの初期化
+	_ = store.InitializeHistory(cfg)
+	factStore := store.InitializeFactStore(cfg)
 
 	// ファクトバンドル取得
 	facts, err := factStore.GetRandomGeneralFactBundle(5)

@@ -1,0 +1,35 @@
+[program:claude_bot]
+# 単体で動かす場合 (後方互換性のため)
+command=/home/ubuntu/claude_bot/claude_bot -env .env
+directory=/home/ubuntu/claude_bot/data
+autostart=true
+autorestart=true
+stderr_logfile=/var/log/claude_bot.err.log
+stdout_logfile=/var/log/claude_bot.out.log
+user=ubuntu
+
+# ==========================================
+# 2台体制で動かす場合 (Claude & Gemini)
+# ==========================================
+
+[program:claude_bot_claude]
+# Claude用ボット
+# 第1引数で設定ファイルを指定します
+command=/home/ubuntu/claude_bot/claude_bot -env .env.claude
+directory=/home/ubuntu/claude_bot/data
+autostart=true
+autorestart=true
+stderr_logfile=/var/log/claude_bot_claude.err.log
+stdout_logfile=/var/log/claude_bot_claude.out.log
+user=ubuntu
+
+[program:claude_bot_gemini]
+# Gemini用ボット
+# 第1引数で設定ファイルを指定します
+command=/home/ubuntu/claude_bot/claude_bot -env .env.gemini
+directory=/home/ubuntu/claude_bot/data
+autostart=true
+autorestart=true
+stderr_logfile=/var/log/claude_bot_gemini.err.log
+stdout_logfile=/var/log/claude_bot_gemini.out.log
+user=ubuntu
