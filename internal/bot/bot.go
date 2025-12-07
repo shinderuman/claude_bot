@@ -425,6 +425,9 @@ func (b *Bot) extractURLContext(ctx context.Context, notification *gomastodon.No
 
 	// 最初の有効なURLのみ処理
 	for _, u := range urls {
+		// URLの末尾に日本語などが付着する場合があるため、クリーニング
+		u = cleanURL(u)
+
 		// 基本的なURLバリデーション（スキーム、IPアドレスチェック）
 		if err := fetcher.IsValidURLBasic(u); err != nil {
 			continue
@@ -438,7 +441,7 @@ func (b *Bot) extractURLContext(ctx context.Context, notification *gomastodon.No
 		meta, err := fetcher.FetchPageContent(ctx, u, nil)
 		if err != nil {
 			log.Printf("ページコンテンツ取得失敗 (%s): %v", u, err)
-			continue
+			return fmt.Sprintf(llm.Messages.Error.URLContentFetch, u, err)
 		}
 
 		return fetcher.FormatPageContent(meta)
@@ -640,6 +643,16 @@ func extractIDFromURL(url string) string {
 		return lastPart
 	}
 	return ""
+}
+
+// cleanURL removes non-ASCII characters from the end of the URL
+func cleanURL(url string) string {
+	for i, r := range url {
+		if r > 127 {
+			return url[:i]
+		}
+	}
+	return url
 }
 
 // handleAssistantRequest handles the assistant analysis request

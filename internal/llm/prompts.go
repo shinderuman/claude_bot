@@ -41,6 +41,7 @@ var Messages = struct {
 		DateLimit          string
 		DateParse          string // Format: %s (date string)
 		NoStatus           string // Format: %d (month), %d (day)
+		URLContentFetch    string // Format: %s (url), %v (error)
 		Default            string // Format: %s (error detail)
 		DefaultFallback    string
 	}
@@ -91,6 +92,7 @@ var Messages = struct {
 		DateLimit          string
 		DateParse          string
 		NoStatus           string
+		URLContentFetch    string // Format: %s (url), %v (error)
 		Default            string
 		DefaultFallback    string
 	}{
@@ -110,6 +112,7 @@ var Messages = struct {
 		DateLimit:          "申し訳ありませんが、遡れるのは3日前までです。",
 		DateParse:          "日付の形式が正しくないか、理解できませんでした (%s)。YYYY-MM-DD形式などで指定してください。",
 		NoStatus:           "日付: %d/%d。状況: ユーザーの発言が1件も見つかりませんでした。",
+		URLContentFetch:    "\n\n[システム通知]\nURLの内容を取得できませんでした (%s)。\nエラー: %v\n(「自分からは見られない」等の旨を回答に含めてください)",
 		Default:            "申し訳ありません。エラーが発生しました: %s",
 		DefaultFallback:    "申し訳ありません。エラーが発生しました。もう一度お試しください。",
 	},

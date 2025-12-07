@@ -15,7 +15,8 @@ import (
 const (
 	MaxBodySize = 500 * 1024 // 500KB limit (increased for content extraction)
 	Timeout     = 10 * time.Second
-	UserAgent   = "MastodonBot/1.0 (+https://github.com/shinderuman/claude_bot)"
+	// User-Agent to mimic a browser to avoid 403s on some sites
+	UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 (+https://github.com/shinderuman/claude_bot)"
 
 	// HTTP
 	MaxRedirects            = 10
@@ -198,11 +199,12 @@ func extractTextContent(n *html.Node) string {
 	}
 
 	// Limit content length to avoid token limit issues
-	content := sb.String()
-	if len(content) > MaxContentLength {
-		return content[:MaxContentLength] + ContentTruncationSuffix
+	// Use rune based slicing to avoid invalid UTF-8 sequences
+	runes := []rune(sb.String())
+	if len(runes) > MaxContentLength {
+		return string(runes[:MaxContentLength]) + ContentTruncationSuffix
 	}
-	return content
+	return string(runes)
 }
 
 func getAttr(n *html.Node, key string) string {
