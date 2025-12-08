@@ -80,13 +80,15 @@ func main() {
 		testRawImage(cfg, llmClient, *message, *imagePath)
 	case "auto-post":
 		testAutoPost(cfg, llmClient)
+	case "conversation":
+		testConversation(cfg, llmClient, *message)
 	case "generate-image":
 		imageGen := image.NewImageGenerator(cfg, llmClient)
 		testGenerateImage(cfg, imageGen, *message)
 	case "error":
 		testErrorMessageGeneration(cfg, llmClient, *message)
 	default:
-		log.Fatalf("不明なモード: %s (使用可能: response, summary, fact, raw-image, auto-post, generate-image, error)", *mode)
+		log.Fatalf("不明なモード: %s (使用可能: response, summary, fact, raw-image, auto-post, conversation, generate-image, error)", *mode)
 	}
 }
 
@@ -459,4 +461,47 @@ func testErrorMessageGeneration(cfg *config.Config, client *llm.Client, errorDet
 	log.Println("--- 生成されたメッセージ ---")
 	log.Println(response)
 	log.Println("--------------------------")
+}
+
+func testConversation(cfg *config.Config, client *llm.Client, lastMessage string) {
+	log.Printf("=== 会話履歴テスト ===")
+	log.Println()
+
+	if cfg.LLMProvider == "claude" && cfg.AnthropicAuthToken == "" {
+		log.Fatal("エラー: ANTHROPIC_AUTH_TOKEN環境変数が設定されていません")
+	}
+	if cfg.LLMProvider == "gemini" && cfg.GeminiAPIKey == "" {
+		log.Fatal("エラー: GEMINI_API_KEY環境変数が設定されていません")
+	}
+
+	// 履歴の構築
+	messages := []model.Message{
+		{Role: "user", Content: "ねぇルナ、今日の晩御飯なにがいいと思う？"},
+		{Role: "assistant", Content: "ふん、ご主人様ったら、そんなことも自分で決められないのですか？...まあ、今日は魔力が満ちているので、激辛麻婆豆腐なんていかがでしょう。深淵なる赤色が食欲をそそりますわよ。"},
+		{Role: "user", Content: lastMessage},
+	}
+
+	log.Println("--- 会話履歴 ---")
+	for _, msg := range messages {
+		log.Printf("[%s]: %s", msg.Role, msg.Content)
+	}
+	log.Println("----------------")
+	log.Println()
+
+	// システムプロンプト（キャラクター設定 + 要約なし）
+	systemPrompt := llm.BuildSystemPrompt(cfg.CharacterPrompt, "", "", true, cfg.MaxPostChars)
+
+	// API呼び出し
+	ctx := context.Background()
+	response := client.GenerateText(ctx, messages, systemPrompt, cfg.MaxResponseTokens, nil)
+
+	if response == "" {
+		log.Fatal("エラー: Claudeからの応答がありません")
+	}
+
+	log.Println("成功: 応答を受信しました")
+	log.Println()
+	log.Println("--- 応答 ---")
+	log.Println(response)
+	log.Println("------------------")
 }
