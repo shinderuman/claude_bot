@@ -113,3 +113,64 @@ func TestShouldHandleBroadcastCommand(t *testing.T) {
 		})
 	}
 }
+
+func TestIsBroadcastCommand(t *testing.T) {
+	tests := []struct {
+		name             string
+		broadcastCommand string
+		content          string
+		want             bool
+	}{
+		{
+			name:             "Exact match (ignored as empty body)",
+			broadcastCommand: "!all",
+			content:          "!all",
+			want:             false,
+		},
+		{
+			name:             "Prefix match with no separator (ignored)",
+			broadcastCommand: "!all",
+			content:          "!allfoo",
+			want:             false,
+		},
+		{
+			name:             "Valid command with space separator",
+			broadcastCommand: "!all",
+			content:          "!all hello",
+			want:             true,
+		},
+		{
+			name:             "Valid command with newline separator",
+			broadcastCommand: "!all",
+			content:          "!all\nhello",
+			want:             true,
+		},
+		{
+			name:             "Command in middle (ignored)",
+			broadcastCommand: "!all",
+			content:          "hello !all",
+			want:             false,
+		},
+		{
+			name:             "Empty command config (ignored)",
+			broadcastCommand: "",
+			content:          "!all hello",
+			want:             false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				BroadcastCommand: tt.broadcastCommand,
+			}
+			bot := &Bot{
+				config: cfg,
+			}
+
+			if got := bot.isBroadcastCommand(tt.content); got != tt.want {
+				t.Errorf("isBroadcastCommand() = %v, want %v (content: %q)", got, tt.want, tt.content)
+			}
+		})
+	}
+}

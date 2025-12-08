@@ -155,7 +155,7 @@ func (b *Bot) Run(ctx context.Context) error {
 			switch e := event.(type) {
 			case *gomastodon.NotificationEvent:
 				if e.Notification.Type == NotificationTypeMention && e.Notification.Status != nil {
-					b.handleNotification(ctx, e.Notification)
+					b.handleNotification(ctx, e.Notification, "")
 				}
 			case *gomastodon.UpdateEvent:
 				// Check for Broadcast Command
@@ -202,7 +202,7 @@ func (b *Bot) logStartupInfo() {
 	log.Printf("=== 起動完了 ===")
 }
 
-func (b *Bot) handleNotification(ctx context.Context, notification *gomastodon.Notification) {
+func (b *Bot) handleNotification(ctx context.Context, notification *gomastodon.Notification, forcedRootID string) {
 	// 自分の投稿への返信は無視
 	if notification.Account.Acct == b.config.BotUsername {
 		return
@@ -223,7 +223,12 @@ func (b *Bot) handleNotification(ctx context.Context, notification *gomastodon.N
 	log.Printf("メンションを受信: %s (ID: %s)", notification.Account.Acct, notification.Status.ID)
 
 	// セッション管理
-	rootStatusID := b.mastodonClient.GetRootStatusID(ctx, notification)
+	var rootStatusID string
+	if forcedRootID != "" {
+		rootStatusID = forcedRootID
+	} else {
+		rootStatusID = b.mastodonClient.GetRootStatusID(ctx, notification)
+	}
 	session := b.history.GetOrCreateSession(notification.Account.Acct)
 
 	// ユーザーメッセージの抽出
@@ -234,6 +239,14 @@ func (b *Bot) handleNotification(ctx context.Context, notification *gomastodon.N
 
 	// アシスタント機能（発言分析）のチェックはprocessResponse内のclassifyIntentで行うため、ここでは削除
 	// 以前のコードブロックは削除済み
+
+	// ブロードキャストコマンドのチェックと除去
+	if b.isBroadcastCommand(userMessage) {
+		log.Printf("リプライ内ブロードキャストコマンドを検出: %s", userMessage)
+		// コマンド部分を除去（単純な置換でOK、isBroadcastCommandで検証済み）
+		userMessage = strings.Replace(userMessage, b.config.BroadcastCommand, "", 1)
+		userMessage = strings.TrimSpace(userMessage)
+	}
 
 	// 応答生成と送信
 	success := b.processResponse(ctx, session, notification, userMessage, rootStatusID)
@@ -684,13 +697,17 @@ func cleanURL(url string) string {
 // Broadcast and Follow handlers
 
 func (b *Bot) shouldHandleBroadcastCommand(status *gomastodon.Status) bool {
+	// HTMLを除去したテキストを取得 (ExtractUserMessageはメンションを除去してしまうため、直接変換する)
+	content := strings.TrimSpace(b.mastodonClient.StripHTML(string(status.Content)))
+	return b.isBroadcastCommand(content)
+}
+
+func (b *Bot) isBroadcastCommand(content string) bool {
 	// コマンドが設定されていない場合は無視
 	if b.config.BroadcastCommand == "" {
 		return false
 	}
 
-	// HTMLを除去したテキストを取得 (ExtractUserMessageはメンションを除去してしまうため、直接変換する)
-	content := strings.TrimSpace(b.mastodonClient.StripHTML(string(status.Content)))
 	cmd := b.config.BroadcastCommand
 
 	// コマンドで始まっているかチェック (!allfoo を弾くためにスペース等の区切りが必要)
@@ -742,8 +759,19 @@ func (b *Bot) handleBroadcastCommand(ctx context.Context, status *gomastodon.Sta
 		Account: status.Account,
 	}
 
+	// 連続投稿のチェック (10分以内なら同じ会話として扱う)
+	var forcedRootID string
+	session := b.history.GetOrCreateSession(status.Account.Acct)
+	if len(session.Conversations) > 0 {
+		lastConv := session.Conversations[len(session.Conversations)-1]
+		if time.Since(lastConv.LastUpdated) < 10*time.Minute {
+			forcedRootID = lastConv.RootStatusID
+			log.Printf("連続するブロードキャストコマンドを検出: 前回の会話ID(%s)を継続使用します", forcedRootID)
+		}
+	}
+
 	// handleNotificationを呼び出して処理
-	b.handleNotification(ctx, notification)
+	b.handleNotification(ctx, notification, forcedRootID)
 }
 
 func (b *Bot) handleFollowRequest(ctx context.Context, session *model.Session, conversation *model.Conversation, notification *gomastodon.Notification, statusID, mention, visibility string) bool {
