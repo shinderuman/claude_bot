@@ -239,6 +239,24 @@ main() {
     echo "=== Mastodon Claude Bot デプロイスクリプト ==="
     echo ""
 
+    # 引数チェック: --force-facts
+    if [[ "$1" == "--force-facts" ]]; then
+        echo "⚠ 強制ファクト更新モード (--force-facts)"
+        echo "ローカルの facts.json でリモートを強制上書きします。"
+        echo "他のデプロイ・同期処理はスキップされます。"
+        echo ""
+        
+        if confirm_action "本当に実行しますか？" false; then
+            echo "facts.json を強制アップロード中..."
+            rsync -avuz -e "ssh -i ${SFTP_KEY_FILE}" "${DATA_DIR}/facts.json" "${SFTP_USER}@${REMOTE_HOST}:${REMOTE_DIR}/${DATA_DIR}/facts.json"
+            echo "完了しました。"
+            exit 0
+        else
+            echo "中止しました。"
+            exit 1
+        fi
+    fi
+
     # デプロイ対象サービスの初期化
     local target_services=()
 

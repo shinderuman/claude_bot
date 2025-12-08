@@ -75,7 +75,7 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, author, authorUse
 	if len(extracted) > 0 {
 		for _, item := range extracted {
 			// 品質フィルタリング
-			if !s.isValidFact(item.Key, item.Value) {
+			if !s.isValidFact(item.Target, item.Key, item.Value) {
 				continue
 			}
 
@@ -162,7 +162,19 @@ func formatAuthor(fact model.Fact) string {
 }
 
 // isValidFact checks if the fact is valid and worth saving
-func (s *FactService) isValidFact(key string, value interface{}) bool {
+func (s *FactService) isValidFact(target, key string, value interface{}) bool {
+	// ターゲットのチェック
+	targetLower := strings.ToLower(target)
+	invalidTargets := []string{
+		"user", "user_id", "userid", "unknown", "none", "no_name", "someone", "anonymous",
+		"undefined", "null", "test_user", "sample_user",
+	}
+	for _, t := range invalidTargets {
+		if targetLower == t {
+			return false
+		}
+	}
+
 	// キーのチェック
 	keyLower := strings.ToLower(key)
 	invalidKeys := []string{"username", "displayname", "display_name", "account", "id", "follower", "following"}
@@ -257,7 +269,7 @@ func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, url
 	if len(extracted) > 0 {
 		for _, item := range extracted {
 			// 品質フィルタリング
-			if !s.isValidFact(item.Key, item.Value) {
+			if !s.isValidFact(item.Target, item.Key, item.Value) {
 				continue
 			}
 
@@ -316,7 +328,7 @@ func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summar
 	if len(extracted) > 0 {
 		for _, item := range extracted {
 			// 品質フィルタリング
-			if !s.isValidFact(item.Key, item.Value) {
+			if !s.isValidFact(item.Target, item.Key, item.Value) {
 				continue
 			}
 
