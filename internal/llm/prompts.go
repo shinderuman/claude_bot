@@ -220,7 +220,7 @@ func BuildAutoPostPrompt(facts []model.Fact) string {
 }
 
 // BuildDailySummaryPrompt creates a prompt for summarizing daily activities
-func BuildDailySummaryPrompt(statuses []*mastodon.Status, targetDateStr, userRequest string) string {
+func BuildDailySummaryPrompt(statuses []*mastodon.Status, targetDateStr, userRequest string, loc *time.Location) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("以下は **%s** のMastodon投稿ログです。この1日の活動をまとめてください。\n\n", targetDateStr))
 	sb.WriteString("【投稿ログ】\n")
@@ -229,7 +229,7 @@ func BuildDailySummaryPrompt(statuses []*mastodon.Status, targetDateStr, userReq
 
 	for _, status := range statuses {
 		content := re.ReplaceAllString(string(status.Content), "")
-		createdAt := status.CreatedAt.Format("15:04")
+		createdAt := status.CreatedAt.In(loc).Format("15:04")
 		sb.WriteString(fmt.Sprintf("- [%s]: %s\n", createdAt, content))
 	}
 

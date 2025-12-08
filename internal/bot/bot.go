@@ -27,8 +27,6 @@ import (
 var urlRegex = xurls.Strict()
 
 const (
-	// Timezone
-	DefaultTimezone = "Asia/Tokyo"
 
 	// Date/Time Formats
 	DateFormatYMD      = "2006-01-02"          // YYYY-MM-DD
@@ -629,7 +627,7 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 func (b *Bot) classifyIntent(ctx context.Context, message string) (model.IntentType, string, []string, string) {
 	// JSTの現在時刻を取得（タイムゾーンロード失敗時はUTC）
 	now := time.Now()
-	if loc, err := time.LoadLocation(DefaultTimezone); err == nil {
+	if loc, err := time.LoadLocation(b.config.Timezone); err == nil {
 		now = now.In(loc)
 	}
 
@@ -866,9 +864,9 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 	log.Printf("Daily Summary Request: targetDate=%s", targetDate)
 
 	// JSTのタイムゾーンを取得
-	loc, err := time.LoadLocation(DefaultTimezone)
+	loc, err := time.LoadLocation(b.config.Timezone)
 	if err != nil {
-		log.Printf("JSTタイムゾーン読み込み失敗: %v", err)
+		log.Printf("タイムゾーン読み込み失敗 (%s): %v", b.config.Timezone, err)
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.TimeZone)
 		return false
 	}
@@ -914,7 +912,7 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 	}
 
 	// LLMによるまとめ
-	prompt := llm.BuildDailySummaryPrompt(statuses, targetDateStr, userMessage)
+	prompt := llm.BuildDailySummaryPrompt(statuses, targetDateStr, userMessage, loc)
 	systemPrompt := llm.BuildSystemPrompt(b.config.CharacterPrompt, "", "", true, b.config.MaxPostChars)
 
 	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil)

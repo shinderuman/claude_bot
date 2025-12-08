@@ -73,6 +73,7 @@ type Config struct {
 	// Storage Settings
 	SessionFileName   string
 	FactStoreFileName string
+	Timezone          string
 }
 
 func LoadEnvironment(envPath string) {
@@ -138,6 +139,7 @@ func LoadConfig() *Config {
 
 		SessionFileName:   parseString(os.Getenv("SESSION_FILE")),
 		FactStoreFileName: parseString(os.Getenv("FACT_STORE_FILE")),
+		Timezone:          parseString(os.Getenv("TIMEZONE")),
 	}
 
 	// プロバイダー固有のバリデーション
