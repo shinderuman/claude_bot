@@ -7,8 +7,8 @@ data/facts.json.lock
 data/url_blacklist.txt
 
 # ビルド成果物
-claude_bot
-test_claude
+/claude_bot
+/test_claude
 *.exe
 *.exe~
 *.dll
