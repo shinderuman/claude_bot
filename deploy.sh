@@ -34,10 +34,10 @@ sync_data_dir() {
         ssh -i "${SFTP_KEY_FILE}" "${SFTP_USER}@${REMOTE_HOST}" "mkdir -p ${REMOTE_DIR}/${DATA_DIR}"
 
         # リモート → ローカル（リモートの方が新しい場合のみ）
-        rsync -avuz --quiet --exclude='url_blacklist.txt.example' --exclude='.env.example' -e "ssh -i ${SFTP_KEY_FILE}" "${remote_dir}/" "${DATA_DIR}/" 2>/dev/null || true
+        rsync -avuz --quiet --exclude='*.example' -e "ssh -i ${SFTP_KEY_FILE}" "${remote_dir}/" "${DATA_DIR}/" 2>/dev/null || true
 
         # ローカル → リモート（ローカルの方が新しい場合のみ）
-        rsync -avuz --quiet --exclude='url_blacklist.txt.example' --exclude='.env.example' -e "ssh -i ${SFTP_KEY_FILE}" "${DATA_DIR}/" "${remote_dir}/" 2>/dev/null || true
+        rsync -avuz --quiet --exclude='*.example' -e "ssh -i ${SFTP_KEY_FILE}" "${DATA_DIR}/" "${remote_dir}/" 2>/dev/null || true
 
         echo "  ✓ ${DATA_DIR}/同期完了"
     else
