@@ -62,8 +62,14 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, author, authorUse
 	// JSON部分のみ抽出（Markdownコードブロック対策）
 	jsonStr := llm.ExtractJSON(response)
 	if err := json.Unmarshal([]byte(jsonStr), &extracted); err != nil {
-		log.Printf("事実抽出JSONパースエラー: %v\nResponse: %s", err, response)
-		return
+		log.Printf("事実抽出JSONパースエラー(初回): %v", err)
+		// リトライ: JSON修復を試みる
+		repairedJSON := llm.RepairJSON(jsonStr)
+		if err := json.Unmarshal([]byte(repairedJSON), &extracted); err != nil {
+			log.Printf("事実抽出JSONパースエラー(修復後): %v\nOriginal: %s\nRepaired: %s", err, jsonStr, repairedJSON)
+			return
+		}
+		log.Printf("事実抽出JSONを修復しました: %d件抽出", len(extracted))
 	}
 
 	if len(extracted) > 0 {
@@ -238,8 +244,14 @@ func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, url
 	var extracted []model.Fact
 	jsonStr := llm.ExtractJSON(response)
 	if err := json.Unmarshal([]byte(jsonStr), &extracted); err != nil {
-		log.Printf("URL事実抽出JSONパースエラー: %v\nResponse: %s", err, response)
-		return
+		log.Printf("URL事実抽出JSONパースエラー(初回): %v", err)
+		// リトライ: JSON修復を試みる
+		repairedJSON := llm.RepairJSON(jsonStr)
+		if err := json.Unmarshal([]byte(repairedJSON), &extracted); err != nil {
+			log.Printf("URL事実抽出JSONパースエラー(修復後): %v\nOriginal: %s\nRepaired: %s", err, jsonStr, repairedJSON)
+			return
+		}
+		log.Printf("URL事実抽出JSONを修復しました: %d件抽出", len(extracted))
 	}
 
 	if len(extracted) > 0 {
@@ -291,8 +303,14 @@ func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summar
 	var extracted []model.Fact
 	jsonStr := llm.ExtractJSON(response)
 	if err := json.Unmarshal([]byte(jsonStr), &extracted); err != nil {
-		log.Printf("サマリ事実抽出JSONパースエラー: %v\nResponse: %s", err, response)
-		return
+		log.Printf("サマリ事実抽出JSONパースエラー(初回): %v", err)
+		// リトライ: JSON修復を試みる
+		repairedJSON := llm.RepairJSON(jsonStr)
+		if err := json.Unmarshal([]byte(repairedJSON), &extracted); err != nil {
+			log.Printf("サマリ事実抽出JSONパースエラー(修復後): %v\nOriginal: %s\nRepaired: %s", err, jsonStr, repairedJSON)
+			return
+		}
+		log.Printf("サマリ事実抽出JSONを修復しました: %d件抽出", len(extracted))
 	}
 
 	if len(extracted) > 0 {
