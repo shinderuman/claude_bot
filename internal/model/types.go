@@ -46,10 +46,11 @@ const (
 )
 
 type Conversation struct {
-	RootStatusID string
-	CreatedAt    time.Time
-	LastUpdated  time.Time
-	Messages     []Message
+	RootStatusID     string
+	CreatedAt        time.Time
+	LastUpdated      time.Time
+	LastUserStatusID string
+	Messages         []Message
 }
 
 type Message struct {

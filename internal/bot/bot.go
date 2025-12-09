@@ -59,14 +59,15 @@ const (
 )
 
 type Bot struct {
-	config         *config.Config
-	history        *store.ConversationHistory
-	factStore      *store.FactStore
-	llmClient      *llm.Client
-	mastodonClient *mastodon.Client
-	factCollector  *collector.FactCollector
-	factService    *facts.FactService
-	imageGenerator *image.ImageGenerator
+	config            *config.Config
+	history           *store.ConversationHistory
+	factStore         *store.FactStore
+	llmClient         *llm.Client
+	mastodonClient    *mastodon.Client
+	factCollector     *collector.FactCollector
+	factService       *facts.FactService
+	imageGenerator    *image.ImageGenerator
+	lastUserStatusMap map[string]string // ユーザーごとの最終ステータスID (Acct -> StatusID)
 }
 
 // NewBot creates a new Bot instance
@@ -94,13 +95,14 @@ func NewBot(cfg *config.Config) *Bot {
 	}
 
 	bot := &Bot{
-		config:         cfg,
-		history:        history,
-		factStore:      factStore,
-		llmClient:      llmClient,
-		mastodonClient: mastodonClient,
-		factService:    factService,
-		imageGenerator: imageGen,
+		config:            cfg,
+		history:           history,
+		factStore:         factStore,
+		llmClient:         llmClient,
+		mastodonClient:    mastodonClient,
+		factService:       factService,
+		imageGenerator:    imageGen,
+		lastUserStatusMap: make(map[string]string),
 	}
 
 	// FactCollectorの初期化
@@ -154,13 +156,23 @@ func (b *Bot) Run(ctx context.Context) error {
 		case event := <-eventChan:
 			switch e := event.(type) {
 			case *gomastodon.NotificationEvent:
+				// NotificationにはStatusが含まれるので、ここでも最終ステータスIDを更新する
+				if e.Notification.Status != nil {
+					b.lastUserStatusMap[e.Notification.Account.Acct] = string(e.Notification.Status.ID)
+				}
 				if e.Notification.Type == NotificationTypeMention && e.Notification.Status != nil {
 					b.handleNotification(ctx, e.Notification, "")
 				}
 			case *gomastodon.UpdateEvent:
+				// ユーザーの最新ステータスIDを更新
+				// 注: StreamUserはホームタイムラインも含むため、フォローしているユーザーの投稿も来る
+				// ここでは発言者のAcctをキーにしてIDを保存する
+				prevID := b.lastUserStatusMap[e.Status.Account.Acct]
+				b.lastUserStatusMap[e.Status.Account.Acct] = string(e.Status.ID)
+
 				// Check for Broadcast Command
 				if b.shouldHandleBroadcastCommand(e.Status) {
-					go b.handleBroadcastCommand(ctx, e.Status)
+					go b.handleBroadcastCommand(ctx, e.Status, prevID)
 					continue
 				}
 
@@ -264,6 +276,8 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 	visibility := string(notification.Status.Visibility)
 
 	conversation := b.history.GetOrCreateConversation(session, rootStatusID)
+	// 会話の最後のユーザー発言IDを更新
+	conversation.LastUserStatusID = statusID
 
 	// 親投稿がある場合、その内容を取得してコンテキストに追加
 	// ただし、会話履歴が既にある場合は不要（Botの応答が既に履歴に含まれているため）
@@ -288,6 +302,8 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 	}
 
 	store.AddMessage(conversation, "user", userMessage)
+	// メッセージ追加時にLastUserStatusIDも更新されるべきだが、AddMessageはMessage構造体しか触らないので
+	// ここで明示的にセットしている（上の行でセット済みだが念のため確認）
 
 	// 事実の抽出（非同期）
 	displayName := notification.Account.DisplayName
@@ -740,7 +756,7 @@ func (b *Bot) isBroadcastCommand(content string) bool {
 	return true
 }
 
-func (b *Bot) handleBroadcastCommand(ctx context.Context, status *gomastodon.Status) {
+func (b *Bot) handleBroadcastCommand(ctx context.Context, status *gomastodon.Status, prevStatusID string) {
 	log.Printf("ブロードキャストコマンドを受信: %s (by %s)", status.Content, status.Account.Acct)
 
 	// ステータスのコピーを作成（元のステータスを変更しないため）
@@ -759,14 +775,22 @@ func (b *Bot) handleBroadcastCommand(ctx context.Context, status *gomastodon.Sta
 		Account: status.Account,
 	}
 
-	// 連続投稿のチェック (10分以内なら同じ会話として扱う)
+	// 連続投稿のチェック (10分以内 かつ 間に他の投稿がない)
 	var forcedRootID string
 	session := b.history.GetOrCreateSession(status.Account.Acct)
 	if len(session.Conversations) > 0 {
 		lastConv := session.Conversations[len(session.Conversations)-1]
-		if time.Since(lastConv.LastUpdated) < 10*time.Minute {
+
+		isTimeValid := time.Since(lastConv.LastUpdated) < 10*time.Minute
+		// prevStatusID（直前の投稿ID）が、前回の会話の最後のユーザー発言IDと一致するかチェック
+		// 一致する場合のみ、連続しているとみなす
+		isContinuityValid := prevStatusID != "" && lastConv.LastUserStatusID == prevStatusID
+
+		if isTimeValid && isContinuityValid {
 			forcedRootID = lastConv.RootStatusID
-			log.Printf("連続するブロードキャストコマンドを検出: 前回の会話ID(%s)を継続使用します", forcedRootID)
+			log.Printf("連続するブロードキャストコマンドを検出: 前回の会話ID(%s)を継続使用します (Time: %v, Continuity: %v)", forcedRootID, isTimeValid, isContinuityValid)
+		} else {
+			log.Printf("ブロードキャストコマンド: 新規会話として扱います (Time: %v, Continuity: %v, Prev: %s, Last: %s)", isTimeValid, isContinuityValid, prevStatusID, lastConv.LastUserStatusID)
 		}
 	}
 
