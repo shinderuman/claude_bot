@@ -61,18 +61,12 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, author, authorUse
 	var extracted []model.Fact
 	// JSON部分のみ抽出（Markdownコードブロック対策）
 	jsonStr := llm.ExtractJSON(response)
-	if err := json.Unmarshal([]byte(jsonStr), &extracted); err != nil {
-		log.Printf("事実抽出JSONパースエラー(初回): %v\nJSON: %s", err, jsonStr)
-		// リトライ: JSON修復を試みる
-		repairedJSON := llm.RepairJSON(jsonStr)
-		if err := json.Unmarshal([]byte(repairedJSON), &extracted); err != nil {
-			log.Printf("事実抽出JSONパースエラー(修復後): %v\nOriginal: %s\nRepaired: %s", err, jsonStr, repairedJSON)
-			return
-		}
-		log.Printf("事実抽出JSONを修復しました: %d件抽出", len(extracted))
+	if err := llm.UnmarshalWithRepair(jsonStr, &extracted, "事実抽出"); err != nil {
+		return
 	}
 
 	if len(extracted) > 0 {
+		log.Printf("事実抽出JSON: %d件抽出", len(extracted))
 		for _, item := range extracted {
 			// 品質フィルタリング
 			if !s.isValidFact(item.Target, item.Key, item.Value) {
@@ -255,18 +249,12 @@ func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, url
 
 	var extracted []model.Fact
 	jsonStr := llm.ExtractJSON(response)
-	if err := json.Unmarshal([]byte(jsonStr), &extracted); err != nil {
-		log.Printf("URL事実抽出JSONパースエラー(初回): %v\nJSON: %s", err, jsonStr)
-		// リトライ: JSON修復を試みる
-		repairedJSON := llm.RepairJSON(jsonStr)
-		if err := json.Unmarshal([]byte(repairedJSON), &extracted); err != nil {
-			log.Printf("URL事実抽出JSONパースエラー(修復後): %v\nOriginal: %s\nRepaired: %s", err, jsonStr, repairedJSON)
-			return
-		}
-		log.Printf("URL事実抽出JSONを修復しました: %d件抽出", len(extracted))
+	if err := llm.UnmarshalWithRepair(jsonStr, &extracted, "URL事実抽出"); err != nil {
+		return
 	}
 
 	if len(extracted) > 0 {
+		log.Printf("URL事実抽出JSON: %d件抽出", len(extracted))
 		for _, item := range extracted {
 			// 品質フィルタリング
 			if !s.isValidFact(item.Target, item.Key, item.Value) {
@@ -314,18 +302,12 @@ func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summar
 
 	var extracted []model.Fact
 	jsonStr := llm.ExtractJSON(response)
-	if err := json.Unmarshal([]byte(jsonStr), &extracted); err != nil {
-		log.Printf("サマリ事実抽出JSONパースエラー(初回): %v\nJSON: %s", err, jsonStr)
-		// リトライ: JSON修復を試みる
-		repairedJSON := llm.RepairJSON(jsonStr)
-		if err := json.Unmarshal([]byte(repairedJSON), &extracted); err != nil {
-			log.Printf("サマリ事実抽出JSONパースエラー(修復後): %v\nOriginal: %s\nRepaired: %s", err, jsonStr, repairedJSON)
-			return
-		}
-		log.Printf("サマリ事実抽出JSONを修復しました: %d件抽出", len(extracted))
+	if err := llm.UnmarshalWithRepair(jsonStr, &extracted, "サマリ事実抽出"); err != nil {
+		return
 	}
 
 	if len(extracted) > 0 {
+		log.Printf("サマリ事実抽出JSON: %d件抽出", len(extracted))
 		for _, item := range extracted {
 			// 品質フィルタリング
 			if !s.isValidFact(item.Target, item.Key, item.Value) {
