@@ -662,7 +662,7 @@ func (b *Bot) classifyIntent(ctx context.Context, message string) (model.IntentT
 	}
 
 	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
-		log.Printf("意図判定JSONパースエラー: %v", err)
+		log.Printf("意図判定JSONパースエラー: %v\nJSON: %s", err, jsonStr)
 		return model.IntentChat, "", nil, ""
 	}
 

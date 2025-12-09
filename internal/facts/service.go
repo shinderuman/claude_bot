@@ -62,7 +62,7 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, author, authorUse
 	// JSON部分のみ抽出（Markdownコードブロック対策）
 	jsonStr := llm.ExtractJSON(response)
 	if err := json.Unmarshal([]byte(jsonStr), &extracted); err != nil {
-		log.Printf("事実抽出JSONパースエラー(初回): %v", err)
+		log.Printf("事実抽出JSONパースエラー(初回): %v\nJSON: %s", err, jsonStr)
 		// リトライ: JSON修復を試みる
 		repairedJSON := llm.RepairJSON(jsonStr)
 		if err := json.Unmarshal([]byte(repairedJSON), &extracted); err != nil {
@@ -256,7 +256,7 @@ func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, url
 	var extracted []model.Fact
 	jsonStr := llm.ExtractJSON(response)
 	if err := json.Unmarshal([]byte(jsonStr), &extracted); err != nil {
-		log.Printf("URL事実抽出JSONパースエラー(初回): %v", err)
+		log.Printf("URL事実抽出JSONパースエラー(初回): %v\nJSON: %s", err, jsonStr)
 		// リトライ: JSON修復を試みる
 		repairedJSON := llm.RepairJSON(jsonStr)
 		if err := json.Unmarshal([]byte(repairedJSON), &extracted); err != nil {
@@ -315,7 +315,7 @@ func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summar
 	var extracted []model.Fact
 	jsonStr := llm.ExtractJSON(response)
 	if err := json.Unmarshal([]byte(jsonStr), &extracted); err != nil {
-		log.Printf("サマリ事実抽出JSONパースエラー(初回): %v", err)
+		log.Printf("サマリ事実抽出JSONパースエラー(初回): %v\nJSON: %s", err, jsonStr)
 		// リトライ: JSON修復を試みる
 		repairedJSON := llm.RepairJSON(jsonStr)
 		if err := json.Unmarshal([]byte(repairedJSON), &extracted); err != nil {
@@ -383,7 +383,7 @@ func (s *FactService) QueryRelevantFacts(ctx context.Context, author, authorUser
 	var q model.SearchQuery
 	jsonStr := llm.ExtractJSON(response)
 	if err := json.Unmarshal([]byte(jsonStr), &q); err != nil {
-		log.Printf("検索クエリパースエラー: %v", err)
+		log.Printf("検索クエリパースエラー: %v\nJSON: %s", err, jsonStr)
 		return ""
 	}
 
@@ -507,7 +507,7 @@ func (s *FactService) archiveTargetFacts(ctx context.Context, target string, fac
 	var archives []model.Fact
 	jsonStr := llm.ExtractJSON(response)
 	if err := json.Unmarshal([]byte(jsonStr), &archives); err != nil {
-		return fmt.Errorf("JSONパースエラー: %v", err)
+		return fmt.Errorf("JSONパースエラー: %v\nJSON: %s", err, jsonStr)
 	}
 
 	if len(archives) == 0 {
