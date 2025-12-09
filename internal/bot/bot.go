@@ -334,7 +334,7 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 
 	switch intent {
 	case model.IntentFollowRequest:
-		return b.handleFollowRequest(ctx, session, conversation, notification, statusID, mention, visibility)
+		return b.handleFollowRequest(ctx, conversation, notification, statusID, mention, visibility)
 	case model.IntentAnalysis:
 		// 分析機能
 		if len(analysisURLs) >= 2 {
@@ -348,7 +348,7 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 			endID := extractIDFromURL(analysisURLs[1])
 
 			if startID != "" && endID != "" {
-				success := b.handleAssistantRequest(ctx, session, conversation, notification, startID, endID, userMessage, statusID, mention, visibility)
+				success := b.handleAssistantRequest(ctx, session, conversation, startID, endID, userMessage, statusID, mention, visibility)
 				if success {
 					b.history.Save()
 				}
@@ -361,7 +361,7 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 	case model.IntentImageGeneration:
 		// 画像生成機能
 		if b.imageGenerator != nil {
-			return b.handleImageGeneration(ctx, session, conversation, notification, imagePrompt, statusID, mention, visibility)
+			return b.handleImageGeneration(ctx, session, conversation, imagePrompt, statusID, mention, visibility)
 		}
 		// 画像生成が無効な場合は通常会話へ
 
@@ -597,7 +597,7 @@ func (b *Bot) startFactMaintenanceLoop(ctx context.Context) {
 }
 
 // handleImageGeneration handles image generation requests
-func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session, conversation *model.Conversation, notification *gomastodon.Notification, imagePrompt, statusID, mention, visibility string) bool {
+func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session, conversation *model.Conversation, imagePrompt, statusID, mention, visibility string) bool {
 	// SVG生成
 	svg, err := b.imageGenerator.GenerateSVG(ctx, imagePrompt)
 	if err != nil {
@@ -788,9 +788,6 @@ func (b *Bot) handleBroadcastCommand(ctx context.Context, status *gomastodon.Sta
 
 		if isTimeValid && isContinuityValid {
 			forcedRootID = lastConv.RootStatusID
-			log.Printf("連続するブロードキャストコマンドを検出: 前回の会話ID(%s)を継続使用します (Time: %v, Continuity: %v)", forcedRootID, isTimeValid, isContinuityValid)
-		} else {
-			log.Printf("ブロードキャストコマンド: 新規会話として扱います (Time: %v, Continuity: %v, Prev: %s, Last: %s)", isTimeValid, isContinuityValid, prevStatusID, lastConv.LastUserStatusID)
 		}
 	}
 
@@ -798,7 +795,7 @@ func (b *Bot) handleBroadcastCommand(ctx context.Context, status *gomastodon.Sta
 	b.handleNotification(ctx, notification, forcedRootID)
 }
 
-func (b *Bot) handleFollowRequest(ctx context.Context, session *model.Session, conversation *model.Conversation, notification *gomastodon.Notification, statusID, mention, visibility string) bool {
+func (b *Bot) handleFollowRequest(ctx context.Context, conversation *model.Conversation, notification *gomastodon.Notification, statusID, mention, visibility string) bool {
 
 	targetAccountID := string(notification.Account.ID)
 	targetAcct := notification.Account.Acct
@@ -856,7 +853,7 @@ func (b *Bot) handleFollowRequest(ctx context.Context, session *model.Session, c
 }
 
 // handleAssistantRequest handles the assistant analysis request
-func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session, conversation *model.Conversation, notification *gomastodon.Notification, startID, endID, userMessage, statusID, mention, visibility string) bool {
+func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session, conversation *model.Conversation, startID, endID, userMessage, statusID, mention, visibility string) bool {
 
 	// 1. 対象ユーザー（発言者）の特定
 	// URLからアカウント情報を取得するために、ステータスを取得してみるのが確実
