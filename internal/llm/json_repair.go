@@ -39,15 +39,12 @@ func RepairJSON(s string) string {
 // It logs a simple error on the first failure, and a detailed error (with JSON) only if the repair also fails.
 func UnmarshalWithRepair(jsonStr string, v interface{}, logPrefix string) error {
 	if err := json.Unmarshal([]byte(jsonStr), v); err != nil {
-		log.Printf("%sJSONパースエラー(初回): %v", logPrefix, err)
-
 		// リトライ: JSON修復を試みる
 		repairedJSON := RepairJSON(jsonStr)
 		if err := json.Unmarshal([]byte(repairedJSON), v); err != nil {
 			log.Printf("%sJSONパースエラー(修復後): %v\nOriginal: %s\nRepaired: %s", logPrefix, err, jsonStr, repairedJSON)
 			return err
 		}
-		log.Printf("%sJSONを修復しました", logPrefix)
 	}
 	return nil
 }

@@ -307,7 +307,6 @@ func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summar
 	}
 
 	if len(extracted) > 0 {
-		log.Printf("サマリ事実抽出JSON: %d件抽出", len(extracted))
 		for _, item := range extracted {
 			// 品質フィルタリング
 			if !s.isValidFact(item.Target, item.Key, item.Value) {
