@@ -89,12 +89,26 @@ func (h *ConversationHistory) Save() error {
 }
 
 func (h *ConversationHistory) GetOrCreateConversation(session *model.Session, rootStatusID string) *model.Conversation {
+	// 1. RootStatusIDで検索
 	for i := range session.Conversations {
 		if session.Conversations[i].RootStatusID == rootStatusID {
 			return &session.Conversations[i]
 		}
 	}
 
+	// 2. メッセージ内のStatusIDで検索（会話のどこかに含まれる投稿へのリプライの場合）
+	for i := range session.Conversations {
+		for _, msg := range session.Conversations[i].Messages {
+			for _, id := range msg.StatusIDs {
+				if id == rootStatusID {
+					// ヒットした場合、この会話を継続として扱う
+					return &session.Conversations[i]
+				}
+			}
+		}
+	}
+
+	// 新規会話作成
 	newConv := model.Conversation{
 		RootStatusID: rootStatusID,
 		CreatedAt:    time.Now(),
@@ -105,10 +119,11 @@ func (h *ConversationHistory) GetOrCreateConversation(session *model.Session, ro
 	return &session.Conversations[len(session.Conversations)-1]
 }
 
-func AddMessage(c *model.Conversation, role, content string) {
+func AddMessage(c *model.Conversation, role, content string, statusIDs []string) {
 	c.Messages = append(c.Messages, model.Message{
-		Role:    role,
-		Content: content,
+		Role:      role,
+		Content:   content,
+		StatusIDs: statusIDs,
 	})
 	c.LastUpdated = time.Now()
 }

@@ -199,9 +199,10 @@ func (c *Client) BuildMention(acct string) string {
 	return "@" + acct + " "
 }
 
-func (c *Client) PostResponseWithSplit(ctx context.Context, inReplyToID, mention, response, visibility string) error {
+func (c *Client) PostResponseWithSplit(ctx context.Context, inReplyToID, mention, response, visibility string) ([]string, error) {
 	parts := splitResponse(response, mention, c.config.MaxPostChars)
 
+	var postedIDs []string
 	currentReplyID := inReplyToID
 	for i, part := range parts {
 		// 2投稿目以降は待機して投稿順序を保証
@@ -213,21 +214,22 @@ func (c *Client) PostResponseWithSplit(ctx context.Context, inReplyToID, mention
 		status, err := c.postReply(ctx, currentReplyID, content, visibility)
 		if err != nil {
 			log.Printf("分割投稿失敗 (%d/%d): %v", i+1, len(parts), err)
-			return err
+			return postedIDs, err
 		}
 		currentReplyID = string(status.ID)
+		postedIDs = append(postedIDs, string(status.ID))
 	}
 
-	return nil
+	return postedIDs, nil
 }
 
 // PostResponseWithMedia posts a response with media attachment
-func (c *Client) PostResponseWithMedia(ctx context.Context, inReplyToID, mention, response, visibility, mediaPath string) error {
+func (c *Client) PostResponseWithMedia(ctx context.Context, inReplyToID, mention, response, visibility, mediaPath string) (string, error) {
 	// Upload media
 	attachment, err := c.client.UploadMedia(ctx, mediaPath)
 	if err != nil {
 		log.Printf("メディアアップロードエラー: %v", err)
-		return err
+		return "", err
 	}
 
 	// Post with media
@@ -239,13 +241,13 @@ func (c *Client) PostResponseWithMedia(ctx context.Context, inReplyToID, mention
 		MediaIDs:    []mastodon.ID{attachment.ID},
 	}
 
-	_, err = c.client.PostStatus(ctx, toot)
+	status, err := c.client.PostStatus(ctx, toot)
 	if err != nil {
 		log.Printf("投稿エラー: %v", err)
-		return err
+		return "", err
 	}
 
-	return nil
+	return string(status.ID), nil
 }
 
 func (c *Client) postReply(ctx context.Context, inReplyToID, content, visibility string) (*mastodon.Status, error) {

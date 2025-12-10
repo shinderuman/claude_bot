@@ -16,6 +16,7 @@ var Messages = struct {
 		CompactJSON       string
 		CompactJSONObject string
 		EmptyArray        string
+		CharacterConfig   string
 	}
 	System struct {
 		IntentClassification  string
@@ -23,6 +24,7 @@ var Messages = struct {
 		ImageRequestDetection string
 		FactExtraction        string
 		FactQuery             string
+		ReferencePost         string // Format: %s (author), %s (content)
 	}
 	Error struct {
 		ResponseGeneration string
@@ -38,6 +40,8 @@ var Messages = struct {
 		AnalysisPost       string
 		DataFetch          string
 		SummaryGeneration  string
+		SummaryPost        string
+		FollowFail         string
 		DateLimit          string
 		DateParse          string // Format: %s (date string)
 		NoStatus           string // Format: %d (month), %d (day)
@@ -47,12 +51,15 @@ var Messages = struct {
 	}
 	Success struct {
 		ImageGeneration string
+		FollowAlready   string // Format: %s (targetAcct)
+		FollowSuccess   string // Format: %s (targetAcct)
 	}
 }{
 	Instruction: struct {
 		CompactJSON       string
 		CompactJSONObject string
 		EmptyArray        string
+		CharacterConfig   string
 	}{
 		CompactJSON: `出力形式:
 **重要**: インデントや改行を含めず、1行のコンパクトなJSON配列として出力してください。
@@ -60,7 +67,8 @@ var Messages = struct {
 		CompactJSONObject: `出力形式:
 **重要**: インデントや改行を含めず、1行のコンパクトなJSONオブジェクトとして出力してください。
 例: {"target_candidates":["ID1","ID2"],"keys":["key1","key2"]}`,
-		EmptyArray: "抽出するものがない場合は空配列 [] を返してください。",
+		EmptyArray:      "抽出するものがない場合は空配列 [] を返してください。",
+		CharacterConfig: "あなたは以下のキャラクター設定を持つAIアシスタントです。\nキャラクター設定: %s\n",
 	},
 	System: struct {
 		IntentClassification  string
@@ -68,12 +76,14 @@ var Messages = struct {
 		ImageRequestDetection string
 		FactExtraction        string
 		FactQuery             string
+		ReferencePost         string // Format: %s (author), %s (content)
 	}{
 		IntentClassification:  "あなたはユーザーの意図を分類するアシスタントです。JSONのみを出力してください。",
 		ImageGeneration:       "あなたはSVG画像を生成するアシスタントです。ユーザーのリクエストに基づいて、美しく完全なSVG画像を作成してください。",
 		ImageRequestDetection: "あなたは画像生成リクエストを判定するアシスタントです。ユーザーのメッセージが画像生成を依頼しているかを正確に判定してください。",
 		FactExtraction:        "あなたは事実抽出エンジンです。JSONのみを出力してください。",
 		FactQuery:             "あなたは検索クエリ生成エンジンです。JSONのみを出力してください。",
+		ReferencePost:         "[参照投稿 by @%s]: %s",
 	},
 	Error: struct {
 		ResponseGeneration string
@@ -89,11 +99,13 @@ var Messages = struct {
 		AnalysisPost       string
 		DataFetch          string
 		SummaryGeneration  string
+		SummaryPost        string
+		FollowFail         string
 		DateLimit          string
-		DateParse          string
-		NoStatus           string
+		DateParse          string // Format: %s (date string)
+		NoStatus           string // Format: %d (month), %d (day)
 		URLContentFetch    string // Format: %s (url), %v (error)
-		Default            string
+		Default            string // Format: %s (error detail)
 		DefaultFallback    string
 	}{
 		ResponseGeneration: "応答の生成に失敗しました。",
@@ -109,6 +121,8 @@ var Messages = struct {
 		AnalysisPost:       "分析結果の投稿に失敗しました。",
 		DataFetch:          "ユーザーの発言データの取得に失敗しました。",
 		SummaryGeneration:  "まとめ結果の生成に失敗しました。",
+		SummaryPost:        "まとめ結果の投稿に失敗しました。",
+		FollowFail:         "フォローに失敗しました...ごめんなさい！",
 		DateLimit:          "申し訳ありませんが、遡れるのは3日前までです。",
 		DateParse:          "日付の形式が正しくないか、理解できませんでした (%s)。YYYY-MM-DD形式などで指定してください。",
 		NoStatus:           "日付: %d/%d。状況: ユーザーの発言が1件も見つかりませんでした。",
@@ -118,8 +132,12 @@ var Messages = struct {
 	},
 	Success: struct {
 		ImageGeneration string
+		FollowAlready   string // Format: %s (targetAcct)
+		FollowSuccess   string // Format: %s (targetAcct)
 	}{
 		ImageGeneration: "画像を生成しました！",
+		FollowAlready:   "もうフォローしていますよ！ @%s さん",
+		FollowSuccess:   "フォローしました！よろしくね @%s さん！",
 	},
 }
 

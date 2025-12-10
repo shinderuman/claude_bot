@@ -46,16 +46,29 @@ const (
 )
 
 type Conversation struct {
-	RootStatusID     string
-	CreatedAt        time.Time
-	LastUpdated      time.Time
-	LastUserStatusID string
-	Messages         []Message
+	RootStatusID string
+	CreatedAt    time.Time
+	LastUpdated  time.Time
+	Messages     []Message
 }
 
 type Message struct {
-	Role    string
-	Content string
+	Role      string
+	Content   string
+	StatusIDs []string // Mastodon Status IDs (multiple if split)
+}
+
+// GetLastUserStatusID retrieves the status ID of the last user message in the conversation
+func (c *Conversation) GetLastUserStatusID() string {
+	for i := len(c.Messages) - 1; i >= 0; i-- {
+		msg := c.Messages[i]
+		if msg.Role == "user" && len(msg.StatusIDs) > 0 {
+			// ユーザー発言は通常1つのStatusIDを持つが、将来的な拡張や稀なケース（分割投稿の統合など）を考慮し、
+			// 物理的に「最後」のステータスIDを取得するために末尾の要素を使用する。
+			return msg.StatusIDs[len(msg.StatusIDs)-1]
+		}
+	}
+	return ""
 }
 
 type Session struct {
@@ -74,6 +87,7 @@ type Fact struct {
 	Timestamp      time.Time   `json:"timestamp"`
 
 	// ソース情報
+	SourceID           string `json:"source_id,omitempty"`            // 情報源となった発言のID
 	SourceType         string `json:"source_type,omitempty"`          // "mention", "federated", "home"
 	SourceURL          string `json:"source_url,omitempty"`           // 投稿のURL
 	PostAuthor         string `json:"post_author,omitempty"`          // 投稿者のAcct

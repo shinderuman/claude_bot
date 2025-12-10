@@ -206,7 +206,7 @@ func testResponse(cfg *config.Config, client *llm.Client, factService *facts.Fac
 	if cfg.EnableFactStore {
 		log.Println()
 		log.Println("ファクトを抽出中...")
-		factService.ExtractAndSaveFacts(ctx, testUser, testUserName, message, "test", "", testUser, testUserName)
+		factService.ExtractAndSaveFacts(ctx, "test_source_id", "user", "TestUser", message, model.SourceTypeTest, "", "test_post_author", "TestPostUserName")
 		log.Println("ファクト抽出完了")
 	}
 }

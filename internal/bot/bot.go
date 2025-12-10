@@ -13,7 +13,6 @@ import (
 	"claude_bot/internal/collector"
 	"claude_bot/internal/config"
 	"claude_bot/internal/facts"
-	"claude_bot/internal/fetcher"
 	"claude_bot/internal/image"
 	"claude_bot/internal/llm"
 	"claude_bot/internal/mastodon"
@@ -56,7 +55,10 @@ const (
 
 	// Conversation
 	MinConversationMessagesForParent = 0
+	BroadcastContinuityThreshold     = 10 * time.Minute
 )
+
+// resolveBroadcastRootID determines the root ID if the broadcast command should continue the previous conversation
 
 type Bot struct {
 	config            *config.Config
@@ -276,47 +278,12 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 	visibility := string(notification.Status.Visibility)
 
 	conversation := b.history.GetOrCreateConversation(session, rootStatusID)
-	// 会話の最後のユーザー発言IDを更新
-	conversation.LastUserStatusID = statusID
 
-	// 親投稿がある場合、その内容を取得してコンテキストに追加
-	// ただし、会話履歴が既にある場合は不要（Botの応答が既に履歴に含まれているため）
-	if notification.Status.InReplyToID != nil && len(conversation.Messages) == 0 {
-		parentStatusID := fmt.Sprintf("%v", notification.Status.InReplyToID)
-		parentStatus, err := b.mastodonClient.GetStatus(ctx, parentStatusID)
-		if err == nil && parentStatus != nil {
-			parentContent, _, _ := b.mastodonClient.ExtractContentFromStatus(parentStatus)
-			if parentContent != "" {
-				// Acctを使用（一意性があり、変更されない）
-				parentAuthor := parentStatus.Account.Acct
-				// 親投稿の内容をコンテキストとして追加
-				contextMessage := fmt.Sprintf("[参照投稿 by @%s]: %s", parentAuthor, parentContent)
-				userMessage = contextMessage + "\n\n" + userMessage
-			}
-		}
-	}
-
-	// URLメタデータの取得と追加
-	if urlContext := b.extractURLContext(ctx, notification, userMessage); urlContext != "" {
-		userMessage += urlContext
-	}
-
-	store.AddMessage(conversation, "user", userMessage)
-	// メッセージ追加時にLastUserStatusIDも更新されるべきだが、AddMessageはMessage構造体しか触らないので
-	// ここで明示的にセットしている（上の行でセット済みだが念のため確認）
+	// 会話コンテキストの準備とユーザーメッセージの保存
+	userMessage = b.prepareConversation(ctx, conversation, notification, userMessage, statusID)
 
 	// 事実の抽出（非同期）
-	displayName := notification.Account.DisplayName
-	if displayName == "" {
-		displayName = notification.Account.Username
-	}
-	sourceURL := string(notification.Status.URL)
-
-	// 1. メンション本文からのファクト抽出
-	go b.factService.ExtractAndSaveFacts(ctx, notification.Account.Acct, displayName, userMessage, model.SourceTypeMention, sourceURL, notification.Account.Acct, displayName)
-
-	// 2. メンション内のURLからのファクト抽出
-	b.extractFactsFromMentionURLs(ctx, notification, displayName)
+	b.triggerFactExtraction(ctx, notification, userMessage, statusID)
 
 	// 画像の取得（保存はせず、今回の応答生成にのみ使用）
 	var images []model.Image
@@ -371,6 +338,14 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 	}
 
 	// 通常の会話処理（chat または フォールバック）
+	return b.handleChatResponse(ctx, session, conversation, notification, userMessage, images, statusID, mention, visibility)
+}
+
+func (b *Bot) handleChatResponse(ctx context.Context, session *model.Session, conversation *model.Conversation, notification *gomastodon.Notification, userMessage string, images []model.Image, statusID, mention, visibility string) bool {
+	displayName := notification.Account.DisplayName
+	if displayName == "" {
+		displayName = notification.Account.Username
+	}
 
 	// 事実の検索と応答生成
 	relevantFacts := b.factService.QueryRelevantFacts(ctx, notification.Account.Acct, displayName, userMessage)
@@ -382,14 +357,17 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 		return false
 	}
 
-	store.AddMessage(conversation, "assistant", response)
-	err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
-
+	// 投稿
+	postedIDs, err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
 	if err != nil {
+		log.Printf("応答の投稿に失敗: %v", err)
 		store.RollbackLastMessages(conversation, RollbackCountMedium)
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.ResponsePost)
 		return false
 	}
+
+	// 履歴に追加
+	store.AddMessage(conversation, "assistant", response, postedIDs)
 
 	session.LastUpdated = time.Now()
 	return true
@@ -416,81 +394,6 @@ func (b *Bot) postErrorMessage(ctx context.Context, statusID, mention, visibilit
 	}
 
 	b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, errorMsg, visibility)
-}
-
-// extractFactsFromMentionURLs extracts facts from URLs in the mention
-func (b *Bot) extractFactsFromMentionURLs(ctx context.Context, notification *gomastodon.Notification, displayName string) {
-	content := string(notification.Status.Content)
-	urls := urlRegex.FindAllString(content, -1)
-
-	if len(urls) == 0 {
-		return
-	}
-
-	author := notification.Account.Acct
-
-	for _, u := range urls {
-		// 基本的なURLバリデーション（スキーム、IPアドレスチェック）
-		if err := fetcher.IsValidURLBasic(u); err != nil {
-			continue
-		}
-
-		// ノイズURL（プロフィールURL、ハッシュタグURLなど）をフィルタリング
-		if fetcher.IsNoiseURL(u) {
-			continue
-		}
-
-		go func(url string) {
-			meta, err := fetcher.FetchPageContent(ctx, url, nil)
-			if err != nil {
-				return
-			}
-
-			urlContent := fetcher.FormatPageContent(meta)
-
-			// URLコンテンツからファクト抽出（リダイレクト後の最終URLを使用）
-			b.factService.ExtractAndSaveFactsFromURLContent(ctx, urlContent, "mention_url", meta.URL, author, displayName)
-		}(u)
-	}
-}
-
-func (b *Bot) extractURLContext(ctx context.Context, notification *gomastodon.Notification, content string) string {
-	// 1. Mastodon Card (優先)
-	if notification.Status.Card != nil {
-		return b.mastodonClient.FormatCard(notification.Status.Card)
-	}
-
-	// 2. 独自取得 (Cardがない場合)
-	urls := urlRegex.FindAllString(content, -1)
-	if len(urls) == 0 {
-		return ""
-	}
-
-	// 最初の有効なURLのみ処理
-	for _, u := range urls {
-		// URLの末尾に日本語などが付着する場合があるため、クリーニング
-		u = cleanURL(u)
-
-		// 基本的なURLバリデーション（スキーム、IPアドレスチェック）
-		if err := fetcher.IsValidURLBasic(u); err != nil {
-			continue
-		}
-
-		// ノイズURL（プロフィールURL、ハッシュタグURLなど）をフィルタリング
-		if fetcher.IsNoiseURL(u) {
-			continue
-		}
-
-		meta, err := fetcher.FetchPageContent(ctx, u, nil)
-		if err != nil {
-			log.Printf("ページコンテンツ取得失敗 (%s): %v", u, err)
-			return fmt.Sprintf(llm.Messages.Error.URLContentFetch, u, err)
-		}
-
-		return fetcher.FormatPageContent(meta)
-	}
-
-	return ""
 }
 
 func (b *Bot) startAutoPostLoop(ctx context.Context) {
@@ -638,15 +541,17 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 		response = llm.Messages.Success.ImageGeneration
 	}
 
-	store.AddMessage(conversation, "assistant", response)
-
-	err = b.mastodonClient.PostResponseWithMedia(ctx, statusID, mention, response, visibility, tmpPngFilename)
+	// 投稿
+	postedID, err := b.mastodonClient.PostResponseWithMedia(ctx, statusID, mention, response, visibility, tmpPngFilename)
 	if err != nil {
 		log.Printf("メディア投稿エラー: %v", err)
 		store.RollbackLastMessages(conversation, RollbackCountMedium)
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.ImagePost)
 		return false
 	}
+
+	// 成功したら履歴に追加
+	store.AddMessage(conversation, "assistant", response, []string{postedID})
 
 	session.LastUpdated = time.Now()
 	return true
@@ -683,31 +588,6 @@ func (b *Bot) classifyIntent(ctx context.Context, message string) (model.IntentT
 	}
 
 	return model.IntentType(result.Intent), result.ImagePrompt, result.AnalysisURLs, result.TargetDate
-}
-
-func extractIDFromURL(url string) string {
-	parts := strings.Split(url, "/")
-	if len(parts) > 0 {
-		lastPart := parts[len(parts)-1]
-		// 数字のみかチェック（簡易的）
-		for _, r := range lastPart {
-			if r < '0' || r > '9' {
-				return ""
-			}
-		}
-		return lastPart
-	}
-	return ""
-}
-
-// cleanURL removes non-ASCII characters from the end of the URL
-func cleanURL(url string) string {
-	for i, r := range url {
-		if r > 127 {
-			return url[:i]
-		}
-	}
-	return url
 }
 
 // Broadcast and Follow handlers
@@ -776,27 +656,40 @@ func (b *Bot) handleBroadcastCommand(ctx context.Context, status *gomastodon.Sta
 	}
 
 	// 連続投稿のチェック (10分以内 かつ 間に他の投稿がない)
-	var forcedRootID string
 	session := b.history.GetOrCreateSession(status.Account.Acct)
-	if len(session.Conversations) > 0 {
-		lastConv := session.Conversations[len(session.Conversations)-1]
-
-		isTimeValid := time.Since(lastConv.LastUpdated) < 10*time.Minute
-		// prevStatusID（直前の投稿ID）が、前回の会話の最後のユーザー発言IDと一致するかチェック
-		// 一致する場合のみ、連続しているとみなす
-		isContinuityValid := prevStatusID != "" && lastConv.LastUserStatusID == prevStatusID
-
-		if isTimeValid && isContinuityValid {
-			forcedRootID = lastConv.RootStatusID
-		}
-	}
+	forcedRootID := b.resolveBroadcastRootID(session, prevStatusID, time.Now())
 
 	// handleNotificationを呼び出して処理
 	b.handleNotification(ctx, notification, forcedRootID)
 }
 
-func (b *Bot) handleFollowRequest(ctx context.Context, conversation *model.Conversation, notification *gomastodon.Notification, statusID, mention, visibility string) bool {
+// resolveBroadcastRootID determines the root ID if the broadcast command should continue the previous conversation
+func (b *Bot) resolveBroadcastRootID(session *model.Session, prevStatusID string, now time.Time) string {
+	if len(session.Conversations) == 0 {
+		return ""
+	}
 
+	lastConv := session.Conversations[len(session.Conversations)-1]
+
+	if !b.isConversationActive(&lastConv, now) {
+		return ""
+	}
+
+	lastUserStatusID := lastConv.GetLastUserStatusID()
+	if prevStatusID != "" && lastUserStatusID == prevStatusID {
+		return lastConv.RootStatusID
+	}
+
+	return ""
+}
+
+// isConversationActive checks if the conversation is recent enough to be continued
+func (b *Bot) isConversationActive(conv *model.Conversation, now time.Time) bool {
+	return now.Sub(conv.LastUpdated) < BroadcastContinuityThreshold
+}
+
+// handleFollowRequest handles the follow request logic
+func (b *Bot) handleFollowRequest(ctx context.Context, conversation *model.Conversation, notification *gomastodon.Notification, statusID, mention, visibility string) bool {
 	targetAccountID := string(notification.Account.ID)
 	targetAcct := notification.Account.Acct
 
@@ -806,50 +699,50 @@ func (b *Bot) handleFollowRequest(ctx context.Context, conversation *model.Conve
 	isFollowing, err := b.mastodonClient.IsFollowing(ctx, targetAccountID)
 	if err != nil {
 		log.Printf("フォロー状態確認エラー: %v", err)
-		// エラーが発生しても処理は続行し、未フォローとして扱う
 		isFollowing = false
 	}
 
 	var replyMessage string
-
 	if isFollowing {
 		log.Printf("既にフォロー済みです: %s", targetAcct)
-		// 既にフォロー済みのメッセージ生成
-		replyPrompt := fmt.Sprintf(llm.Templates.FollowResponseAlready, b.config.CharacterPrompt, targetAcct)
-		systemPrompt := llm.BuildSystemPrompt(b.config.CharacterPrompt, "", "", true, b.config.MaxPostChars)
-		replyMessage = b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: replyPrompt}}, systemPrompt, b.config.MaxResponseTokens, nil)
-
-		if replyMessage == "" {
-			replyMessage = fmt.Sprintf("もうフォローしていますよ！ @%s さん", targetAcct)
-		}
+		replyMessage = b.generateFollowReply(ctx, targetAcct, llm.Templates.FollowResponseAlready, llm.Messages.Success.FollowAlready)
 	} else {
-		// フォロー実行
-		if err := b.mastodonClient.FollowAccount(ctx, targetAccountID); err != nil {
-			log.Printf("フォロー実行エラー: %v", err)
-			b.postErrorMessage(ctx, statusID, mention, visibility, "フォローに失敗しました...ごめんなさい！")
-			return true
+		// まだフォローしていない場合、フォローを実行
+		err := b.mastodonClient.FollowAccount(ctx, targetAccountID)
+		if err != nil {
+			log.Printf("フォロー失敗: %v", err)
+			b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.FollowFail)
+			return false
 		}
-
-		log.Printf("アカウントをフォローしました: %s", targetAcct)
-
-		// フォロー完了メッセージ生成
-		replyPrompt := fmt.Sprintf(llm.Templates.FollowResponse, b.config.CharacterPrompt, targetAcct)
-		systemPrompt := llm.BuildSystemPrompt(b.config.CharacterPrompt, "", "", true, b.config.MaxPostChars)
-		replyMessage = b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: replyPrompt}}, systemPrompt, b.config.MaxResponseTokens, nil)
-
-		// 生成失敗時はデフォルトメッセージ
-		if replyMessage == "" {
-			replyMessage = fmt.Sprintf("フォローしました！よろしくね @%s さん！", targetAcct)
-		}
+		replyMessage = b.generateFollowReply(ctx, targetAcct, llm.Templates.FollowResponse, llm.Messages.Success.FollowSuccess)
 	}
 
-	store.AddMessage(conversation, "assistant", replyMessage)
-
-	if err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, replyMessage, visibility); err != nil {
+	// 投稿
+	postedIDs, err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, replyMessage, visibility)
+	if err != nil {
 		log.Printf("フォロー完了返信エラー: %v", err)
+	} else {
+		// 成功したら履歴に追加
+		store.AddMessage(conversation, "assistant", replyMessage, postedIDs)
 	}
 
 	return true
+}
+
+func (b *Bot) generateFollowReply(ctx context.Context, targetAcct, template, fallbackFormat string) string {
+	if b.config.CharacterPrompt == "" {
+		return fmt.Sprintf(fallbackFormat, targetAcct)
+	}
+
+	replyPrompt := fmt.Sprintf(template, b.config.CharacterPrompt, targetAcct)
+	replyMessages := []model.Message{{Role: "user", Content: replyPrompt}}
+
+	generatedReply := b.llmClient.GenerateText(ctx, replyMessages, "", b.config.MaxResponseTokens, nil)
+	if generatedReply != "" {
+		return generatedReply
+	}
+
+	return fmt.Sprintf(fallbackFormat, targetAcct)
 }
 
 // handleAssistantRequest handles the assistant analysis request
@@ -892,14 +785,18 @@ func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session
 		return false
 	}
 
-	// 4. 結果の投稿
-	store.AddMessage(conversation, "assistant", response)
-	err = b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
+	// 4. Mastodonに投稿 (分割投稿対応)
+	// 投稿した全てのStatusIDを取得する
+	postedIDs, err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
 	if err != nil {
-		log.Printf("分析結果投稿エラー: %v", err)
+		log.Printf("応答の投稿に失敗しました: %v", err)
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.AnalysisPost)
 		return false
 	}
+
+	// 5. 会話履歴にアシスタントの発言を追加 (投稿成功後)
+	// 投稿された全てのIDを保存する
+	store.AddMessage(conversation, "assistant", response, postedIDs)
 
 	session.LastUpdated = time.Now()
 	return true
@@ -971,13 +868,16 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 		return false
 	}
 
-	// 結果の投稿
-	store.AddMessage(conversation, "assistant", response)
-	err = b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
+	// 投稿
+	postedIDs, err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
 	if err != nil {
 		log.Printf("まとめ結果投稿エラー: %v", err)
+		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.SummaryPost)
 		return false
 	}
+
+	// 履歴に追加
+	store.AddMessage(conversation, "assistant", response, postedIDs)
 
 	session.LastUpdated = time.Now()
 	return true

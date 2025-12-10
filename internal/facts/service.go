@@ -45,7 +45,7 @@ func NewFactService(cfg *config.Config, store *store.FactStore, llm *llm.Client)
 }
 
 // ExtractAndSaveFacts extracts facts from a message and saves them to the store
-func (s *FactService) ExtractAndSaveFacts(ctx context.Context, author, authorUserName, message, sourceType, sourceURL, postAuthor, postAuthorUserName string) {
+func (s *FactService) ExtractAndSaveFacts(ctx context.Context, sourceID, author, authorUserName, message, sourceType, sourceURL, postAuthor, postAuthorUserName string) {
 	if !s.config.EnableFactStore {
 		return
 	}
@@ -93,6 +93,7 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, author, authorUse
 				Key:                item.Key,
 				Value:              item.Value,
 				Timestamp:          time.Now(),
+				SourceID:           sourceID,
 				SourceType:         sourceType,
 				SourceURL:          sourceURL,
 				PostAuthor:         postAuthor,
