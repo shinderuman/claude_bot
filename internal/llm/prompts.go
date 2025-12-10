@@ -48,6 +48,7 @@ var Messages = struct {
 		URLContentFetch    string // Format: %s (url), %v (error)
 		Default            string // Format: %s (error detail)
 		DefaultFallback    string
+		Internal           string
 	}
 	Success struct {
 		ImageGeneration string
@@ -107,6 +108,7 @@ var Messages = struct {
 		URLContentFetch    string // Format: %s (url), %v (error)
 		Default            string // Format: %s (error detail)
 		DefaultFallback    string
+		Internal           string
 	}{
 		ResponseGeneration: "応答の生成に失敗しました。",
 		ResponsePost:       "応答の投稿に失敗しました。",
@@ -129,6 +131,7 @@ var Messages = struct {
 		URLContentFetch:    "\n\n[システム通知]\nURLの内容を取得できませんでした (%s)。\nエラー: %v\n(「自分からは見られない」等の旨を回答に含めてください)",
 		Default:            "申し訳ありません。エラーが発生しました: %s",
 		DefaultFallback:    "申し訳ありません。エラーが発生しました。もう一度お試しください。",
+		Internal:           "内部エラーが発生しました。",
 	},
 	Success: struct {
 		ImageGeneration string

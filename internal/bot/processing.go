@@ -5,10 +5,10 @@ import (
 	"claude_bot/internal/llm"
 	"claude_bot/internal/model"
 	"claude_bot/internal/store"
+	"claude_bot/internal/util"
 	"context"
 	"fmt"
 	"log"
-	"strings"
 
 	gomastodon "github.com/mattn/go-mastodon"
 )
@@ -114,7 +114,7 @@ func (b *Bot) extractURLContext(ctx context.Context, notification *gomastodon.No
 	// 最初の有効なURLのみ処理
 	for _, u := range urls {
 		// URLの末尾に日本語などが付着する場合があるため、クリーニング
-		u = cleanURL(u)
+		u = util.CleanURL(u)
 
 		// 基本的なURLバリデーション（スキーム、IPアドレスチェック）
 		if err := fetcher.IsValidURLBasic(u); err != nil {
@@ -136,29 +136,4 @@ func (b *Bot) extractURLContext(ctx context.Context, notification *gomastodon.No
 	}
 
 	return ""
-}
-
-func extractIDFromURL(url string) string {
-	parts := strings.Split(url, "/")
-	if len(parts) > 0 {
-		lastPart := parts[len(parts)-1]
-		// 数字のみかチェック（簡易的）
-		for _, r := range lastPart {
-			if r < '0' || r > '9' {
-				return ""
-			}
-		}
-		return lastPart
-	}
-	return ""
-}
-
-// cleanURL removes non-ASCII characters from the end of the URL
-func cleanURL(url string) string {
-	for i, r := range url {
-		if r > 127 {
-			return url[:i]
-		}
-	}
-	return url
 }
