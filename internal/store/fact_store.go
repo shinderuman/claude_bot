@@ -502,30 +502,74 @@ func (s *FactStore) GetFactsByTarget(target string) []model.Fact {
 	return results
 }
 
-// ReplaceFacts replaces all facts for a specific target with new facts
-func (s *FactStore) ReplaceFacts(target string, newFacts []model.Fact) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// OverwriteFactsForTarget は指定されたターゲットのファクトを強制的に上書き保存します
+// ディスク上の該当ターゲットのデータは全て削除され、newFactsに置き換わります
+func (s *FactStore) OverwriteFactsForTarget(target string, newFacts []model.Fact) error {
+	// タイムアウト付きでロック取得（1.0秒 - 重い処理なので長めに）
+	ctx, cancel := context.WithTimeout(context.Background(), 1000*time.Millisecond)
+	defer cancel()
 
-	// 1. 対象ターゲット以外のファクトを保持
-	var keptFacts []model.Fact
-	for _, fact := range s.Facts {
-		if fact.Target != target {
-			keptFacts = append(keptFacts, fact)
+	locked, err := s.fileLock.TryLockContext(ctx, 50*time.Millisecond)
+	if err != nil || !locked {
+		return fmt.Errorf("failed to acquire file lock for overwrite: %v", err)
+	}
+	defer s.fileLock.Unlock()
+
+	// 1. ディスクから最新をロード
+	var diskFacts []model.Fact
+	data, err := os.ReadFile(s.saveFilePath)
+	if err == nil && len(data) > 0 {
+		if err := json.Unmarshal(data, &diskFacts); err != nil {
+			return fmt.Errorf("failed to unmarshal disk facts: %v", err)
 		}
 	}
 
-	// 2. 新しいファクトを追加
-	// タイムスタンプが未設定の場合は現在時刻を設定
+	// 2. ディスク上のデータから対象ターゲットを除外
+	var keptFacts []model.Fact
+	for _, f := range diskFacts {
+		if f.Target != target {
+			keptFacts = append(keptFacts, f)
+		}
+	}
+
+	// 3. 新しいファクト（アーカイブ済みデータ）を追加
+	// タイムスタンプ補完
 	now := time.Now()
 	for i := range newFacts {
 		if newFacts[i].Timestamp.IsZero() {
 			newFacts[i].Timestamp = now
 		}
 	}
-
 	keptFacts = append(keptFacts, newFacts...)
-	s.Facts = keptFacts
+
+	// 4. 保存
+	encoded, err := json.MarshalIndent(keptFacts, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal facts: %v", err)
+	}
+
+	if err := os.WriteFile(s.saveFilePath, encoded, 0644); err != nil {
+		return fmt.Errorf("failed to write facts to disk: %v", err)
+	}
+
+	// 5. メモリも更新（このメソッドが権限を持つため、メモリ上の他スレッドの変更よりもここでの決定を優先する形になるが
+	// アーカイブ処理はターゲット単位で独立しているため、他ターゲットへの影響はない）
+	s.mu.Lock()
+	// メモリ上のデータも同様に再構築（ディスクと同じ状態にするのが最も整合性が取れる）
+	// ただし、他ターゲットの更新がメモリ上で進行中の可能性を考慮し、
+	// メモリ上の「対象ターゲット以外のデータ」+「新しいデータ」とするのが安全
+	// ここではメモリ上のデータ再構築ロジックを適用
+	var memoryKept []model.Fact
+	for _, f := range s.Facts {
+		if f.Target != target {
+			memoryKept = append(memoryKept, f)
+		}
+	}
+	memoryKept = append(memoryKept, newFacts...)
+	s.Facts = memoryKept
+	s.mu.Unlock()
+
+	return nil
 }
 
 // GetAllTargets returns a list of all unique targets in the store

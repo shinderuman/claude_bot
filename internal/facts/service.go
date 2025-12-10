@@ -512,9 +512,11 @@ func (s *FactService) archiveTargetFacts(ctx context.Context, target string, fac
 		archives[i].SourceURL = ""
 	}
 
-	// ストアのデータを置き換え
-	s.factStore.ReplaceFacts(target, archives)
-	log.Printf("ターゲット %s のアーカイブ完了: %d件 -> %d件に圧縮", target, len(facts), len(archives))
+	// ストアのデータを置き換え（ディスク上の古いデータを完全に削除・上書き）
+	if err := s.factStore.OverwriteFactsForTarget(target, archives); err != nil {
+		return fmt.Errorf("アーカイブ保存エラー: %v", err)
+	}
+	log.Printf("ターゲット %s のアーカイブ完了: %d件 -> %d件に圧縮 (永続化済み)", target, len(facts), len(archives))
 
 	return nil
 }
