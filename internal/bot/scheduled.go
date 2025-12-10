@@ -93,7 +93,13 @@ func (b *Bot) executeAutoPost(ctx context.Context) {
 	}
 
 	// プロンプト作成
-	prompt := llm.BuildAutoPostPrompt(facts)
+	// JSTの現在時刻を取得（タイムゾーンロード失敗時はUTC）
+	now := time.Now()
+	if loc, err := time.LoadLocation(b.config.Timezone); err == nil {
+		now = now.In(loc)
+	}
+
+	prompt := llm.BuildAutoPostPrompt(facts, now)
 	// システムプロンプトはキャラクター設定のみを使用（要約などは不要）
 	// AutoPostの場合はMaxPostChars制限を適用
 	systemPrompt := llm.BuildSystemPrompt(b.config.CharacterPrompt, "", "", true, b.config.MaxPostChars)

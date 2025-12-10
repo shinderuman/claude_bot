@@ -41,6 +41,7 @@ func (c *Client) GenerateResponse(ctx context.Context, session *model.Session, c
 		sessionSummary = session.Summary
 	}
 	systemPrompt := BuildSystemPrompt(c.config.CharacterPrompt, sessionSummary, relevantFacts, true, c.config.MaxPostChars)
+
 	return c.GenerateText(ctx, conversation.Messages, systemPrompt, c.config.MaxResponseTokens, currentImages)
 }
 

@@ -227,9 +227,12 @@ func BuildAssistantAnalysisPrompt(statuses []*mastodon.Status, userRequest strin
 }
 
 // BuildAutoPostPrompt creates a prompt for generating an auto-post based on facts
-func BuildAutoPostPrompt(facts []model.Fact) string {
+func BuildAutoPostPrompt(facts []model.Fact, now time.Time) string {
 	var factList strings.Builder
 	var source string
+
+	factList.WriteString(fmt.Sprintf("現在日時: %s\n\n", now.Format("2006年01月02日 15:04")))
+
 	for _, fact := range facts {
 		factList.WriteString(fmt.Sprintf("- %s: %v\n", fact.Key, fact.Value))
 		if source == "" {
@@ -243,7 +246,12 @@ func BuildAutoPostPrompt(facts []model.Fact) string {
 // BuildDailySummaryPrompt creates a prompt for summarizing daily activities
 func BuildDailySummaryPrompt(statuses []*mastodon.Status, targetDateStr, userRequest string, loc *time.Location) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("以下は **%s** のMastodon投稿ログです。この1日の活動をまとめてください。\n\n", targetDateStr))
+	// タイムゾーンが指定されている場合、プロンプトにも明記する
+	tzName := "指定タイムゾーン"
+	if loc != nil {
+		tzName = loc.String()
+	}
+	sb.WriteString(fmt.Sprintf("以下は **%s** (%s) のMastodon投稿ログです。この1日の活動をまとめてください。\n\n", targetDateStr, tzName))
 	sb.WriteString("【投稿ログ】\n")
 
 	re := regexp.MustCompile(`<[^>]*>`)
