@@ -207,7 +207,7 @@ func (fc *FactCollector) processStatus(ctx context.Context, status *gomastodon.S
 	}
 
 	// URLコンテンツからのファクト抽出
-	fc.extractFactsFromURLs(ctx, status, sourceType, sourceURL, postAuthor, postAuthorUserName)
+	fc.extractFactsFromURLs(ctx, status, sourceType, postAuthor, postAuthorUserName)
 }
 
 // determineSourceType はソースタイプを判定します
@@ -273,12 +273,14 @@ func (fc *FactCollector) extractFactsFromContent(ctx context.Context, status *go
 			fc.factStore.AddFactWithSource(fact)
 			facts.LogFactSaved(fact)
 		}
-		fc.factStore.Save()
+		if err := fc.factStore.Save(); err != nil {
+			log.Printf("ファクト保存エラー: %v", err)
+		}
 	}
 }
 
 // extractFactsFromURLs は投稿に含まれるURLからファクトを抽出します
-func (fc *FactCollector) extractFactsFromURLs(ctx context.Context, status *gomastodon.Status, sourceType, sourceURL, postAuthor, postAuthorUserName string) {
+func (fc *FactCollector) extractFactsFromURLs(ctx context.Context, status *gomastodon.Status, sourceType, postAuthor, postAuthorUserName string) {
 	content := string(status.Content)
 	urls := fc.urlExtractor.FindAllString(content, -1)
 
@@ -318,12 +320,12 @@ func (fc *FactCollector) extractFactsFromURLs(ctx context.Context, status *gomas
 		}
 
 		// 各URLの処理を非同期で実行（セマフォで並列数を制限）
-		go fc.processURL(ctx, urlStr, urlDomain, sourceType, sourceURL, postAuthor, postAuthorUserName)
+		go fc.processURL(ctx, urlStr, urlDomain, sourceType, postAuthor, postAuthorUserName)
 	}
 }
 
 // processURL は単一のURLからファクトを抽出します
-func (fc *FactCollector) processURL(ctx context.Context, urlStr, urlDomain, sourceType, sourceURL, postAuthor, postAuthorUserName string) {
+func (fc *FactCollector) processURL(ctx context.Context, urlStr, urlDomain, sourceType, postAuthor, postAuthorUserName string) {
 	// セマフォで並列数を制限
 	fc.semaphore <- struct{}{}
 	defer func() { <-fc.semaphore }()
@@ -385,7 +387,9 @@ func (fc *FactCollector) processURL(ctx context.Context, urlStr, urlDomain, sour
 			fc.factStore.AddFactWithSource(fact)
 			facts.LogFactSaved(fact)
 		}
-		fc.factStore.Save()
+		if err := fc.factStore.Save(); err != nil {
+			log.Printf("ファクト保存エラー: %v", err)
+		}
 	}
 }
 

@@ -1,0 +1,7 @@
+{
+    "go.lintTool": "golangci-lint",
+    "go.lintOnSave": "package",
+    "go.alternateTools": {
+        "golangci-lint": "/opt/homebrew/bin/golangci-lint"
+    },
+}

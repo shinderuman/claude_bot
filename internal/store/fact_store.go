@@ -88,7 +88,7 @@ func (s *FactStore) Save() error {
 		log.Printf("ファイルロック取得失敗のため保存をスキップ: %v", err)
 		return fmt.Errorf("failed to acquire file lock")
 	}
-	defer s.fileLock.Unlock()
+	defer s.fileLock.Unlock() //nolint:errcheck
 
 	s.mu.RLock()
 	currentMemoryFacts := make([]model.Fact, len(s.Facts))
@@ -100,7 +100,10 @@ func (s *FactStore) Save() error {
 	data, err := os.ReadFile(s.saveFilePath)
 	if err == nil {
 		// ファイルが存在する場合のみパース
-		json.Unmarshal(data, &diskFacts)
+		if err := json.Unmarshal(data, &diskFacts); err != nil {
+			log.Printf("ファクトデータのパースエラー: %v", err)
+			return fmt.Errorf("failed to parse facts: %w", err)
+		}
 	}
 
 	// 2. マージ（重複排除: Target+Key+Valueが完全一致するもの）
@@ -174,7 +177,9 @@ func (s *FactStore) Cleanup(retention time.Duration) int {
 
 	if deletedCount > 0 {
 		// 保存（ロック＆マージ付き）
-		s.Save()
+		if err := s.Save(); err != nil {
+			log.Printf("ファクト保存エラー: %v", err)
+		}
 	}
 
 	return deletedCount
@@ -207,18 +212,6 @@ func (s *FactStore) SearchFuzzy(targets []string, keys []string) []model.Fact {
 		}
 	}
 	return results
-}
-
-func RunPeriodicCleanup(store *FactStore) {
-	ticker := time.NewTicker(24 * time.Hour)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		deleted := store.Cleanup(30 * 24 * time.Hour)
-		if deleted > 0 {
-			log.Printf("定期クリーンアップ完了: %d件の古い事実を削除しました", deleted)
-		}
-	}
 }
 
 // GetRecentFacts は最新のファクトを指定された件数取得します
@@ -351,7 +344,9 @@ func (s *FactStore) PerformMaintenance(retentionDays, maxFacts int) int {
 		log.Printf("ファクトメンテナンス完了: %d件削除 (残り: %d件)", deletedCount, len(s.Facts))
 		// ロックを一時的に解放してSaveを呼ぶ
 		s.mu.Unlock()
-		s.Save()
+		if err := s.Save(); err != nil {
+			log.Printf("ファクト保存エラー: %v", err)
+		}
 		s.mu.Lock()
 	}
 
@@ -513,7 +508,7 @@ func (s *FactStore) OverwriteFactsForTarget(target string, newFacts []model.Fact
 	if err != nil || !locked {
 		return fmt.Errorf("failed to acquire file lock for overwrite: %v", err)
 	}
-	defer s.fileLock.Unlock()
+	defer s.fileLock.Unlock() //nolint:errcheck
 
 	// 1. ディスクから最新をロード
 	var diskFacts []model.Fact

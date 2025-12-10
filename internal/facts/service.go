@@ -103,7 +103,9 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, sourceID, author,
 			s.factStore.AddFactWithSource(fact)
 			LogFactSaved(fact)
 		}
-		s.factStore.Save()
+		if err := s.factStore.Save(); err != nil {
+			log.Printf("ファクト保存エラー: %v", err)
+		}
 	}
 }
 
@@ -283,7 +285,9 @@ func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, url
 			s.factStore.AddFactWithSource(fact)
 			LogFactSaved(fact)
 		}
-		s.factStore.Save()
+		if err := s.factStore.Save(); err != nil {
+			log.Printf("ファクト保存エラー: %v", err)
+		}
 	}
 }
 
@@ -344,7 +348,9 @@ func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summar
 			s.factStore.AddFactWithSource(fact)
 			LogFactSaved(fact)
 		}
-		s.factStore.Save()
+		if err := s.factStore.Save(); err != nil {
+			log.Printf("ファクト保存エラー: %v", err)
+		}
 	}
 }
 

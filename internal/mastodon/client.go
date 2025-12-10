@@ -148,7 +148,7 @@ func (c *Client) downloadImage(url string) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		return "", "", fmt.Errorf("HTTP error: %d", resp.StatusCode)

@@ -67,7 +67,7 @@ func FetchPageContent(ctx context.Context, urlStr string, blacklist []string) (*
 	if err != nil {
 		return nil, fmt.Errorf("通信エラー: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTPエラー: %d", resp.StatusCode)

@@ -68,7 +68,7 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.Internal)
 		return false
 	}
-	defer os.Remove(tmpSvgFilename)
+	defer os.Remove(tmpSvgFilename) //nolint:errcheck
 
 	tmpPngFilename := fmt.Sprintf("%s/generated_image_%d.png", os.TempDir(), time.Now().Unix())
 	if err := image.ConvertSVGToPNG(tmpSvgFilename, tmpPngFilename); err != nil {
@@ -77,7 +77,7 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 		// ここではエラーログを出してSVGを使用
 		tmpPngFilename = tmpSvgFilename
 	} else {
-		defer os.Remove(tmpPngFilename) // クリーンアップ
+		defer os.Remove(tmpPngFilename) //nolint:errcheck // クリーンアップ
 	}
 
 	// 画像を添付して返信

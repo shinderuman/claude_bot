@@ -53,8 +53,8 @@ const (
 	RollbackCountMedium = 2
 
 	// Conversation
-	MinConversationMessagesForParent = 0
-	BroadcastContinuityThreshold     = 10 * time.Minute
+
+	BroadcastContinuityThreshold = 10 * time.Minute
 )
 
 // resolveBroadcastRootID determines the root ID if the broadcast command should continue the previous conversation
@@ -267,7 +267,9 @@ func (b *Bot) handleNotification(ctx context.Context, notification *gomastodon.N
 		// 履歴の圧縮
 		b.history.CompressHistoryIfNeeded(ctx, session, notification.Account.Acct, b.config, b.llmClient, b.factService)
 		// 会話履歴の保存
-		b.history.Save()
+		if err := b.history.Save(); err != nil {
+			log.Printf("会話履歴保存エラー: %v", err)
+		}
 	}
 }
 
@@ -316,7 +318,9 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 			if startID != "" && endID != "" {
 				success := b.handleAssistantRequest(ctx, session, conversation, startID, endID, userMessage, statusID, mention, visibility)
 				if success {
-					b.history.Save()
+					if err := b.history.Save(); err != nil {
+						log.Printf("会話履歴保存エラー: %v", err)
+					}
 				}
 				return true
 			}
@@ -360,6 +364,8 @@ func (b *Bot) postErrorMessage(ctx context.Context, statusID, mention, visibilit
 		}
 	}
 
-	b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, errorMsg, visibility)
+	if _, err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, errorMsg, visibility); err != nil {
+		log.Printf("エラーメッセージ投稿失敗: %v", err)
+	}
 
 }

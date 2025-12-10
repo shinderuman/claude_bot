@@ -53,7 +53,7 @@ func (b *URLBlacklist) reload() error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer file.Close() //nolint:errcheck
 
 	var domains []string
 	scanner := bufio.NewScanner(file)
@@ -91,7 +91,7 @@ func (b *URLBlacklist) StartWatching(ctx context.Context) error {
 	b.watcher = watcher
 
 	if err := watcher.Add(b.filePath); err != nil {
-		watcher.Close()
+		watcher.Close() //nolint:errcheck
 		return err
 	}
 
@@ -103,7 +103,7 @@ func (b *URLBlacklist) StartWatching(ctx context.Context) error {
 
 // watchLoop watches for file changes and reloads the blacklist
 func (b *URLBlacklist) watchLoop(ctx context.Context) {
-	defer b.watcher.Close()
+	defer b.watcher.Close() //nolint:errcheck
 
 	for {
 		select {

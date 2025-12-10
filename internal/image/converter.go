@@ -17,7 +17,7 @@ func ConvertSVGToPNG(svgPath, pngPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open SVG file: %w", err)
 	}
-	defer in.Close()
+	defer in.Close() //nolint:errcheck
 
 	// Parse SVG
 	icon, err := oksvg.ReadIconStream(in)
@@ -47,7 +47,7 @@ func ConvertSVGToPNG(svgPath, pngPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to create PNG file: %w", err)
 	}
-	defer out.Close()
+	defer out.Close() //nolint:errcheck
 
 	if err := png.Encode(out, rgba); err != nil {
 		return fmt.Errorf("failed to encode PNG: %w", err)

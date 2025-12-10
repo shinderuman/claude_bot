@@ -84,7 +84,7 @@ func main() {
 		testConversation(cfg, llmClient, *message)
 	case "generate-image":
 		imageGen := image.NewImageGenerator(cfg, llmClient)
-		testGenerateImage(cfg, imageGen, *message)
+		testGenerateImage(imageGen, *message)
 	case "error":
 		testErrorMessageGeneration(cfg, llmClient, *message)
 	default:
@@ -109,10 +109,11 @@ func printConfig(cfg *config.Config) {
 	log.Println()
 	log.Println("=== LLM & 投稿設定 ===")
 	log.Printf("プロバイダー: %s", cfg.LLMProvider)
-	if cfg.LLMProvider == "claude" {
+	switch cfg.LLMProvider {
+	case "claude":
 		log.Printf("Claude API: %s", cfg.AnthropicBaseURL)
 		log.Printf("Claudeモデル: %s", cfg.AnthropicModel)
-	} else if cfg.LLMProvider == "gemini" {
+	case "gemini":
 		log.Printf("Geminiモデル: %s", cfg.GeminiModel)
 	}
 	log.Printf("最大応答トークン: %d", cfg.MaxResponseTokens)
@@ -190,7 +191,7 @@ func testResponse(cfg *config.Config, client *llm.Client, factService *facts.Fac
 		log.Println("関連する事実は見つかりませんでした")
 	}
 
-	response := client.GenerateResponse(ctx, nil, conversation, relevantFacts, currentImages)
+	response := client.GenerateResponse(ctx, session, conversation, relevantFacts, currentImages)
 
 	if response == "" {
 		log.Fatal("エラー: Claudeからの応答がありません")
@@ -379,7 +380,7 @@ func loadImage(path string) (*model.Image, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer file.Close() //nolint:errcheck
 
 	data, err := io.ReadAll(file)
 	if err != nil {
@@ -399,7 +400,7 @@ func loadImage(path string) (*model.Image, error) {
 	}, nil
 }
 
-func testGenerateImage(cfg *config.Config, imageGen *image.ImageGenerator, prompt string) {
+func testGenerateImage(imageGen *image.ImageGenerator, prompt string) {
 	log.Printf("=== SVG画像生成テスト ===")
 	log.Printf("プロンプト: %s", prompt)
 	log.Println()
