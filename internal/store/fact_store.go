@@ -22,6 +22,7 @@ type FactStore struct {
 	fileLock     *flock.Flock
 	Facts        []model.Fact
 	saveFilePath string
+	lastModTime  time.Time
 }
 
 func InitializeFactStore(cfg *config.Config) *FactStore {
@@ -117,6 +118,11 @@ func (s *FactStore) Save() error {
 
 	if err := os.WriteFile(s.saveFilePath, data, 0644); err != nil {
 		return err
+	}
+
+	// 自身の書き込みによる更新日時を反映して、直後のSyncFromDiskで無駄な読み込みが発生しないようにする
+	if stat, err := os.Stat(s.saveFilePath); err == nil {
+		s.lastModTime = stat.ModTime()
 	}
 
 	// 4. メモリも更新（他プロセスの変更を取り込む）
@@ -258,6 +264,11 @@ func (s *FactStore) GetRecentFacts(limit int) []model.Fact {
 // GetRandomGeneralFactBundle はランダムな一般知識のファクトバンドルを取得します
 // 同じ情報源(TargetUserName)から最大limit件のファクトを返します
 func (s *FactStore) GetRandomGeneralFactBundle(limit int) ([]model.Fact, error) {
+	// 最新データを同期
+	if err := s.SyncFromDisk(); err != nil {
+		log.Printf("GetRandomGeneralFactBundle: SyncFromDisk failed: %v", err)
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -564,6 +575,56 @@ func (s *FactStore) OverwriteFactsForTarget(target string, newFacts []model.Fact
 	s.Facts = memoryKept
 	s.mu.Unlock()
 
+	return nil
+}
+
+// SyncFromDisk checks for updates on disk and merges them into memory
+func (s *FactStore) SyncFromDisk() error {
+	stat, err := os.Stat(s.saveFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	// 変更がなければスキップ
+	if !stat.ModTime().After(s.lastModTime) {
+		return nil
+	}
+
+	// 読み込みロック取得（他プロセスが書き込み中でないことを確認）
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	locked, err := s.fileLock.TryRLockContext(ctx, 50*time.Millisecond)
+	if err != nil || !locked {
+		log.Printf("SyncFromDisk: ロック取得失敗のためスキップ: %v", err)
+		return nil
+	}
+	defer s.fileLock.Unlock() //nolint:errcheck
+
+	// ディスクから読み込み
+	data, err := os.ReadFile(s.saveFilePath)
+	if err != nil {
+		return err
+	}
+
+	var diskFacts []model.Fact
+	if err := json.Unmarshal(data, &diskFacts); err != nil {
+		return fmt.Errorf("failed to unmarshal facts: %w", err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// マージ実行
+	// メモリ上のデータとディスク上のデータをマージ（ディスク優先）
+	mergedFacts := s.mergeFacts(diskFacts, s.Facts)
+	s.Facts = mergedFacts
+	s.lastModTime = stat.ModTime()
+
+	log.Printf("SyncFromDisk: ディスクから同期完了 (%d件)", len(s.Facts))
 	return nil
 }
 
