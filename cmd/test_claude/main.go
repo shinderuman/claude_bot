@@ -350,7 +350,7 @@ func testAutoPost(cfg *config.Config, client *llm.Client) {
 	log.Println()
 
 	// プロンプト作成
-	prompt := llm.BuildAutoPostPrompt(facts, time.Now())
+	prompt := llm.BuildAutoPostPrompt(facts)
 	log.Println("--- 生成されたプロンプト ---")
 	log.Println(prompt)
 	log.Println("--------------------------")

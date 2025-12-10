@@ -227,11 +227,9 @@ func BuildAssistantAnalysisPrompt(statuses []*mastodon.Status, userRequest strin
 }
 
 // BuildAutoPostPrompt creates a prompt for generating an auto-post based on facts
-func BuildAutoPostPrompt(facts []model.Fact, now time.Time) string {
+func BuildAutoPostPrompt(facts []model.Fact) string {
 	var factList strings.Builder
 	var source string
-
-	factList.WriteString(fmt.Sprintf("現在日時: %s\n\n", now.Format("2006年01月02日 15:04")))
 
 	for _, fact := range facts {
 		factList.WriteString(fmt.Sprintf("- %s: %v\n", fact.Key, fact.Value))
