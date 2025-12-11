@@ -116,7 +116,7 @@ func (s *FactStore) Save() error {
 		return err
 	}
 
-	if err := os.WriteFile(s.saveFilePath, data, 0644); err != nil {
+	if err := s.atomicWriteFile(data); err != nil {
 		return err
 	}
 
@@ -554,7 +554,7 @@ func (s *FactStore) OverwriteFactsForTarget(target string, newFacts []model.Fact
 		return fmt.Errorf("failed to marshal facts: %v", err)
 	}
 
-	if err := os.WriteFile(s.saveFilePath, encoded, 0644); err != nil {
+	if err := s.atomicWriteFile(encoded); err != nil {
 		return fmt.Errorf("failed to write facts to disk: %v", err)
 	}
 
@@ -625,6 +625,59 @@ func (s *FactStore) SyncFromDisk() error {
 	s.lastModTime = stat.ModTime()
 
 	log.Printf("SyncFromDisk: ディスクから同期完了 (%d件)", len(s.Facts))
+	return nil
+}
+
+// atomicWriteFile writes data to a temporary file and then renames it to the target path
+// This ensures that the file is never in a partially written state
+func (s *FactStore) atomicWriteFile(data []byte) error {
+	// 一時ファイルを作成（ターゲットと同じディレクトリにすることで、Renameがアトミックになる可能性を高める）
+	// os.CreateTempの第一引数はディレクトリ（空ならデフォルト）、第二引数はパターン
+	// ここではターゲットファイルと同じディレクトリを使用したいが、簡単のためデフォルトの一時ディレクトリは使わず
+	// ターゲットファイルの横に作るのが一般的（ファイルシステムを跨がないため）
+	dir := "."
+	if idx := strings.LastIndex(s.saveFilePath, string(os.PathSeparator)); idx != -1 {
+		dir = s.saveFilePath[:idx]
+	}
+
+	tmpFile, err := os.CreateTemp(dir, "facts_tmp_*.json")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+
+	// エラー発生時のクリーンアップ（成功時はRenameされるので削除不要だが、念のため）
+	defer func() {
+		_ = tmpFile.Close()
+		// Rename成功後ならエラーになるだけなので無視、失敗時ならゴミ掃除
+		_ = os.Remove(tmpPath) //nolint:errcheck
+	}()
+
+	// データを書き込み
+	if _, err := tmpFile.Write(data); err != nil {
+		return fmt.Errorf("failed to write to temp file: %w", err)
+	}
+
+	// 確実にディスクに同期
+	if err := tmpFile.Sync(); err != nil {
+		return fmt.Errorf("failed to sync temp file: %w", err)
+	}
+
+	// 閉じる（Rename前に閉じる必要があるWindows等を考慮し、ここでも明示的に閉じる）
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("failed to close temp file: %w", err)
+	}
+
+	// 権限設定（元のファイルに合わせるのが理想だが、ここでは0644）
+	if err := os.Chmod(tmpPath, 0644); err != nil {
+		log.Printf("failed to chmod temp file: %v", err)
+	}
+
+	// アトミックにリネーム
+	if err := os.Rename(tmpPath, s.saveFilePath); err != nil {
+		return fmt.Errorf("failed to rename temp file to target: %w", err)
+	}
+
 	return nil
 }
 
