@@ -16,6 +16,13 @@ import (
 	gomastodon "github.com/mattn/go-mastodon"
 )
 
+const (
+	// TempImageFilenameSVG is the format for temporary SVG files
+	TempImageFilenameSVG = "%s/generated_image_%d.svg"
+	// TempImageFilenamePNG is the format for temporary PNG files
+	TempImageFilenamePNG = "%s/generated_image_%d.png"
+)
+
 // handleChatResponse handles the normal chat response flow
 func (b *Bot) handleChatResponse(ctx context.Context, session *model.Session, conversation *model.Conversation, notification *gomastodon.Notification, userMessage string, images []model.Image, statusID, mention, visibility string) bool {
 	displayName := notification.Account.DisplayName
@@ -61,7 +68,7 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 	}
 
 	// 一時ファイルに保存
-	tmpSvgFilename := fmt.Sprintf("%s/generated_image_%d.svg", os.TempDir(), time.Now().Unix())
+	tmpSvgFilename := fmt.Sprintf(TempImageFilenameSVG, os.TempDir(), time.Now().Unix())
 	if err := os.WriteFile(tmpSvgFilename, []byte(svg), 0644); err != nil {
 		log.Printf("SVG保存エラー: %v", err)
 		store.RollbackLastMessages(conversation, RollbackCountSmall)
@@ -70,7 +77,7 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 	}
 	defer os.Remove(tmpSvgFilename) //nolint:errcheck
 
-	tmpPngFilename := fmt.Sprintf("%s/generated_image_%d.png", os.TempDir(), time.Now().Unix())
+	tmpPngFilename := fmt.Sprintf(TempImageFilenamePNG, os.TempDir(), time.Now().Unix())
 	if err := image.ConvertSVGToPNG(tmpSvgFilename, tmpPngFilename); err != nil {
 		log.Printf("PNG変換エラー: %v", err)
 		// 変換失敗時はSVGのままアップロードを試みる（またはエラーにする）

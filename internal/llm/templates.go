@@ -24,10 +24,12 @@ var Templates = struct {
 	FollowResponseAlready string
 	ErrorMessage          string
 	AssistantAnalysis     struct {
+		Instruction  string
 		OutputFormat string
 	}
 	IntentClassification string
 	DailySummary         struct {
+		Header      string
 		Instruction string
 	}
 }{
@@ -320,8 +322,10 @@ JSONは1行で出力すること(改行・インデントなし)`,
 - 謝罪を含めて、親切に伝えてください。
 - 説明は不要です。返信メッセージのみを出力してください。`,
 	AssistantAnalysis: struct {
+		Instruction  string
 		OutputFormat string
 	}{
+		Instruction: "以下のMastodonの投稿ログを分析してください。\n\n",
 		OutputFormat: `
 
 【出力形式】
@@ -360,8 +364,10 @@ JSONは1行で出力すること(改行・インデントなし)`,
   - 曖昧な場合は "chat" に分類してください。
 - 明確な依頼がない場合は "chat" に分類してください。`,
 	DailySummary: struct {
+		Header      string
 		Instruction string
 	}{
+		Header: "以下は **%s** (%s) のMastodon投稿ログです。この1日の活動をまとめてください。\n\n",
 		Instruction: `
 【まとめ方】
 1. **時系列での主な出来事**: 重要な活動や話題を時系列で整理

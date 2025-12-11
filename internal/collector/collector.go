@@ -42,6 +42,13 @@ type FactCollector struct {
 	fediverseDomains sync.Map
 }
 
+const (
+	// CacheTTL はキャッシュの有効期限
+	CacheTTL = 24 * time.Hour
+	// CacheCleanupInterval はキャッシュのクリーンアップ間隔
+	CacheCleanupInterval = 1 * time.Hour
+)
+
 // NewFactCollector は新しい FactCollector を作成します
 func NewFactCollector(cfg *config.Config, factStore *store.FactStore, llmClient *llm.Client, mastodonClient *mastodon.Client) *FactCollector {
 	fc := &FactCollector{
@@ -62,15 +69,15 @@ func NewFactCollector(cfg *config.Config, factStore *store.FactStore, llmClient 
 
 // cleanupCacheLoop は定期的に古いキャッシュを削除します
 func (fc *FactCollector) cleanupCacheLoop() {
-	ticker := time.NewTicker(1 * time.Hour)
+	ticker := time.NewTicker(CacheCleanupInterval)
 	defer ticker.Stop()
 
 	for range ticker.C {
 		now := time.Now()
 		fc.processedURLs.Range(func(key, value interface{}) bool {
 			if t, ok := value.(time.Time); ok {
-				// 24時間経過したキャッシュは削除
-				if now.Sub(t) > 24*time.Hour {
+				// 期限切れのキャッシュは削除
+				if now.Sub(t) > CacheTTL {
 					fc.processedURLs.Delete(key)
 				}
 			}
@@ -80,8 +87,8 @@ func (fc *FactCollector) cleanupCacheLoop() {
 		// Fediverseドメインキャッシュもクリーンアップ
 		fc.fediverseDomains.Range(func(key, value interface{}) bool {
 			if t, ok := value.(time.Time); ok {
-				// 24時間経過したキャッシュは削除
-				if now.Sub(t) > 24*time.Hour {
+				// 期限切れのキャッシュは削除
+				if now.Sub(t) > CacheTTL {
 					fc.fediverseDomains.Delete(key)
 				}
 			}

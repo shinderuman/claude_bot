@@ -17,7 +17,46 @@ import (
 const (
 	// Validation
 	MinFactValueLength = 2
+)
 
+var (
+	// InvalidTargets は無効なターゲットのリスト
+	InvalidTargets = []string{
+		"user", "user_id", "userid", "unknown", "none", "no_name", "someone", "anonymous",
+		"undefined", "null", "test_user", "sample_user",
+	}
+
+	// InvalidKeys は無効なキーの部分一致リスト
+	InvalidKeys = []string{"username", "displayname", "display_name", "account", "id", "follower", "following"}
+
+	// InvalidValues は無効な値のリスト
+	InvalidValues = []string{"不明", "なし", "特になし", "unknown", "none", "n/a"}
+
+	// KeyNormalizationMappings はキーの正規化マッピング
+	KeyNormalizationMappings = map[string]string{
+		"好きなもの": "preference",
+		"好き":    "preference",
+		"趣味":    "preference",
+		"推し":    "preference",
+		"好物":    "preference",
+		"職業":    "occupation",
+		"仕事":    "occupation",
+		"居住地":   "location",
+		"住まい":   "location",
+		"場所":    "location",
+		"出身":    "location",
+		"所有":    "possession",
+		"持ち物":   "possession",
+		"ペット":   "possession",
+		"経験":    "experience",
+		"資格":    "experience",
+		"経歴":    "experience",
+		"性格":    "attribute",
+		"特徴":    "attribute",
+	}
+)
+
+const (
 	// Archive
 	ArchiveFactThreshold = 20
 	ArchiveMinFactCount  = 2
@@ -162,10 +201,7 @@ func formatAuthor(fact model.Fact) string {
 func (s *FactService) isValidFact(target, key string, value interface{}) bool {
 	// ターゲットのチェック
 	targetLower := strings.ToLower(target)
-	invalidTargets := []string{
-		"user", "user_id", "userid", "unknown", "none", "no_name", "someone", "anonymous",
-		"undefined", "null", "test_user", "sample_user",
-	}
+	invalidTargets := InvalidTargets
 	for _, t := range invalidTargets {
 		if targetLower == t {
 			return false
@@ -174,7 +210,7 @@ func (s *FactService) isValidFact(target, key string, value interface{}) bool {
 
 	// キーのチェック
 	keyLower := strings.ToLower(key)
-	invalidKeys := []string{"username", "displayname", "display_name", "account", "id", "follower", "following"}
+	invalidKeys := InvalidKeys
 	for _, k := range invalidKeys {
 		if strings.Contains(keyLower, k) {
 			return false
@@ -188,7 +224,7 @@ func (s *FactService) isValidFact(target, key string, value interface{}) bool {
 			return false
 		}
 		// "不明" "なし" などの無意味な値を除外
-		invalidValues := []string{"不明", "なし", "特になし", "unknown", "none", "n/a"}
+		invalidValues := InvalidValues
 		valLower := strings.ToLower(strVal)
 		for _, v := range invalidValues {
 			if valLower == v {
@@ -205,27 +241,8 @@ func (s *FactService) normalizeKey(key string) string {
 	keyLower := strings.ToLower(key)
 
 	// マッピングルール
-	mappings := map[string]string{
-		"好きなもの": "preference",
-		"好き":    "preference",
-		"趣味":    "preference",
-		"推し":    "preference",
-		"好物":    "preference",
-		"職業":    "occupation",
-		"仕事":    "occupation",
-		"居住地":   "location",
-		"住まい":   "location",
-		"場所":    "location",
-		"出身":    "location",
-		"所有":    "possession",
-		"持ち物":   "possession",
-		"ペット":   "possession",
-		"経験":    "experience",
-		"資格":    "experience",
-		"経歴":    "experience",
-		"性格":    "attribute",
-		"特徴":    "attribute",
-	}
+	// マッピングルール
+	mappings := KeyNormalizationMappings
 
 	for k, v := range mappings {
 		if strings.Contains(keyLower, k) {
