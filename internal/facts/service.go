@@ -19,7 +19,7 @@ const (
 	MinFactValueLength = 2
 
 	// Archive
-	ArchiveFactThreshold = 5
+	ArchiveFactThreshold = 20
 	ArchiveMinFactCount  = 2
 	ArchiveAgeDays       = 30
 
