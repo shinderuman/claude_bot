@@ -243,7 +243,11 @@ func (c *Client) PostResponseWithMedia(ctx context.Context, inReplyToID, mention
 
 	status, err := c.client.PostStatus(ctx, toot)
 	if err != nil {
-		log.Printf("投稿エラー: %v", err)
+		log.Printf("投稿エラー (Media): %v", err)
+		if strings.Contains(err.Error(), "422") {
+			log.Printf("⚠️ 422 Error detected. Content length: %d", len([]rune(fullResponse)))
+			log.Printf("Rejected Content: %s", fullResponse)
+		}
 		return "", err
 	}
 
@@ -260,7 +264,10 @@ func (c *Client) postReply(ctx context.Context, inReplyToID, content, visibility
 	status, err := c.client.PostStatus(ctx, toot)
 	if err != nil {
 		log.Printf("投稿エラー: %v", err)
-		log.Printf("投稿内容（%d文字）: %s", len([]rune(content)), content)
+		if strings.Contains(err.Error(), "422") {
+			log.Printf("⚠️ 422 Error detected (Reply). Content length: %d", len([]rune(content)))
+			log.Printf("Rejected Content: %s", content)
+		}
 		return nil, err
 	}
 
@@ -275,7 +282,15 @@ func (c *Client) PostStatus(ctx context.Context, content, visibility string) err
 	}
 
 	_, err := c.client.PostStatus(ctx, toot)
-	return err
+	if err != nil {
+		log.Printf("投稿エラー (Status): %v", err)
+		if strings.Contains(err.Error(), "422") {
+			log.Printf("⚠️ 422 Error detected (Status). Content length: %d", len([]rune(content)))
+			log.Printf("Rejected Content: %s", content)
+		}
+		return err
+	}
+	return nil
 }
 
 // FollowAccount follows the specified account
