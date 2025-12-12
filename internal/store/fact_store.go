@@ -162,8 +162,41 @@ func (s *FactStore) mergeFacts(disk, memory []model.Fact) []model.Fact {
 	return result
 }
 
+// SaveOverwrite forces the current memory state to disk without merging
+// This is used for cleanup/maintenance operations where deletions must be persisted
+func (s *FactStore) SaveOverwrite() error {
+	// 1. Acquire lock with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 1000*time.Millisecond)
+	defer cancel()
+
+	locked, err := s.fileLock.TryLockContext(ctx, 50*time.Millisecond)
+	if err != nil || !locked {
+		return fmt.Errorf("failed to acquire file lock for overwrite: %v", err)
+	}
+	defer s.fileLock.Unlock() //nolint:errcheck
+
+	// 2. Serialize current memory state
+	s.mu.RLock()
+	data, err := json.MarshalIndent(s.Facts, "", "  ")
+	s.mu.RUnlock()
+	if err != nil {
+		return fmt.Errorf("failed to marshal facts: %w", err)
+	}
+
+	// 3. Write to disk (atomic replace)
+	if err := s.atomicWriteFile(data); err != nil {
+		return fmt.Errorf("failed to write facts to disk: %w", err)
+	}
+
+	// Update last modification time to avoid reloading what we just wrote
+	if stat, err := os.Stat(s.saveFilePath); err == nil {
+		s.lastModTime = stat.ModTime()
+	}
+
+	return nil
+}
+
 func (s *FactStore) Cleanup(retention time.Duration) int {
-	// CleanupはSaveを呼ぶため、ここではメモリ上の操作のみ行い、Saveに任せる
 	s.mu.Lock()
 
 	threshold := time.Now().Add(-retention)
@@ -182,9 +215,10 @@ func (s *FactStore) Cleanup(retention time.Duration) int {
 	s.mu.Unlock()
 
 	if deletedCount > 0 {
-		// 保存（ロック＆マージ付き）
-		if err := s.Save(); err != nil {
-			log.Printf("ファクト保存エラー: %v", err)
+		// Use SaveOverwrite to ensure deletions are persisted to disk
+		// Regular Save() would merge with disk and resurrect deleted items
+		if err := s.SaveOverwrite(); err != nil {
+			log.Printf("ファクト保存エラー(Cleanup): %v", err)
 		}
 	}
 
@@ -353,9 +387,9 @@ func (s *FactStore) PerformMaintenance(retentionDays, maxFacts int) int {
 	deletedCount := initialCount - len(s.Facts)
 	if deletedCount > 0 {
 		log.Printf("ファクトメンテナンス完了: %d件削除 (残り: %d件)", deletedCount, len(s.Facts))
-		// ロックを一時的に解放してSaveを呼ぶ
+		// ロックを一時的に解放してSaveOverwriteを呼ぶ（マージせずに削除を反映）
 		s.mu.Unlock()
-		if err := s.Save(); err != nil {
+		if err := s.SaveOverwrite(); err != nil {
 			log.Printf("ファクト保存エラー: %v", err)
 		}
 		s.mu.Lock()
