@@ -392,10 +392,30 @@ func ExtractStatusFromEvent(event mastodon.Event) *mastodon.Status {
 }
 
 // ShouldCollectFactsFromStatus はファクト収集対象の投稿かを判定します
+// ポリシー:
+// - Public: 収集許可（Bot/人間問わず）
+// - Unlisted: Botのみ収集許可（人間のUnlistedは除外）
+// - Private/Direct: 収集不可
+//
+// 共通条件:
 // - 本文に実際のURLを含む(http://またはhttps://)
 // - メンションを含まない
 func ShouldCollectFactsFromStatus(status *mastodon.Status) bool {
 	if status == nil {
+		return false
+	}
+
+	// 1. 公開範囲とアカウント属性によるフィルタリング
+	switch status.Visibility {
+	case "public":
+		// Publicは許可
+	case "unlisted":
+		// UnlistedはBotの場合のみ許可（人間のUnlistedは恐らく私信や独り言なので除外）
+		if !status.Account.Bot {
+			return false
+		}
+	default:
+		// Private, Direct は収集不可
 		return false
 	}
 
