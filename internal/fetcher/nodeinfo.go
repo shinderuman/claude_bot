@@ -65,6 +65,7 @@ func IsFediverseServer(domain string) bool {
 	if err != nil {
 		return false
 	}
+	req.Header.Set("User-Agent", UserAgent)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -89,7 +90,9 @@ func IsFediverseServer(domain string) bool {
 	// Find NodeInfo 2.0 or 2.1 link
 	var nodeInfoURL string
 	for _, link := range links.Links {
-		if strings.Contains(link.Rel, "nodeinfo/2.") {
+		// Check for standard NodeInfo schema URLs
+		// e.g. http://nodeinfo.diaspora.software/ns/schema/2.0
+		if strings.Contains(link.Rel, "ns/schema/2.") {
 			nodeInfoURL = link.Href
 			break
 		}
@@ -104,6 +107,7 @@ func IsFediverseServer(domain string) bool {
 	if err != nil {
 		return false
 	}
+	req.Header.Set("User-Agent", UserAgent)
 
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
