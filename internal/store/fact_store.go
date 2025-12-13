@@ -136,16 +136,29 @@ func (s *FactStore) Save() error {
 // mergeFacts はディスク上のデータとメモリ上のデータをマージします
 // Target+Key+Valueが完全一致するもののみ重複排除します
 func (s *FactStore) mergeFacts(disk, memory []model.Fact) []model.Fact {
-	// 重複チェック用マップ
-	// キー: "Target|Key|Value"
+	archiveTimestamps := make(map[string]time.Time)
+	for _, f := range disk {
+		if f.SourceType == model.SourceTypeArchive {
+			if ts, ok := archiveTimestamps[f.Target]; !ok || f.Timestamp.After(ts) {
+				archiveTimestamps[f.Target] = f.Timestamp
+			}
+		}
+	}
+
 	seen := make(map[string]bool)
 	var result []model.Fact
 
-	// ヘルパー: ファクトを追加
-	add := func(list []model.Fact) {
+	add := func(list []model.Fact, checkZombie bool) {
 		for _, f := range list {
-			valStr := fmt.Sprintf("%v", f.Value)
-			uniqueKey := fmt.Sprintf("%s|%s|%s", f.Target, f.Key, valStr)
+			if checkZombie {
+				if archiveTime, ok := archiveTimestamps[f.Target]; ok {
+					if f.SourceType != model.SourceTypeArchive && f.Timestamp.Before(archiveTime) {
+						continue
+					}
+				}
+			}
+
+			uniqueKey := f.ComputeUniqueKey()
 
 			if !seen[uniqueKey] {
 				seen[uniqueKey] = true
@@ -154,10 +167,8 @@ func (s *FactStore) mergeFacts(disk, memory []model.Fact) []model.Fact {
 		}
 	}
 
-	// ディスクを優先（ベース）
-	add(disk)
-	// メモリを追加（差分のみ追加される）
-	add(memory)
+	add(disk, false)
+	add(memory, true)
 
 	return result
 }
@@ -542,71 +553,62 @@ func (s *FactStore) GetFactsByTarget(target string) []model.Fact {
 	return results
 }
 
-// OverwriteFactsForTarget は指定されたターゲットのファクトを強制的に上書き保存します
-// ディスク上の該当ターゲットのデータは全て削除され、newFactsに置き換わります
-func (s *FactStore) OverwriteFactsForTarget(target string, newFacts []model.Fact) error {
-	// タイムアウト付きでロック取得（1.0秒 - 重い処理なので長めに）
+// ReplaceFacts atomically removes specified facts and adds new ones
+// This is safe for concurrent partial updates of the same target
+func (s *FactStore) ReplaceFacts(target string, factsToRemove, factsToAdd []model.Fact) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 1000*time.Millisecond)
 	defer cancel()
 
 	locked, err := s.fileLock.TryLockContext(ctx, 50*time.Millisecond)
 	if err != nil || !locked {
-		return fmt.Errorf("failed to acquire file lock for overwrite: %v", err)
+		return fmt.Errorf("failed to acquire file lock for replace: %v", err)
 	}
 	defer s.fileLock.Unlock() //nolint:errcheck
 
-	// 1. ディスクから最新をロード
 	var diskFacts []model.Fact
 	data, err := os.ReadFile(s.saveFilePath)
 	if err == nil && len(data) > 0 {
 		if err := json.Unmarshal(data, &diskFacts); err != nil {
 			return fmt.Errorf("failed to unmarshal disk facts: %v", err)
 		}
+	} else if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to load facts from disk: %v", err)
 	}
 
-	// 2. ディスク上のデータから対象ターゲットを除外
+	removals := make(map[string]bool)
+	for _, f := range factsToRemove {
+		key := f.ComputeUniqueKey()
+		removals[key] = true
+	}
+
 	var keptFacts []model.Fact
 	for _, f := range diskFacts {
-		if f.Target != target {
+		key := f.ComputeUniqueKey()
+		if !removals[key] {
 			keptFacts = append(keptFacts, f)
 		}
 	}
 
-	// 3. 新しいファクト（アーカイブ済みデータ）を追加
-	// タイムスタンプ補完
 	now := time.Now()
-	for i := range newFacts {
-		if newFacts[i].Timestamp.IsZero() {
-			newFacts[i].Timestamp = now
+	for i := range factsToAdd {
+		if factsToAdd[i].Timestamp.IsZero() {
+			factsToAdd[i].Timestamp = now
 		}
 	}
-	keptFacts = append(keptFacts, newFacts...)
+	keptFacts = append(keptFacts, factsToAdd...)
 
-	// 4. 保存
 	encoded, err := json.MarshalIndent(keptFacts, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal facts: %v", err)
 	}
 
-	if err := s.atomicWriteFile(encoded); err != nil {
+	if err := os.WriteFile(s.saveFilePath, encoded, 0644); err != nil {
 		return fmt.Errorf("failed to write facts to disk: %v", err)
 	}
 
-	// 5. メモリも更新（このメソッドが権限を持つため、メモリ上の他スレッドの変更よりもここでの決定を優先する形になるが
-	// アーカイブ処理はターゲット単位で独立しているため、他ターゲットへの影響はない）
 	s.mu.Lock()
-	// メモリ上のデータも同様に再構築（ディスクと同じ状態にするのが最も整合性が取れる）
-	// ただし、他ターゲットの更新がメモリ上で進行中の可能性を考慮し、
-	// メモリ上の「対象ターゲット以外のデータ」+「新しいデータ」とするのが安全
-	// ここではメモリ上のデータ再構築ロジックを適用
-	var memoryKept []model.Fact
-	for _, f := range s.Facts {
-		if f.Target != target {
-			memoryKept = append(memoryKept, f)
-		}
-	}
-	memoryKept = append(memoryKept, newFacts...)
-	s.Facts = memoryKept
+	s.Facts = keptFacts
+	s.lastModTime = time.Now() // 更新したのでタイムスタンプも更新
 	s.mu.Unlock()
 
 	return nil

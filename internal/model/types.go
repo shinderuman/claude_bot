@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -92,6 +93,11 @@ type Fact struct {
 	SourceURL          string `json:"source_url,omitempty"`           // 投稿のURL
 	PostAuthor         string `json:"post_author,omitempty"`          // 投稿者のAcct
 	PostAuthorUserName string `json:"post_author_username,omitempty"` // 投稿者の表示名
+}
+
+// ComputeUniqueKey returns a stable unique key for the fact based on its content and timestamp
+func (f *Fact) ComputeUniqueKey() string {
+	return fmt.Sprintf("%s|%s|%v|%d", f.Target, f.Key, f.Value, f.Timestamp.UnixNano())
 }
 
 type SearchQuery struct {

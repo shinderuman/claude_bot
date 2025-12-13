@@ -10,6 +10,7 @@ import (
 
 	"claude_bot/internal/collector"
 	"claude_bot/internal/config"
+	"claude_bot/internal/discovery"
 	"claude_bot/internal/facts"
 	"claude_bot/internal/image"
 	"claude_bot/internal/llm"
@@ -46,7 +47,9 @@ const (
 	DailySummaryDaysLimit = 3
 
 	// Maintenance
-	FactMaintenanceInterval = 24 * time.Hour
+	FactMaintenanceInterval = 6 * time.Hour
+	// Startup Warm-up
+	StartupMaintenanceDelay = 1 * time.Minute
 
 	// Rollback
 	RollbackCountSmall  = 1
@@ -123,12 +126,21 @@ func (b *Bot) Run(ctx context.Context) error {
 
 	b.logStartupInfo()
 
-	// ファクトストアのメンテナンス（起動時）
+	if b.config.EnableFactStore {
+		discovery.StartHeartbeatLoop(ctx, b.config.BotUsername)
+	}
+
 	if b.factService != nil {
-		log.Println("ファクトストアのメンテナンスを実行中...")
 		go func() {
-			if err := b.factService.PerformMaintenance(ctx); err != nil {
-				log.Printf("起動時ファクトメンテナンスエラー: %v", err)
+			log.Printf("起動時ファクトメンテナンス: クラスタ同期待ちのため %v 待機します...", StartupMaintenanceDelay)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(StartupMaintenanceDelay):
+				log.Println("起動時ファクトメンテナンスを実行中...")
+				if err := b.factService.PerformMaintenance(ctx); err != nil {
+					log.Printf("起動時ファクトメンテナンスエラー: %v", err)
+				}
 			}
 		}()
 	}

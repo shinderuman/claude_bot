@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"log"
 	"strings"
 	"time"
 
 	"claude_bot/internal/config"
+	"claude_bot/internal/discovery"
 	"claude_bot/internal/llm"
 	"claude_bot/internal/model"
 	"claude_bot/internal/store"
@@ -61,6 +63,12 @@ const (
 	ArchiveFactThreshold = 20
 	ArchiveMinFactCount  = 2
 	ArchiveAgeDays       = 30
+	FactArchiveBatchSize = 50
+
+	// Archive Reasons
+	ArchiveReasonThresholdMet = "割り当て件数が閾値を超えていたため"
+	ArchiveReasonOldData      = "古いデータが含まれており、かつ最低件数を満たしたため"
+	ArchiveReasonInsufficient = "条件を満たさなかったため"
 
 	// Query
 	RecentFactsCount = 5
@@ -451,100 +459,151 @@ func (s *FactService) PerformMaintenance(ctx context.Context) error {
 		return nil
 	}
 
-	log.Println("ファクトストアのメンテナンス（アーカイブ処理）を開始します...")
+	// 0. クラスタ位置の取得
+	instanceID, totalInstances, err := discovery.GetMyPosition(s.config.BotUsername)
+	if err != nil {
+		log.Printf("クラスタ位置取得エラー (分散処理無効): %v", err)
+		instanceID = 0
+		totalInstances = 1
+	}
+	log.Printf("分散メンテナンス開始: Instance %d/%d (Bot: %s)", instanceID, totalInstances, s.config.BotUsername)
 
-	// 1. 全ターゲットの取得
 	targets := s.factStore.GetAllTargets()
 
-	// 2. ターゲットごとにチェック
 	archivedCount := 0
 	for _, target := range targets {
-		facts := s.factStore.GetFactsByTarget(target)
-		if len(facts) == 0 {
-			continue
-		}
-
-		// アーカイブが必要か判定
-		// 条件1: ファクト数が閾値を超えている
-		// 条件2: 古いファクトが含まれている - 今回は簡易的に件数ベースまたは全件対象
-		// ユーザーの要望「データ量を増やしたくない」→ 常に最新の1つにまとめるのが理想
-		// ただし毎回やるとコストが高いので、ある程度溜まったらやる
-		shouldArchive := false
-		if len(facts) >= ArchiveFactThreshold {
-			shouldArchive = true
-		} else {
-			// アーカイブ済みデータが含まれていない（＝まだ一度もアーカイブされていない）かつ、
-			// 古いデータがある場合はアーカイブする
-			hasOldFact := false
-			threshold := time.Now().AddDate(0, 0, -ArchiveAgeDays)
-			for _, f := range facts {
-				if f.Timestamp.Before(threshold) {
-					hasOldFact = true
-					break
-				}
-			}
-			if hasOldFact && len(facts) >= ArchiveMinFactCount { // 最低2件はないと統合の意味がない
-				shouldArchive = true
-			}
-		}
-
-		if shouldArchive {
-			if err := s.archiveTargetFacts(ctx, target, facts); err != nil {
-				log.Printf("ターゲット %s のアーカイブ失敗: %v", target, err)
-			} else {
-				archivedCount++
-			}
+		archived, _ := s.processTargetMaintenance(ctx, target, instanceID, totalInstances)
+		if archived {
+			archivedCount++
 		}
 	}
 
-	log.Printf("メンテナンス完了: %d件のターゲットをアーカイブしました", archivedCount)
+	log.Printf("メンテナンス完了: %d件のターゲット(担当分)を処理しました", archivedCount)
 	return s.factStore.Save()
+}
+
+// processTargetMaintenance handles maintenance for a single target
+func (s *FactService) processTargetMaintenance(ctx context.Context, target string, instanceID, totalInstances int) (bool, error) {
+	allFacts := s.factStore.GetFactsByTarget(target)
+	if len(allFacts) == 0 {
+		return false, nil
+	}
+
+	myFacts := s.shardFacts(allFacts, instanceID, totalInstances)
+	if len(myFacts) == 0 {
+		return false, nil
+	}
+
+	shouldArchive, reason := s.shouldArchiveFacts(myFacts, totalInstances)
+
+	if shouldArchive {
+		log.Printf("ターゲット %s: %d件を担当 -> アーカイブを実行します (理由: %s, Instance %d)", target, len(myFacts), reason, instanceID)
+		if err := s.archiveTargetFacts(ctx, target, myFacts); err != nil {
+			log.Printf("ターゲット %s のアーカイブ失敗: %v", target, err)
+			return false, err
+		}
+		return true, nil
+	}
+
+	log.Printf("ターゲット %s: %d件を担当 -> スキップします (件数不足, Instance %d)", target, len(myFacts), instanceID)
+	return false, nil
+}
+
+// shardFacts filters facts based on consistent hashing
+func (s *FactService) shardFacts(facts []model.Fact, instanceID, totalInstances int) []model.Fact {
+	if totalInstances <= 1 {
+		return facts
+	}
+
+	var myFacts []model.Fact
+	h := fnv.New32a()
+	for _, f := range facts {
+		uniqueKey := f.ComputeUniqueKey()
+		h.Reset()
+		h.Write([]byte(uniqueKey))
+
+		if h.Sum32()%uint32(totalInstances) == uint32(instanceID) {
+			myFacts = append(myFacts, f)
+		}
+	}
+	return myFacts
+}
+
+// shouldArchiveFacts determines if facts should be archived based on thresholds
+func (s *FactService) shouldArchiveFacts(facts []model.Fact, totalInstances int) (bool, string) {
+	if len(facts) >= ArchiveFactThreshold/max(1, totalInstances) {
+		return true, ArchiveReasonThresholdMet
+	}
+
+	threshold := time.Now().AddDate(0, 0, -ArchiveAgeDays)
+	hasOldFact := false
+	for _, f := range facts {
+		if f.Timestamp.Before(threshold) {
+			hasOldFact = true
+			break
+		}
+	}
+
+	if hasOldFact && len(facts) >= ArchiveMinFactCount {
+		return true, ArchiveReasonOldData
+	}
+
+	return false, ArchiveReasonInsufficient
 }
 
 func (s *FactService) archiveTargetFacts(ctx context.Context, target string, facts []model.Fact) error {
 	log.Printf("ターゲット %s の事実をアーカイブ中 (対象: %d件)...", target, len(facts))
 
-	// LLMでアーカイブ生成
-	prompt := llm.BuildFactArchivingPrompt(facts)
-	messages := []model.Message{{Role: "user", Content: prompt}}
+	var allArchives []model.Fact
 
-	// アーカイブ生成には少し長めのトークンを許可
-	response := s.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, s.config.MaxSummaryTokens, nil)
-	if response == "" {
-		return fmt.Errorf("LLM応答が空です")
+	for i := 0; i < len(facts); i += FactArchiveBatchSize {
+		end := min(i+FactArchiveBatchSize, len(facts))
+
+		batch := facts[i:end]
+		log.Printf("バッチ処理中: %d - %d / %d", i+1, end, len(facts))
+
+		prompt := llm.BuildFactArchivingPrompt(batch)
+		messages := []model.Message{{Role: "user", Content: prompt}}
+
+		response := s.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, s.config.MaxSummaryTokens, nil)
+		if response == "" {
+			log.Printf("警告: バッチ %d-%d のLLM応答が空でした", i+1, end)
+			continue
+		}
+
+		var chunkArchives []model.Fact
+		jsonStr := llm.ExtractJSON(response)
+		if err := json.Unmarshal([]byte(jsonStr), &chunkArchives); err != nil {
+			log.Printf("警告: バッチ %d-%d のJSONパースエラー: %v", i+1, end, err)
+			continue
+		}
+
+		allArchives = append(allArchives, chunkArchives...)
+		time.Sleep(1 * time.Second)
 	}
 
-	var archives []model.Fact
-	jsonStr := llm.ExtractJSON(response)
-	if err := json.Unmarshal([]byte(jsonStr), &archives); err != nil {
-		return fmt.Errorf("JSONパースエラー: %v\nJSON: %s", err, jsonStr)
-	}
-
-	if len(archives) == 0 {
+	if len(allArchives) == 0 {
 		return fmt.Errorf("有効なアーカイブが生成されませんでした")
 	}
 
-	// アーカイブデータの整形
-	for i := range archives {
-		archives[i].Target = target
-		// TargetUserNameは元のファクトから引き継ぐ（またはLLMが生成したものを使用）
-		if archives[i].TargetUserName == "" || archives[i].TargetUserName == model.UnknownTarget {
+	for i := range allArchives {
+		allArchives[i].Target = target
+		if allArchives[i].TargetUserName == "" || allArchives[i].TargetUserName == model.UnknownTarget {
 			if len(facts) > 0 {
-				archives[i].TargetUserName = facts[0].TargetUserName
+				allArchives[i].TargetUserName = facts[0].TargetUserName
 			}
 		}
-		archives[i].Author = SystemAuthor
-		archives[i].AuthorUserName = SystemAuthor
-		archives[i].Timestamp = time.Now()
-		archives[i].SourceType = model.SourceTypeArchive
-		archives[i].SourceURL = ""
+		allArchives[i].Author = SystemAuthor
+		allArchives[i].AuthorUserName = SystemAuthor
+		allArchives[i].Timestamp = time.Now()
+		allArchives[i].SourceType = model.SourceTypeArchive
+		allArchives[i].SourceURL = ""
 	}
 
-	// ストアのデータを置き換え（ディスク上の古いデータを完全に削除・上書き）
-	if err := s.factStore.OverwriteFactsForTarget(target, archives); err != nil {
-		return fmt.Errorf("アーカイブ保存エラー: %v", err)
+	if err := s.factStore.ReplaceFacts(target, facts, allArchives); err != nil {
+		return fmt.Errorf("アーカイブ保存エラー(ReplaceFacts): %v", err)
 	}
-	log.Printf("ターゲット %s のアーカイブ完了: %d件 -> %d件に圧縮 (永続化済み)", target, len(facts), len(archives))
+	log.Printf("ターゲット %s のアーカイブ完了(担当分): %d件 -> %d件に圧縮 (永続化済み)", target, len(facts), len(allArchives))
 
 	return nil
 }

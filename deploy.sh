@@ -321,11 +321,12 @@ main() {
     # フェーズ3: デプロイ（プログラムデプロイ時のみ）
     # ========================================
     if [ "$DEPLOY_PROGRAM" = true ]; then
-        # Supervisorの停止
+        # Supervisorの停止（並列実行）
         for SERVICE in "${target_services[@]}"; do
             echo "Supervisor (${SERVICE}) を停止中..."
-            ssh "${REMOTE_HOST}" "sudo supervisorctl stop ${SERVICE}" || echo "  ⚠ ${SERVICE} の停止に失敗しました（プロセスが存在しない可能性があります）"
+            ssh "${REMOTE_HOST}" "sudo supervisorctl stop ${SERVICE}" &
         done
+        wait # 全停止を待機
 
         # バイナリの転送 (Text file busy回避のため一時ファイル経由)
         echo "バイナリを転送中..."
@@ -334,11 +335,12 @@ main() {
         # バイナリの置き換え (アトミック操作)
         ssh "${REMOTE_HOST}" "mv '${REMOTE_DIR}/${APP_NAME}.new' '${REMOTE_DIR}/${APP_NAME}' && chmod +x '${REMOTE_DIR}/${APP_NAME}'"
 
-        # Supervisorの開始
+        # Supervisorの開始（並列実行）
         for SERVICE in "${target_services[@]}"; do
             echo "Supervisor (${SERVICE}) を開始中..."
-            ssh "${REMOTE_HOST}" "sudo supervisorctl start ${SERVICE}"
+            ssh "${REMOTE_HOST}" "sudo supervisorctl start ${SERVICE}" &
         done
+        wait # 全開始を待機
         echo "  ✓ Supervisor操作完了"
 
         # ローカルのバイナリを削除
