@@ -2,7 +2,6 @@ package image
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 
@@ -43,7 +42,7 @@ func (g *ImageGenerator) GenerateSVG(ctx context.Context, prompt string) (string
 		SVG string `json:"svg"`
 	}
 
-	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+	if err := llm.UnmarshalWithRepair(jsonStr, &result, "画像生成"); err != nil {
 		return "", fmt.Errorf("JSONパースエラー: %v", err)
 	}
 

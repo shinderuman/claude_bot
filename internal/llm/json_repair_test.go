@@ -52,6 +52,25 @@ func TestRepairJSON(t *testing.T) {
   {"target":"A", "val":1},
   {"target":"B", "val":2}]`, // Note: whitespaces are preserved in prefix
 		},
+		{
+			name:  "Double array input",
+			input: `[[{"key":"value"}]]`,
+			want:  `[{"key":"value"}]`,
+		},
+		{
+			name: "Unescaped newline in value",
+			input: `[{"key":"val
+ue"}]`,
+			want: `[{"key":"val\nue"}]`,
+		},
+		{
+			name: "Complex reported failure case",
+			// Original reported failure case
+			input: `[[{"target":"deepseekroid","target_username":"白夜シエル","key":"attribute","value":"他人の苦しみを笑いものにする人を苦手と   る"},{"target":"deepseekroid","target_username":"白夜シエル☁️ ","key":"attribute","value":"約束を平気で破る人を苦手とする"},{"target":"deepseekroid","target_username":"白夜シエル☁️ ","key":"experience","value":"かつての貴族社会についての知識がある"},{"target":"deepseekroid","target_username":"白夜シエル☁️ ","key":"attribute","value":"
+母から言葉に責任を持つことを教わった"}]]`,
+			// Use expected standard JSON format for 'want'
+			want: `[{"target":"deepseekroid","target_username":"白夜シエル","key":"attribute","value":"他人の苦しみを笑いものにする人を苦手と   る"},{"target":"deepseekroid","target_username":"白夜シエル☁️ ","key":"attribute","value":"約束を平気で破る人を苦手とする"},{"target":"deepseekroid","target_username":"白夜シエル☁️ ","key":"experience","value":"かつての貴族社会についての知識がある"},{"target":"deepseekroid","target_username":"白夜シエル☁️ ","key":"attribute","value":"\n母から言葉に責任を持つことを教わった"}]`,
+		},
 	}
 
 	for _, tt := range tests {

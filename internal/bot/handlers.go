@@ -5,7 +5,6 @@ import (
 	"claude_bot/internal/model"
 	"claude_bot/internal/store"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -171,7 +170,7 @@ func (b *Bot) classifyIntent(ctx context.Context, message string) (model.IntentT
 		TargetDate   string   `json:"target_date"`
 	}
 
-	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+	if err := llm.UnmarshalWithRepair(jsonStr, &result, "意図判定"); err != nil {
 		log.Printf("意図判定JSONパースエラー: %v\nJSON: %s", err, jsonStr)
 		return model.IntentChat, "", nil, ""
 	}

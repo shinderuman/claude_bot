@@ -2,7 +2,6 @@ package facts
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"log"
@@ -411,7 +410,7 @@ func (s *FactService) QueryRelevantFacts(ctx context.Context, author, authorUser
 
 	var q model.SearchQuery
 	jsonStr := llm.ExtractJSON(response)
-	if err := json.Unmarshal([]byte(jsonStr), &q); err != nil {
+	if err := llm.UnmarshalWithRepair(jsonStr, &q, "検索クエリ"); err != nil {
 		log.Printf("検索クエリパースエラー: %v\nJSON: %s", err, jsonStr)
 		return ""
 	}
@@ -775,12 +774,9 @@ func (s *FactService) archiveTargetFactsRecursion(ctx context.Context, target st
 		// Parse
 		var archives []model.Fact
 		jsonStr := llm.ExtractJSON(response)
-		if err := json.Unmarshal([]byte(jsonStr), &archives); err != nil {
-			// Try repair
-			if err := llm.UnmarshalWithRepair(jsonStr, &archives, "再帰圧縮: "); err != nil {
-				log.Printf("再帰圧縮: JSONパースエラー: %v (skip batch)", err)
-				continue
-			}
+		if err := llm.UnmarshalWithRepair(jsonStr, &archives, "再帰圧縮"); err != nil {
+			log.Printf("再帰圧縮: JSONパースエラー: %v (skip batch)", err)
+			continue
 		}
 
 		allArchives = append(allArchives, archives...)
