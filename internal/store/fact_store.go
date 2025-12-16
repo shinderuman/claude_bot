@@ -17,6 +17,8 @@ import (
 	"claude_bot/internal/utils"
 )
 
+const MinTargetUserNameFuzzyLength = 5
+
 type FactStore struct {
 	mu           sync.RWMutex
 	fileLock     *flock.Flock
@@ -236,6 +238,7 @@ func (s *FactStore) Cleanup(retention time.Duration) int {
 	return deletedCount
 }
 
+// SearchFuzzy はファクトの曖昧検索を行います
 func (s *FactStore) SearchFuzzy(targets []string, keys []string) []model.Fact {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -245,9 +248,17 @@ func (s *FactStore) SearchFuzzy(targets []string, keys []string) []model.Fact {
 		// Targetの一致確認
 		targetMatch := false
 		for _, t := range targets {
-			if fact.Target == t {
+			// 完全一致は常にチェック（TargetもTargetUserNameも）
+			if fact.Target == t || fact.TargetUserName == t {
 				targetMatch = true
 				break
+			}
+			// クエリがN文字以上の場合のみ、前方一致・後方一致もチェック（TargetUserNameのみ）
+			if len(t) >= MinTargetUserNameFuzzyLength {
+				if strings.HasPrefix(fact.TargetUserName, t) || strings.HasSuffix(fact.TargetUserName, t) {
+					targetMatch = true
+					break
+				}
 			}
 		}
 		if !targetMatch {
