@@ -675,11 +675,12 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 		factList.WriteString(fmt.Sprintf("- %s: %v\n", f.Key, f.Value))
 	}
 
-	prompt := llm.BuildBotProfilePrompt(s.config.BotUsername, factList.String())
+	prompt := llm.BuildBotProfilePrompt(factList.String())
 
 	messages := []model.Message{{Role: "user", Content: prompt}}
 
-	profileText := s.llmClient.GenerateText(ctx, messages, "", s.config.MaxSummaryTokens, nil)
+	// System Promptとしてキャラクター設定を渡すことで、そのキャラクターとして自己認識を記述させる
+	profileText := s.llmClient.GenerateText(ctx, messages, s.config.CharacterPrompt, s.config.MaxSummaryTokens, nil)
 	if profileText == "" {
 		return fmt.Errorf("プロファイル生成結果が空でした")
 	}

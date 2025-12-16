@@ -216,8 +216,8 @@ func BuildURLContentFactExtractionPrompt(urlContent string) string {
 }
 
 // BuildBotProfilePrompt creates a prompt for generating the bot's self-perception profile
-func BuildBotProfilePrompt(botName, factsList string) string {
-	return fmt.Sprintf(Templates.BotProfileGeneration, botName, factsList)
+func BuildBotProfilePrompt(factsList string) string {
+	return fmt.Sprintf(Templates.BotProfileGeneration, factsList)
 }
 
 // -----------------------------------------------------------------------------
