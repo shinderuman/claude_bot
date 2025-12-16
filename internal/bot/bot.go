@@ -89,7 +89,7 @@ func NewBot(cfg *config.Config) *Bot {
 
 	factStore := store.InitializeFactStore(cfg)
 
-	factService := facts.NewFactService(cfg, factStore, llmClient)
+	factService := facts.NewFactService(cfg, factStore, llmClient, mastodonClient)
 
 	var imageGen *image.ImageGenerator
 	if cfg.EnableImageGeneration {

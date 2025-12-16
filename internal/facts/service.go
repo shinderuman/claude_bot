@@ -13,6 +13,7 @@ import (
 	"claude_bot/internal/config"
 	"claude_bot/internal/discovery"
 	"claude_bot/internal/llm"
+	"claude_bot/internal/mastodon"
 	"claude_bot/internal/model"
 	"claude_bot/internal/store"
 )
@@ -61,10 +62,12 @@ var (
 
 const (
 	// Archive
-	ArchiveFactThreshold = 10
-	ArchiveMinFactCount  = 2
-	ArchiveAgeDays       = 30
-	FactArchiveBatchSize = 200
+	ArchiveFactThreshold    = 10
+	ArchiveMinFactCount     = 2
+	ArchiveAgeDays          = 30
+	FactArchiveBatchSize    = 200
+	DisclaimerText          = "\n\n※このアカウントの投稿には事実に基づく内容が含まれることもありますが、すべての正確性は保証できません。"
+	MaxMastodonProfileChars = 500
 
 	// Archive Reasons
 	ArchiveReasonThresholdMet = "割り当て件数が閾値を超えていたため"
@@ -79,16 +82,18 @@ const (
 )
 
 type FactService struct {
-	config    *config.Config
-	factStore *store.FactStore
-	llmClient *llm.Client
+	config         *config.Config
+	factStore      *store.FactStore
+	llmClient      *llm.Client
+	mastodonClient *mastodon.Client
 }
 
-func NewFactService(cfg *config.Config, store *store.FactStore, llm *llm.Client) *FactService {
+func NewFactService(cfg *config.Config, store *store.FactStore, llm *llm.Client, mastodon *mastodon.Client) *FactService {
 	return &FactService{
-		config:    cfg,
-		factStore: store,
-		llmClient: llm,
+		config:         cfg,
+		factStore:      store,
+		llmClient:      llm,
+		mastodonClient: mastodon,
 	}
 }
 
@@ -689,8 +694,55 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 		return fmt.Errorf("プロファイルファイル保存失敗 (%s): %v", s.config.BotProfileFile, err)
 	}
 
+	// Mastodonのプロフィールも更新する
+	if err := s.mastodonClient.UpdateProfile(ctx, s.formatProfileText(profileText)); err != nil {
+		log.Printf("Mastodonプロフィール更新エラー: %v", err)
+	}
+
 	log.Printf("自己プロファイルを更新しました: %s (%d文字)", s.config.BotProfileFile, len([]rune(profileText)))
+
 	return nil
+}
+
+// formatProfileText formats the profile text for Mastodon (compaction, truncation, disclaimer)
+func (s *FactService) formatProfileText(text string) string {
+	// 1. 過剰な改行の削除（空行を詰める）
+	lines := strings.Split(text, "\n")
+	var compacted []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			compacted = append(compacted, trimmed)
+		}
+	}
+	text = strings.Join(compacted, "\n")
+
+	// 2. 文字数制限（500文字）への適合
+	// 免責文を含めて500文字以内にする必要があるため、本文の上限を計算
+	maxBodyLen := MaxMastodonProfileChars - len([]rune(DisclaimerText))
+
+	runes := []rune(text)
+	if len(runes) > maxBodyLen {
+		// 上限を超えている場合、切り詰める
+		truncated := runes[:maxBodyLen]
+
+		// 文の途中で切れるのを避けるため、最後の句点か改行を探す
+		lastPeriod := -1
+		for i := len(truncated) - 1; i >= 0; i-- {
+			if truncated[i] == '。' || truncated[i] == '\n' {
+				lastPeriod = i
+				break
+			}
+		}
+
+		if lastPeriod != -1 {
+			truncated = truncated[:lastPeriod+1]
+		}
+		text = string(truncated)
+	}
+
+	// 3. 免責文の結合
+	return text + DisclaimerText
 }
 
 // archiveTargetFactsRecursion handles the recursive step of compression.

@@ -294,6 +294,15 @@ func (c *Client) PostStatus(ctx context.Context, content, visibility string) (*m
 	return status, nil
 }
 
+// UpdateProfile updates the account profile (note)
+func (c *Client) UpdateProfile(ctx context.Context, note string) error {
+	profile := &mastodon.Profile{
+		Note: &note,
+	}
+	_, err := c.client.AccountUpdate(ctx, profile)
+	return err
+}
+
 // FollowAccount follows the specified account
 func (c *Client) FollowAccount(ctx context.Context, accountID string) error {
 	_, err := c.client.AccountFollow(ctx, mastodon.ID(accountID))
