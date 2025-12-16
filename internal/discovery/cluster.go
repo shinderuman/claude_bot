@@ -101,27 +101,42 @@ func GetMyPosition(username string) (int, int, error) {
 	}
 
 	// Update list: Remove expired nodes, Update/Add self
+	// Update list: Remove expired nodes, Update/Add self
 	now := time.Now()
 	threshold := now.Add(-HeartbeatDuration)
-	var activeNodes []Node
-	foundSelf := false
+
+	// Map to ensure uniqueness by username
+	nodeMap := make(map[string]Node)
 
 	for _, node := range registry.Nodes {
+		// Skip self (will be added fresh later)
 		if node.Username == username {
-			// Update self
-			activeNodes = append(activeNodes, Node{Username: username, LastUpdated: now})
-			foundSelf = true
-		} else if node.LastUpdated.After(threshold) {
-			// Keep active node
-			activeNodes = append(activeNodes, node)
-		} else {
+			continue
+		}
+
+		// Check expiration
+		if !node.LastUpdated.After(threshold) {
 			log.Printf("[Discovery] Dropping expired node: %s (Last seen: %s)", node.Username, node.LastUpdated)
+			continue
+		}
+
+		// Handle duplicates: Keep the one with latest timestamp
+		if existing, exists := nodeMap[node.Username]; exists {
+			if node.LastUpdated.After(existing.LastUpdated) {
+				nodeMap[node.Username] = node
+			}
+		} else {
+			nodeMap[node.Username] = node
 		}
 	}
 
-	if !foundSelf {
-		log.Printf("[Discovery] Adding new node: %s", username)
-		activeNodes = append(activeNodes, Node{Username: username, LastUpdated: now})
+	// Add self (always latest)
+	nodeMap[username] = Node{Username: username, LastUpdated: now}
+
+	// Convert map back to slice
+	var activeNodes []Node
+	for _, node := range nodeMap {
+		activeNodes = append(activeNodes, node)
 	}
 
 	// Sort nodes by username to ensure deterministic ordering
