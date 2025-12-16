@@ -61,10 +61,10 @@ var (
 
 const (
 	// Archive
-	ArchiveFactThreshold = 20
+	ArchiveFactThreshold = 10
 	ArchiveMinFactCount  = 2
 	ArchiveAgeDays       = 30
-	FactArchiveBatchSize = 50
+	FactArchiveBatchSize = 200
 
 	// Archive Reasons
 	ArchiveReasonThresholdMet = "割り当て件数が閾値を超えていたため"
@@ -619,6 +619,23 @@ func (s *FactService) archiveTargetFacts(ctx context.Context, target string, fac
 		allArchives[i].SourceURL = ""
 	}
 
+	// 5. 再帰的圧縮: 生成されたアーカイブがまだ多すぎる場合（閾値の2倍以上）、さらに圧縮する
+	if len(allArchives) >= ArchiveFactThreshold*2 && len(allArchives) < len(facts) {
+		log.Printf("再帰的圧縮: 生成されたアーカイブ数(%d)が多いため、再圧縮を実行します", len(allArchives))
+
+		recursiveArchives, err := s.archiveTargetFactsRecursion(ctx, target, allArchives)
+		if err == nil {
+			allArchives = recursiveArchives
+		} else {
+			log.Printf("再帰的圧縮エラー（無視して現在の結果を使用）: %v", err)
+		}
+	}
+
+	// 安全装置: データ損失防止のため、出力が0件の場合は保存しない
+	if len(facts) > 0 && len(allArchives) == 0 {
+		return fmt.Errorf("アーカイブ生成結果が0件のため保存を中止しました")
+	}
+
 	if err := s.factStore.ReplaceFacts(target, facts, allArchives); err != nil {
 		return fmt.Errorf("アーカイブ保存エラー(ReplaceFacts): %v", err)
 	}
@@ -657,4 +674,68 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 
 	log.Printf("自己プロファイルを更新しました: %s (%d文字)", s.config.BotProfileFile, len([]rune(profileText)))
 	return nil
+}
+
+// archiveTargetFactsRecursion handles the recursive step of compression.
+// It differs from archiveTargetFacts in that it does NOT save to the store (ReplaceFacts),
+// but only returns the compressed facts.
+func (s *FactService) archiveTargetFactsRecursion(ctx context.Context, target string, facts []model.Fact) ([]model.Fact, error) {
+	// Re-use logical blocks from archiveTargetFacts, but only the generation part.
+
+	// Batch processing
+	var allArchives []model.Fact
+	totalFacts := len(facts)
+
+	for i := 0; i < totalFacts; i += FactArchiveBatchSize {
+		end := i + FactArchiveBatchSize
+		if end > totalFacts {
+			end = totalFacts
+		}
+
+		batch := facts[i:end]
+		prompt := llm.BuildFactArchivingPrompt(batch)
+
+		systemPrompt := llm.BuildSystemPrompt(s.config, "", "", "", false)
+
+		// Call LLM
+		response := s.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, s.config.MaxSummaryTokens, nil)
+		if response == "" {
+			continue
+		}
+
+		// Parse
+		var archives []model.Fact
+		jsonStr := llm.ExtractJSON(response)
+		if err := json.Unmarshal([]byte(jsonStr), &archives); err != nil {
+			// Try repair
+			if err := llm.UnmarshalWithRepair(jsonStr, &archives, "再帰圧縮: "); err != nil {
+				log.Printf("再帰圧縮: JSONパースエラー: %v (skip batch)", err)
+				continue
+			}
+		}
+
+		allArchives = append(allArchives, archives...)
+	}
+
+	// Post-process metadata
+	for i := range allArchives {
+		allArchives[i].Target = target
+		if allArchives[i].TargetUserName == "" || allArchives[i].TargetUserName == model.UnknownTarget {
+			if len(facts) > 0 {
+				allArchives[i].TargetUserName = facts[0].TargetUserName
+			}
+		}
+		allArchives[i].Author = SystemAuthor
+		allArchives[i].AuthorUserName = SystemAuthor
+		allArchives[i].Timestamp = time.Now()
+		allArchives[i].SourceType = model.SourceTypeArchive
+		allArchives[i].SourceURL = ""
+	}
+
+	// Recursive step (Deep recursion)
+	if len(allArchives) >= ArchiveFactThreshold*2 && len(allArchives) < len(facts) {
+		return s.archiveTargetFactsRecursion(ctx, target, allArchives)
+	}
+
+	return allArchives, nil
 }

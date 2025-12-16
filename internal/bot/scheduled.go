@@ -13,6 +13,20 @@ func (b *Bot) startFactMaintenanceLoop(ctx context.Context) {
 		return
 	}
 
+	// 起動時の初期メンテナンス（遅延実行）
+	// Bot起動直後の高負荷を避けるため、少し待ってから実行
+	go func() {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(StartupMaintenanceDelay):
+			log.Println("起動時ファクトメンテナンスを実行中...")
+			if err := b.factService.PerformMaintenance(ctx); err != nil {
+				log.Printf("ファクトメンテナンスエラー: %v", err)
+			}
+		}
+	}()
+
 	// 定期的にメンテナンスを実行
 	ticker := time.NewTicker(FactMaintenanceInterval)
 	defer ticker.Stop()

@@ -564,18 +564,22 @@ func (s *FactStore) GetFactsByTarget(target string) []model.Fact {
 	return results
 }
 
-// ReplaceFacts atomically removes specified facts and adds new ones
-// This is safe for concurrent partial updates of the same target
+// ReplaceFacts atomically replaces all facts for the given target.
 func (s *FactStore) ReplaceFacts(target string, factsToRemove, factsToAdd []model.Fact) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 1000*time.Millisecond)
 	defer cancel()
 
+	// ファイルロック（書き込み用）
 	locked, err := s.fileLock.TryLockContext(ctx, 50*time.Millisecond)
 	if err != nil || !locked {
 		return fmt.Errorf("failed to acquire file lock for replace: %v", err)
 	}
 	defer s.fileLock.Unlock() //nolint:errcheck
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// 1. ディスクから最新を読み込み
 	var diskFacts []model.Fact
 	data, err := os.ReadFile(s.saveFilePath)
 	if err == nil && len(data) > 0 {
@@ -586,41 +590,56 @@ func (s *FactStore) ReplaceFacts(target string, factsToRemove, factsToAdd []mode
 		return fmt.Errorf("failed to load facts from disk: %v", err)
 	}
 
-	removals := make(map[string]bool)
-	for _, f := range factsToRemove {
-		key := f.ComputeUniqueKey()
-		removals[key] = true
-	}
+	keptAuthMap := make(map[string]model.Fact) // 重複排除用マップ (UniqueKey -> Fact)
 
-	var keptFacts []model.Fact
+	// 2. ディスクデータのフィルタリング
 	for _, f := range diskFacts {
+		if f.Target == target {
+			continue
+		}
 		key := f.ComputeUniqueKey()
-		if !removals[key] {
-			keptFacts = append(keptFacts, f)
+		keptAuthMap[key] = f
+	}
+
+	// 3. メモリデータの統合
+	for _, f := range s.Facts {
+		if f.Target == target {
+			continue
+		}
+		key := f.ComputeUniqueKey()
+		if _, exists := keptAuthMap[key]; !exists {
+			keptAuthMap[key] = f
 		}
 	}
 
-	now := time.Now()
-	for i := range factsToAdd {
-		if factsToAdd[i].Timestamp.IsZero() {
-			factsToAdd[i].Timestamp = now
+	// 4. 新規追加分（アーカイブ結果）を追加
+	for _, f := range factsToAdd {
+		key := f.ComputeUniqueKey()
+		if f.Timestamp.IsZero() {
+			f.Timestamp = time.Now()
 		}
+		keptAuthMap[key] = f
 	}
-	keptFacts = append(keptFacts, factsToAdd...)
 
-	encoded, err := json.MarshalIndent(keptFacts, "", "  ")
+	// リスト化
+	var finalFacts []model.Fact
+	for _, f := range keptAuthMap {
+		finalFacts = append(finalFacts, f)
+	}
+
+	// 5. 保存 (Atomic Write)
+	encoded, err := json.MarshalIndent(finalFacts, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal facts: %v", err)
 	}
 
-	if err := os.WriteFile(s.saveFilePath, encoded, 0644); err != nil {
-		return fmt.Errorf("failed to write facts to disk: %v", err)
+	if err := s.atomicWriteFile(encoded); err != nil {
+		return fmt.Errorf("failed to write facts to disk (atomic): %v", err)
 	}
 
-	s.mu.Lock()
-	s.Facts = keptFacts
-	s.lastModTime = time.Now() // 更新したのでタイムスタンプも更新
-	s.mu.Unlock()
+	// 6. メモリ更新
+	s.Facts = finalFacts
+	s.lastModTime = time.Now()
 
 	return nil
 }
