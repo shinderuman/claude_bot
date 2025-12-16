@@ -26,7 +26,15 @@ func (b *Bot) prepareConversation(ctx context.Context, conversation *model.Conve
 				// Acctを使用（一意性があり、変更されない）
 				parentAuthor := parentStatus.Account.Acct
 				// 親投稿の内容をコンテキストとして追加
-				contextMessage := fmt.Sprintf(llm.Messages.System.ReferencePost, parentAuthor, parentContent)
+				var contextMessage string
+				// BotUsernameとの比較は、Acct(user@domain)とUsername(user)の両方をチェックして堅牢にする
+				if parentAuthor == b.config.BotUsername || parentStatus.Account.Username == b.config.BotUsername {
+					// 自分の発言（自動投稿含む）の場合は「私の発言」としてフォーマット
+					contextMessage = fmt.Sprintf(llm.Messages.System.SelfReferencePost, parentContent)
+				} else {
+					// 他人の発言の場合は「参照投稿」としてフォーマット
+					contextMessage = fmt.Sprintf(llm.Messages.System.ReferencePost, parentAuthor, parentContent)
+				}
 
 				// 会話履歴の直近にこのメッセージが含まれていないか確認してから追加
 				if len(conversation.Messages) == 0 || conversation.Messages[len(conversation.Messages)-1].Content != contextMessage {

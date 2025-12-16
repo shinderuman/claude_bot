@@ -233,7 +233,7 @@ func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session
 
 	// 3. LLMによる分析
 	prompt := llm.BuildAssistantAnalysisPrompt(statuses, userMessage)
-	systemPrompt := llm.BuildSystemPrompt(b.config.CharacterPrompt, "", "", true, b.config.MaxPostChars)
+	systemPrompt := llm.BuildSystemPrompt(b.config, "", "", true)
 
 	// 分析には長文の可能性があるため、サマリー用のトークン数を使用
 	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil)
@@ -317,7 +317,7 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 
 	// LLMによるまとめ
 	prompt := llm.BuildDailySummaryPrompt(statuses, targetDateStr, userMessage, loc)
-	systemPrompt := llm.BuildSystemPrompt(b.config.CharacterPrompt, "", "", true, b.config.MaxPostChars)
+	systemPrompt := llm.BuildSystemPrompt(b.config, "", "", true)
 
 	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil)
 
