@@ -13,35 +13,12 @@ func (b *Bot) startFactMaintenanceLoop(ctx context.Context) {
 		return
 	}
 
-	// 起動時の初期メンテナンス（遅延実行）
-	// Bot起動直後の高負荷を避けるため、少し待ってから実行
-	go func() {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(StartupMaintenanceDelay):
-			log.Println("起動時ファクトメンテナンスを実行中...")
-			if err := b.factService.PerformMaintenance(ctx); err != nil {
-				log.Printf("ファクトメンテナンスエラー: %v", err)
-			}
+	b.runInWindowedLoop(ctx, FactMaintenanceInterval, "ファクトメンテナンス", func(ctx context.Context) {
+		log.Println("ファクトメンテナンスを実行中...")
+		if err := b.factService.PerformMaintenance(ctx); err != nil {
+			log.Printf("ファクトメンテナンスエラー: %v", err)
 		}
-	}()
-
-	// 定期的にメンテナンスを実行
-	ticker := time.NewTicker(FactMaintenanceInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			log.Println("定期ファクトメンテナンスを実行中...")
-			if err := b.factService.PerformMaintenance(ctx); err != nil {
-				log.Printf("ファクトメンテナンスエラー: %v", err)
-			}
-		}
-	}
+	})
 }
 
 func (b *Bot) startAutoPostLoop(ctx context.Context) {
@@ -49,54 +26,46 @@ func (b *Bot) startAutoPostLoop(ctx context.Context) {
 		return
 	}
 
-	log.Printf("自動投稿ループを開始しました (間隔: %d時間 + ランダム遅延)", b.config.AutoPostIntervalHours)
+	interval := time.Duration(b.config.AutoPostIntervalHours) * time.Hour
+	b.runInWindowedLoop(ctx, interval, "自動投稿", b.executeAutoPost)
+}
+
+func (b *Bot) runInWindowedLoop(ctx context.Context, interval time.Duration, taskName string, task func(context.Context)) {
+	log.Printf("%sループを開始しました (間隔: %v)", taskName, interval)
 
 	// 起動時間を基準にする
 	windowStart := time.Now()
 
-	for {
-		// インターバル（時間）を分に変換して、その範囲内でランダムな時間を決定
-		// 例: 1時間なら0-59分、2時間なら0-119分
-		intervalMinutes := b.config.AutoPostIntervalHours * 60
-		randomMinutes := time.Duration(time.Now().UnixNano() % int64(intervalMinutes))
-		if randomMinutes < 0 {
-			randomMinutes = -randomMinutes // 念のため
-		}
+	go func() {
+		for {
+			// interval.Minutes() (分) の範囲内でランダムな分数を決定
+			randomMinutes := time.Duration(time.Now().UnixNano() % int64(interval.Minutes()))
 
-		// ウィンドウ開始からrandomMinutes後に実行
-		scheduledTime := windowStart.Add(randomMinutes * time.Minute)
+			// ウィンドウ開始からrandomMinutes後に実行
+			scheduledTime := windowStart.Add(randomMinutes * time.Minute)
 
-		// もし計算した時間が既に過ぎている場合は、すぐに実行するか、次のウィンドウに回すか...
-		// ここでは「現在時刻より後」になるように調整（ウィンドウ内でまだ時間が残っていれば）
-		if scheduledTime.Before(time.Now()) {
-			// ウィンドウ後半などで起動した場合など。すぐに実行。
-			scheduledTime = time.Now().Add(1 * time.Minute)
-		}
+			log.Printf("次回の%s予定: %s", taskName, scheduledTime.Format(DateTimeFormat))
 
-		log.Printf("次回の自動投稿予定: %s", scheduledTime.Format(DateTimeFormat))
-
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(time.Until(scheduledTime)):
-			b.executeAutoPost(ctx)
-		}
-
-		// 現在のウィンドウが終わる（＝次のウィンドウ開始）まで待機
-		windowEnd := windowStart.Add(time.Duration(b.config.AutoPostIntervalHours) * time.Hour)
-		if time.Now().Before(windowEnd) {
-			log.Printf("次のウィンドウ開始(%s)まで待機します", windowEnd.Format(DateTimeFormat))
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(time.Until(windowEnd)):
-				// 待機完了
+			case <-time.After(time.Until(scheduledTime)):
+				task(ctx)
+			}
+
+			// 次のウィンドウへ（＝現在のウィンドウの終わり）
+			windowStart = windowStart.Add(interval)
+			if time.Now().Before(windowStart) {
+				log.Printf("次の%sウィンドウ開始(%s)まで待機します", taskName, windowStart.Format(DateTimeFormat))
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(time.Until(windowStart)):
+					// 待機完了
+				}
 			}
 		}
-
-		// 次のウィンドウへ
-		windowStart = windowEnd
-	}
+	}()
 }
 
 func (b *Bot) executeAutoPost(ctx context.Context) {

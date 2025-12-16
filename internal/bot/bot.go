@@ -48,8 +48,6 @@ const (
 
 	// Maintenance
 	FactMaintenanceInterval = 6 * time.Hour
-	// Startup Warm-up
-	StartupMaintenanceDelay = 1 * time.Minute
 
 	// Rollback
 	RollbackCountSmall  = 1
@@ -131,16 +129,11 @@ func (b *Bot) Run(ctx context.Context) error {
 	}
 
 	if b.factService != nil {
+		// 起動時に自己プロファイルを読み込む（メンテナンスは非同期でランダムに実行される）
 		go func() {
-			log.Printf("起動時ファクトメンテナンス: クラスタ同期待ちのため %v 待機します...", StartupMaintenanceDelay)
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(StartupMaintenanceDelay):
-				log.Println("起動時ファクトメンテナンスを実行中...")
-				if err := b.factService.PerformMaintenance(ctx); err != nil {
-					log.Printf("起動時ファクトメンテナンスエラー: %v", err)
-				}
+			log.Println("起動時自己プロファイル読み込みを開始します...")
+			if err := b.factService.LoadBotProfile(ctx); err != nil {
+				log.Printf("起動時自己プロファイル読み込みエラー: %v", err)
 			}
 		}()
 	}

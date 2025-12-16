@@ -644,6 +644,22 @@ func (s *FactService) archiveTargetFacts(ctx context.Context, target string, fac
 	return nil
 }
 
+// LoadBotProfile loads facts for the bot itself and regenerates the profile
+func (s *FactService) LoadBotProfile(ctx context.Context) error {
+	if !s.config.EnableFactStore {
+		return nil
+	}
+
+	target := s.config.BotUsername
+	facts := s.factStore.GetFactsByTarget(target)
+	if len(facts) == 0 {
+		return nil
+	}
+
+	log.Printf("自己プロファイル更新(起動時): %s (全 %d 件)", target, len(facts))
+	return s.GenerateAndSaveBotProfile(ctx, facts)
+}
+
 // GenerateAndSaveBotProfile generates a profile summary from facts and saves it to a file
 func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []model.Fact) error {
 	if s.config.BotProfileFile == "" {
