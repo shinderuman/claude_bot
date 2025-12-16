@@ -95,9 +95,9 @@ type Fact struct {
 	PostAuthorUserName string `json:"post_author_username,omitempty"` // 投稿者の表示名
 }
 
-// ComputeUniqueKey returns a stable unique key for the fact based on its content and timestamp
+// ComputeUniqueKey returns a stable unique key for the fact based on its meaningful content
 func (f *Fact) ComputeUniqueKey() string {
-	return fmt.Sprintf("%s|%s|%v|%d", f.Target, f.Key, f.Value, f.Timestamp.UnixNano())
+	return fmt.Sprintf("%s|%s|%v", f.Target, f.Key, f.Value)
 }
 
 type SearchQuery struct {
