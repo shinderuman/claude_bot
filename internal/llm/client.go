@@ -35,18 +35,18 @@ func NewClient(cfg *config.Config) *Client {
 	}
 }
 
-func (c *Client) GenerateResponse(ctx context.Context, session *model.Session, conversation *model.Conversation, relevantFacts string, currentImages []model.Image) string {
+func (c *Client) GenerateResponse(ctx context.Context, session *model.Session, conversation *model.Conversation, relevantFacts, botProfile string, currentImages []model.Image) string {
 	var sessionSummary string
 	if session != nil {
 		sessionSummary = session.Summary
 	}
-	systemPrompt := BuildSystemPrompt(c.config, sessionSummary, relevantFacts, true)
+	systemPrompt := BuildSystemPrompt(c.config, sessionSummary, relevantFacts, botProfile, true)
 
 	return c.GenerateText(ctx, conversation.Messages, systemPrompt, c.config.MaxResponseTokens, currentImages)
 }
 
 func (c *Client) GenerateSummary(ctx context.Context, messages []model.Message, summary string) string {
-	systemPrompt := BuildSystemPrompt(c.config, summary, "", false)
+	systemPrompt := BuildSystemPrompt(c.config, summary, "", "", false)
 	return c.GenerateText(ctx, messages, systemPrompt, c.config.MaxSummaryTokens, nil)
 }
 

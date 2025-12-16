@@ -10,7 +10,7 @@ import (
 	"sort"
 	"time"
 
-	"claude_bot/internal/utils"
+	"claude_bot/internal/util"
 
 	"github.com/gofrs/flock"
 )
@@ -59,8 +59,8 @@ func StartHeartbeatLoop(ctx context.Context, username string) {
 
 // GetMyPosition registers the current bot and returns its position and total count
 func GetMyPosition(username string) (int, int, error) {
-	// utils.GetFilePath already handles the "data/" prefix logic
-	registryPath := utils.GetFilePath(RegistryFileName)
+	// util.GetFilePath already handles the "data/" prefix logic
+	registryPath := util.GetFilePath(RegistryFileName)
 	lockPath := registryPath + ".lock"
 
 	// Create/Acquire Lock
@@ -92,8 +92,6 @@ func GetMyPosition(username string) (int, int, error) {
 			if err := json.Unmarshal(data, &registry); err != nil {
 				log.Printf("[Discovery] Warning: Failed to unmarshal registry (will overwrite): %v", err)
 				// 読み込み失敗時は空として扱う（追記ではなく新規作成になる）
-			} else {
-
 			}
 		} else {
 			log.Println("[Discovery] Registry file is empty.")

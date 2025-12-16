@@ -39,6 +39,9 @@ const (
 	// SourceTypeTest はテスト用のソースタイプを示す
 	SourceTypeTest = "test"
 
+	// SourceTypeSelf indicates facts extracted from the bot's own posts
+	SourceTypeSelf = "self"
+
 	// GeneralTarget は一般知識のターゲットを示す
 	GeneralTarget = "__general__"
 

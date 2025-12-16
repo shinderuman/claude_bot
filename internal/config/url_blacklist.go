@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"claude_bot/internal/utils"
+	"claude_bot/internal/util"
 
 	"github.com/fsnotify/fsnotify"
 )
@@ -194,7 +194,7 @@ func LoadBlacklistFromEnv(envValue string) []string {
 
 // InitializeURLBlacklist initializes the URL blacklist from file or env
 func InitializeURLBlacklist(ctx context.Context, envValue string) *URLBlacklist {
-	blacklistPath := utils.GetFilePath("url_blacklist.txt")
+	blacklistPath := util.GetFilePath("url_blacklist.txt")
 
 	// Check if file exists
 	if _, err := os.Stat(blacklistPath); err == nil {

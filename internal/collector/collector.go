@@ -2,7 +2,7 @@ package collector
 
 import (
 	"context"
-	"encoding/json"
+	"fmt"
 	"log"
 	"net/url"
 	"regexp"
@@ -99,24 +99,19 @@ func (fc *FactCollector) cleanupCacheLoop() {
 
 // Start はストリーミング接続とファクト収集を開始します
 func (fc *FactCollector) Start(ctx context.Context) {
-	if !fc.config.FactCollectionEnabled {
+	// どちらも無効なら終了
+	if !fc.config.IsGlobalCollectionEnabled() {
 		log.Println("ファクト収集機能は無効です")
 		return
 	}
 
-	log.Printf("ファクト収集開始: 連合=%t, ホーム=%t, 並列数=%d, 時間制限=%d/h",
-		fc.config.FactCollectionFederated, fc.config.FactCollectionHome,
-		fc.config.FactCollectionMaxWorkers, fc.config.FactCollectionMaxPerHour)
-
-	eventChan := make(chan gomastodon.Event, 100)
-
-	// 連合タイムラインのストリーミング
-	if fc.config.FactCollectionFederated {
-		go fc.mastodonClient.StreamPublic(ctx, eventChan)
+	// 連合タイムラインのストリーミング (全体収集が有効かつ連合収集が有効な場合)
+	if !fc.config.IsFederatedStreamingEnabled() {
+		return
 	}
 
-	// ホームタイムラインはBot側から受け取るため、ここでは接続しない
-
+	eventChan := make(chan gomastodon.Event, 100)
+	go fc.mastodonClient.StreamPublic(ctx, eventChan)
 	// イベント処理ループ
 	go fc.processEvents(ctx, eventChan)
 }
@@ -127,47 +122,32 @@ func (fc *FactCollector) ProcessHomeEvent(event *gomastodon.UpdateEvent) {
 		return
 	}
 
-	status := event.Status
-	if status == nil {
-		return
-	}
-
-	// ファクト収集対象かチェック
-	if !mastodon.ShouldCollectFactsFromStatus(status) {
-		return
-	}
-
-	// レート制限チェック
-	if !fc.canProcess() {
-		return
-	}
-
-	// 非同期で処理
-	go fc.processStatus(context.Background(), status)
+	fc.handleStatus(context.Background(), event.Status, model.SourceTypeHome)
 }
 
 // processEvents はイベントを受信してファクト収集を実行します
 func (fc *FactCollector) processEvents(ctx context.Context, eventChan <-chan gomastodon.Event) {
 	for event := range eventChan {
 		status := mastodon.ExtractStatusFromEvent(event)
-		if status == nil {
-			continue
-		}
-
-		// ファクト収集対象かチェック
-		if !mastodon.ShouldCollectFactsFromStatus(status) {
-			continue
-		}
-
-		// レート制限チェック
-		if !fc.canProcess() {
-			// ログ出力を抑制（ノイズになるため）
-			continue
-		}
-
-		// 非同期で処理
-		go fc.processStatus(ctx, status)
+		fc.handleStatus(ctx, status, model.SourceTypeFederated)
 	}
+}
+
+// handleStatus handles the common logic for processing a status from any source
+func (fc *FactCollector) handleStatus(ctx context.Context, status *gomastodon.Status, sourceType string) {
+	// ファクト収集対象かチェック (設定・フィルタリング)
+	if !fc.isCollectableStatus(status) {
+		return
+	}
+
+	// レート制限チェック
+	// 注意: canProcessは処理回数をカウントする副作用があるため、実際に処理する場合のみ呼び出す
+	if !fc.canProcess() {
+		return
+	}
+
+	// 非同期で処理
+	go fc.processStatus(ctx, status, sourceType)
 }
 
 // canProcess はレート制限内で処理可能かをチェックします
@@ -198,9 +178,8 @@ func (fc *FactCollector) canProcess() bool {
 }
 
 // processStatus は投稿からファクトを抽出します
-func (fc *FactCollector) processStatus(ctx context.Context, status *gomastodon.Status) {
+func (fc *FactCollector) processStatus(ctx context.Context, status *gomastodon.Status, sourceType string) {
 	// ソース情報
-	sourceType := fc.determineSourceType(status)
 	sourceURL := string(status.URL)
 	postAuthor := string(status.Account.Acct)
 	postAuthorUserName := status.Account.DisplayName
@@ -215,15 +194,6 @@ func (fc *FactCollector) processStatus(ctx context.Context, status *gomastodon.S
 
 	// URLコンテンツからのファクト抽出
 	fc.extractFactsFromURLs(ctx, status, sourceType, postAuthor, postAuthorUserName)
-}
-
-// determineSourceType はソースタイプを判定します
-func (fc *FactCollector) determineSourceType(status *gomastodon.Status) string {
-	// 簡易的な判定: ローカルユーザーならhome、それ以外はfederated
-	if strings.Contains(string(status.Account.Acct), "@") {
-		return model.SourceTypeFederated
-	}
-	return model.SourceTypeHome
 }
 
 // extractFactsFromContent は投稿本文からファクトを抽出します
@@ -249,40 +219,42 @@ func (fc *FactCollector) extractFactsFromContent(ctx context.Context, status *go
 
 	var extracted []model.Fact
 	jsonStr := llm.ExtractJSON(response)
-	if err := json.Unmarshal([]byte(jsonStr), &extracted); err != nil {
-		// JSONパースエラーはログに出さない（ノイズになるため）
+	if err := llm.UnmarshalWithRepair(jsonStr, &extracted, fmt.Sprintf("投稿: %s", postAuthor)); err != nil {
+		log.Printf("警告: 投稿からのファクト抽出JSONエラー(修復失敗): %v", err)
 		return
 	}
 
-	if len(extracted) > 0 {
-		for _, item := range extracted {
-			target := item.Target
-			targetUserName := item.TargetUserName
-			if target == "" {
-				target = postAuthor
-				targetUserName = postAuthorUserName
-			}
+	if len(extracted) == 0 {
+		return
+	}
 
-			fact := model.Fact{
-				Target:             target,
-				TargetUserName:     targetUserName,
-				Author:             postAuthor,
-				AuthorUserName:     postAuthorUserName,
-				Key:                item.Key,
-				Value:              item.Value,
-				Timestamp:          time.Now(),
-				SourceType:         sourceType,
-				SourceURL:          sourceURL,
-				PostAuthor:         postAuthor,
-				PostAuthorUserName: postAuthorUserName,
-			}
+	for _, item := range extracted {
+		target := item.Target
+		targetUserName := item.TargetUserName
+		if target == "" {
+			target = postAuthor
+			targetUserName = postAuthorUserName
+		}
 
-			fc.factStore.AddFactWithSource(fact)
-			facts.LogFactSaved(fact)
+		fact := model.Fact{
+			Target:             target,
+			TargetUserName:     targetUserName,
+			Author:             postAuthor,
+			AuthorUserName:     postAuthorUserName,
+			Key:                item.Key,
+			Value:              item.Value,
+			Timestamp:          time.Now(),
+			SourceType:         sourceType,
+			SourceURL:          sourceURL,
+			PostAuthor:         postAuthor,
+			PostAuthorUserName: postAuthorUserName,
 		}
-		if err := fc.factStore.Save(); err != nil {
-			log.Printf("ファクト保存エラー: %v", err)
-		}
+
+		fc.factStore.AddFactWithSource(fact)
+		facts.LogFactSaved(fact)
+	}
+	if err := fc.factStore.Save(); err != nil {
+		log.Printf("ファクト保存エラー: %v", err)
 	}
 }
 
@@ -358,45 +330,47 @@ func (fc *FactCollector) processURL(ctx context.Context, urlStr, urlDomain, sour
 
 	var extracted []model.Fact
 	jsonStr := llm.ExtractJSON(response)
-	if err := json.Unmarshal([]byte(jsonStr), &extracted); err != nil {
-		// JSONパースエラーはログに出さない
+	if err := llm.UnmarshalWithRepair(jsonStr, &extracted, fmt.Sprintf("URL: %s", urlStr)); err != nil {
+		log.Printf("警告: URLからのファクト抽出JSONエラー(修復失敗): %v", err)
 		return
 	}
 
-	if len(extracted) > 0 {
-		for _, item := range extracted {
-			target := item.Target
-			targetUserName := item.TargetUserName
-			if target == "" {
-				// ターゲットが不明な場合は「一般知識」として扱う
-				// これにより、特定の個人に紐付かない知識として保存される
-				target = model.GeneralTarget
-				targetUserName = "Web Knowledge"
-				if urlDomain != "" {
-					targetUserName = urlDomain
-				}
-			}
+	if len(extracted) == 0 {
+		return
+	}
 
-			fact := model.Fact{
-				Target:             target,
-				TargetUserName:     targetUserName,
-				Author:             postAuthor,
-				AuthorUserName:     postAuthorUserName,
-				Key:                item.Key,
-				Value:              item.Value,
-				Timestamp:          time.Now(),
-				SourceType:         sourceType,
-				SourceURL:          meta.URL, // リダイレクト後の最終URL
-				PostAuthor:         postAuthor,
-				PostAuthorUserName: postAuthorUserName,
+	for _, item := range extracted {
+		target := item.Target
+		targetUserName := item.TargetUserName
+		if target == "" {
+			// ターゲットが不明な場合は「一般知識」として扱う
+			// これにより、特定の個人に紐付かない知識として保存される
+			target = model.GeneralTarget
+			targetUserName = "Web Knowledge"
+			if urlDomain != "" {
+				targetUserName = urlDomain
 			}
+		}
 
-			fc.factStore.AddFactWithSource(fact)
-			facts.LogFactSaved(fact)
+		fact := model.Fact{
+			Target:             target,
+			TargetUserName:     targetUserName,
+			Author:             postAuthor,
+			AuthorUserName:     postAuthorUserName,
+			Key:                item.Key,
+			Value:              item.Value,
+			Timestamp:          time.Now(),
+			SourceType:         sourceType,
+			SourceURL:          meta.URL, // リダイレクト後の最終URL
+			PostAuthor:         postAuthor,
+			PostAuthorUserName: postAuthorUserName,
 		}
-		if err := fc.factStore.Save(); err != nil {
-			log.Printf("ファクト保存エラー: %v", err)
-		}
+
+		fc.factStore.AddFactWithSource(fact)
+		facts.LogFactSaved(fact)
+	}
+	if err := fc.factStore.Save(); err != nil {
+		log.Printf("ファクト保存エラー: %v", err)
 	}
 }
 
@@ -440,4 +414,21 @@ func (fc *FactCollector) isFediverseDomain(domain string) bool {
 	}
 
 	return false
+}
+
+// isCollectableStatus checks if the status is collectable based on config and rules
+func (fc *FactCollector) isCollectableStatus(status *gomastodon.Status) bool {
+	if status == nil {
+		return false
+	}
+
+	// 基本的なフィルタリング（公開範囲、Bot属性など）
+	if !mastodon.ShouldCollectFactsFromStatus(status) {
+		return false
+	}
+
+	// 設定に基づく追加フィルタリング
+
+	// 全体収集が有効なら、ここまでのチェック(ShouldCollectFactsFromStatus)でOK
+	return fc.config.IsGlobalCollectionEnabled()
 }

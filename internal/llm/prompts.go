@@ -215,6 +215,11 @@ func BuildURLContentFactExtractionPrompt(urlContent string) string {
 	return fmt.Sprintf(Templates.URLContentFactExtraction, urlContent)
 }
 
+// BuildBotProfilePrompt creates a prompt for generating the bot's self-perception profile
+func BuildBotProfilePrompt(botName, factsList string) string {
+	return fmt.Sprintf(Templates.BotProfileGeneration, botName, factsList)
+}
+
 // -----------------------------------------------------------------------------
 // Complex Prompt Builders (Continuing logic and string building)
 // -----------------------------------------------------------------------------
@@ -330,7 +335,7 @@ func BuildSummaryPrompt(formattedMessages, existingSummary string) string {
 }
 
 // BuildSystemPrompt creates the system prompt for conversation responses
-func BuildSystemPrompt(cfg *config.Config, sessionSummary, relevantFacts string, includeCharacterPrompt bool) string {
+func BuildSystemPrompt(cfg *config.Config, sessionSummary, relevantFacts, botProfile string, includeCharacterPrompt bool) string {
 	var prompt strings.Builder
 	prompt.WriteString(Messages.System.Base)
 
@@ -342,7 +347,13 @@ func BuildSystemPrompt(cfg *config.Config, sessionSummary, relevantFacts string,
 	if includeCharacterPrompt {
 		prompt.WriteString(cfg.CharacterPrompt)
 		prompt.WriteString("\n\n")
-		// 共通の制約事項を追加
+
+		if botProfile != "" {
+			prompt.WriteString("【現在の自己認識（学習済みプロファイル）】\n")
+			prompt.WriteString(botProfile)
+			prompt.WriteString("\n\n")
+		}
+
 		prompt.WriteString(fmt.Sprintf(Messages.System.Constraint, cfg.MaxPostChars))
 	}
 

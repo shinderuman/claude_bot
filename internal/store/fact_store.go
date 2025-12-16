@@ -14,7 +14,7 @@ import (
 
 	"claude_bot/internal/config"
 	"claude_bot/internal/model"
-	"claude_bot/internal/utils"
+	"claude_bot/internal/util"
 )
 
 const MinTargetUserNameFuzzyLength = 5
@@ -28,7 +28,7 @@ type FactStore struct {
 }
 
 func InitializeFactStore(cfg *config.Config) *FactStore {
-	factsPath := utils.GetFilePath(cfg.FactStoreFileName)
+	factsPath := util.GetFilePath(cfg.FactStoreFileName)
 	return NewFactStore(factsPath)
 }
 

@@ -30,9 +30,16 @@ func (b *Bot) handleChatResponse(ctx context.Context, session *model.Session, co
 		displayName = notification.Account.Username
 	}
 
-	// 事実の検索と応答生成
 	relevantFacts := b.factService.QueryRelevantFacts(ctx, notification.Account.Acct, displayName, userMessage)
-	response := b.llmClient.GenerateResponse(ctx, session, conversation, relevantFacts, images)
+
+	var botProfile string
+	if b.config.BotProfileFile != "" {
+		if content, err := os.ReadFile(b.config.BotProfileFile); err == nil {
+			botProfile = string(content)
+		}
+	}
+
+	response := b.llmClient.GenerateResponse(ctx, session, conversation, relevantFacts, botProfile, images)
 
 	if response == "" {
 		store.RollbackLastMessages(conversation, RollbackCountSmall) // ユーザー発言を取り消し
@@ -41,12 +48,38 @@ func (b *Bot) handleChatResponse(ctx context.Context, session *model.Session, co
 	}
 
 	// 投稿
-	postedIDs, err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
+	postedStatuses, err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
 	if err != nil {
 		log.Printf("応答の投稿に失敗: %v", err)
 		store.RollbackLastMessages(conversation, RollbackCountMedium)
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.ResponsePost)
 		return false
+	}
+
+	// IDリストの作成
+	var postedIDs []string
+	for _, s := range postedStatuses {
+		postedIDs = append(postedIDs, string(s.ID))
+	}
+
+	// 自分の投稿から事実を抽出（学習）
+	if len(postedStatuses) > 0 {
+		status := postedStatuses[0]
+		displayName := status.Account.DisplayName
+		if displayName == "" {
+			displayName = status.Account.Username
+		}
+		go b.factService.ExtractAndSaveFacts(
+			ctx,
+			string(status.ID),
+			status.Account.Acct,
+			displayName,
+			response,
+			model.SourceTypeSelf,
+			string(status.URL),
+			status.Account.Acct,
+			displayName,
+		)
 	}
 
 	// 履歴に追加
@@ -176,10 +209,15 @@ func (b *Bot) handleFollowRequest(ctx context.Context, conversation *model.Conve
 	}
 
 	// 投稿
-	postedIDs, err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, replyMessage, visibility)
+	postedStatuses, err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, replyMessage, visibility)
 	if err != nil {
 		log.Printf("フォロー完了返信エラー: %v", err)
 	} else {
+		// IDリストの作成
+		var postedIDs []string
+		for _, s := range postedStatuses {
+			postedIDs = append(postedIDs, string(s.ID))
+		}
 		// 成功したら履歴に追加
 		store.AddMessage(conversation, "assistant", replyMessage, postedIDs)
 	}
@@ -233,7 +271,7 @@ func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session
 
 	// 3. LLMによる分析
 	prompt := llm.BuildAssistantAnalysisPrompt(statuses, userMessage)
-	systemPrompt := llm.BuildSystemPrompt(b.config, "", "", true)
+	systemPrompt := llm.BuildSystemPrompt(b.config, "", "", "", true)
 
 	// 分析には長文の可能性があるため、サマリー用のトークン数を使用
 	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil)
@@ -245,11 +283,17 @@ func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session
 
 	// 4. Mastodonに投稿 (分割投稿対応)
 	// 投稿した全てのStatusIDを取得する
-	postedIDs, err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
+	postedStatuses, err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
 	if err != nil {
 		log.Printf("応答の投稿に失敗しました: %v", err)
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.AnalysisPost)
 		return false
+	}
+
+	// IDリストの作成
+	var postedIDs []string
+	for _, s := range postedStatuses {
+		postedIDs = append(postedIDs, string(s.ID))
 	}
 
 	// 5. 会話履歴にアシスタントの発言を追加 (投稿成功後)
@@ -317,7 +361,7 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 
 	// LLMによるまとめ
 	prompt := llm.BuildDailySummaryPrompt(statuses, targetDateStr, userMessage, loc)
-	systemPrompt := llm.BuildSystemPrompt(b.config, "", "", true)
+	systemPrompt := llm.BuildSystemPrompt(b.config, "", "", "", true)
 
 	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil)
 
@@ -327,11 +371,17 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 	}
 
 	// 投稿
-	postedIDs, err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
+	postedStatuses, err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
 	if err != nil {
 		log.Printf("まとめ結果投稿エラー: %v", err)
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.SummaryPost)
 		return false
+	}
+
+	// IDリストの作成
+	var postedIDs []string
+	for _, s := range postedStatuses {
+		postedIDs = append(postedIDs, string(s.ID))
 	}
 
 	// 履歴に追加

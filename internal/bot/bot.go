@@ -212,8 +212,10 @@ func (b *Bot) logStartupInfo() {
 		b.config.BotUsername, b.config.MastodonServer, strings.ToUpper(b.config.LLMProvider), modelInfo)
 
 	// 機能設定
-	log.Printf("機能: リモートユーザー=%t, 事実ストア=%t, 画像認識=%t, ファクト収集=%t",
-		b.config.AllowRemoteUsers, b.config.EnableFactStore, b.config.EnableImageRecognition, b.config.FactCollectionEnabled)
+	// 機能設定
+	log.Printf("機能: リモートユーザー=%t, 事実ストア=%t, 画像認識=%t, ファクト収集(全体/自己/連合)=%t/%t/%t",
+		b.config.AllowRemoteUsers, b.config.EnableFactStore, b.config.EnableImageRecognition,
+		b.config.IsGlobalCollectionEnabled(), b.config.IsSelfLearningEnabled(), b.config.FactCollectionFederated)
 
 	// 会話管理設定
 	log.Printf("会話管理: 圧縮=%d件, 保持=%d件, 保持時間=%dh, 最小保持=%d件, アイドル時間=%dh",
@@ -363,8 +365,7 @@ func (b *Bot) postErrorMessage(ctx context.Context, statusID, mention, visibilit
 	// LLMを使ってキャラクターの口調でエラーメッセージを生成
 	prompt := llm.BuildErrorMessagePrompt(errorDetail)
 	// エラーメッセージも文字数制限を守る
-	// エラーメッセージも文字数制限を守る
-	systemPrompt := llm.BuildSystemPrompt(b.config, "", "", true)
+	systemPrompt := llm.BuildSystemPrompt(b.config, "", "", "", true)
 
 	errorMsg := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxResponseTokens, nil)
 

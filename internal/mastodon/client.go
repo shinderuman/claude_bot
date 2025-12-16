@@ -199,10 +199,10 @@ func (c *Client) BuildMention(acct string) string {
 	return "@" + acct + " "
 }
 
-func (c *Client) PostResponseWithSplit(ctx context.Context, inReplyToID, mention, response, visibility string) ([]string, error) {
+func (c *Client) PostResponseWithSplit(ctx context.Context, inReplyToID, mention, response, visibility string) ([]*mastodon.Status, error) {
 	parts := splitResponse(response, mention, c.config.MaxPostChars)
 
-	var postedIDs []string
+	var postedStatuses []*mastodon.Status
 	currentReplyID := inReplyToID
 	for i, part := range parts {
 		// 2投稿目以降は待機して投稿順序を保証
@@ -214,13 +214,13 @@ func (c *Client) PostResponseWithSplit(ctx context.Context, inReplyToID, mention
 		status, err := c.postReply(ctx, currentReplyID, content, visibility)
 		if err != nil {
 			log.Printf("分割投稿失敗 (%d/%d): %v", i+1, len(parts), err)
-			return postedIDs, err
+			return postedStatuses, err
 		}
 		currentReplyID = string(status.ID)
-		postedIDs = append(postedIDs, string(status.ID))
+		postedStatuses = append(postedStatuses, status)
 	}
 
-	return postedIDs, nil
+	return postedStatuses, nil
 }
 
 // PostResponseWithMedia posts a response with media attachment
@@ -275,22 +275,23 @@ func (c *Client) postReply(ctx context.Context, inReplyToID, content, visibility
 }
 
 // PostStatus posts a new status (not a reply)
-func (c *Client) PostStatus(ctx context.Context, content, visibility string) error {
+// PostStatus posts a new status (not a reply)
+func (c *Client) PostStatus(ctx context.Context, content, visibility string) (*mastodon.Status, error) {
 	toot := &mastodon.Toot{
 		Status:     content,
 		Visibility: visibility,
 	}
 
-	_, err := c.client.PostStatus(ctx, toot)
+	status, err := c.client.PostStatus(ctx, toot)
 	if err != nil {
 		log.Printf("投稿エラー (Status): %v", err)
 		if strings.Contains(err.Error(), "422") {
 			log.Printf("⚠️ 422 Error detected (Status). Content length: %d", len([]rune(content)))
 			log.Printf("Rejected Content: %s", content)
 		}
-		return err
+		return nil, err
 	}
-	return nil
+	return status, nil
 }
 
 // FollowAccount follows the specified account

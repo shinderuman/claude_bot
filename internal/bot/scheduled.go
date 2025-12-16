@@ -96,7 +96,7 @@ func (b *Bot) executeAutoPost(ctx context.Context) {
 	prompt := llm.BuildAutoPostPrompt(facts)
 	// システムプロンプトはキャラクター設定のみを使用（要約などは不要）
 	// AutoPostの場合はMaxPostChars制限を適用
-	systemPrompt := llm.BuildSystemPrompt(b.config, "", "", true)
+	systemPrompt := llm.BuildSystemPrompt(b.config, "", "", "", true)
 
 	// 画像なしで呼び出し
 	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, int64(b.config.MaxPostChars), nil)
@@ -107,9 +107,27 @@ func (b *Bot) executeAutoPost(ctx context.Context) {
 
 		// 公開投稿として送信
 		log.Printf("自動投稿を実行します: %s...", string([]rune(response))[:min(LogContentMaxChars, len([]rune(response)))])
-		err := b.mastodonClient.PostStatus(ctx, response, b.config.AutoPostVisibility)
+		status, err := b.mastodonClient.PostStatus(ctx, response, b.config.AutoPostVisibility)
 		if err != nil {
 			log.Printf("自動投稿エラー: %v", err)
+			return
 		}
+
+		// 自分の投稿から事実を抽出（学習）
+		displayName := status.Account.DisplayName
+		if displayName == "" {
+			displayName = status.Account.Username
+		}
+		go b.factService.ExtractAndSaveFacts(
+			ctx,
+			string(status.ID),
+			status.Account.Acct,
+			displayName,
+			response,
+			model.SourceTypeSelf,
+			string(status.URL),
+			status.Account.Acct,
+			displayName,
+		)
 	}
 }

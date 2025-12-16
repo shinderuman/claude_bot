@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -112,47 +113,49 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, sourceID, author,
 		return
 	}
 
-	if len(extracted) > 0 {
-		log.Printf("事実抽出JSON: %d件抽出", len(extracted))
-		for _, item := range extracted {
-			// 品質フィルタリング
-			if !s.isValidFact(item.Target, item.Key, item.Value) {
-				continue
-			}
+	if len(extracted) == 0 {
+		return
+	}
 
-			// キーの正規化
-			item.Key = s.normalizeKey(item.Key)
-
-			// Targetが空なら発言者をセット
-			target := item.Target
-			targetUserName := item.TargetUserName
-			if target == "" {
-				target = author
-				targetUserName = authorUserName
-			}
-
-			// ソース情報を設定
-			fact := model.Fact{
-				Target:             target,
-				TargetUserName:     targetUserName,
-				Author:             author,
-				AuthorUserName:     authorUserName,
-				Key:                item.Key,
-				Value:              item.Value,
-				Timestamp:          time.Now(),
-				SourceID:           sourceID,
-				SourceType:         sourceType,
-				SourceURL:          sourceURL,
-				PostAuthor:         postAuthor,
-				PostAuthorUserName: postAuthorUserName,
-			}
-
-			s.factStore.AddFactWithSource(fact)
-			LogFactSaved(fact)
+	log.Printf("事実抽出JSON: %d件抽出", len(extracted))
+	for _, item := range extracted {
+		// 品質フィルタリング
+		if !s.isValidFact(item.Target, item.Key, item.Value) {
+			continue
 		}
-		if err := s.factStore.Save(); err != nil {
-			log.Printf("ファクト保存エラー: %v", err)
+
+		// キーの正規化
+		item.Key = s.normalizeKey(item.Key)
+
+		// Targetが空なら発言者をセット
+		target := item.Target
+		targetUserName := item.TargetUserName
+		if target == "" {
+			target = author
+			targetUserName = authorUserName
 		}
+
+		// ソース情報を設定
+		fact := model.Fact{
+			Target:             target,
+			TargetUserName:     targetUserName,
+			Author:             author,
+			AuthorUserName:     authorUserName,
+			Key:                item.Key,
+			Value:              item.Value,
+			Timestamp:          time.Now(),
+			SourceID:           sourceID,
+			SourceType:         sourceType,
+			SourceURL:          sourceURL,
+			PostAuthor:         postAuthor,
+			PostAuthorUserName: postAuthorUserName,
+		}
+
+		s.factStore.AddFactWithSource(fact)
+		LogFactSaved(fact)
+	}
+	if err := s.factStore.Save(); err != nil {
+		log.Printf("ファクト保存エラー: %v", err)
 	}
 }
 
@@ -249,7 +252,6 @@ func (s *FactService) normalizeKey(key string) string {
 	keyLower := strings.ToLower(key)
 
 	// マッピングルール
-	// マッピングルール
 	mappings := KeyNormalizationMappings
 
 	for k, v := range mappings {
@@ -281,38 +283,40 @@ func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, url
 		return
 	}
 
-	if len(extracted) > 0 {
-		log.Printf("URL事実抽出JSON: %d件抽出", len(extracted))
-		for _, item := range extracted {
-			// 品質フィルタリング
-			if !s.isValidFact(item.Target, item.Key, item.Value) {
-				continue
-			}
+	if len(extracted) == 0 {
+		return
+	}
 
-			// キーの正規化
-			item.Key = s.normalizeKey(item.Key)
-
-			// URLコンテンツからの抽出では、targetは常に__general__
-			fact := model.Fact{
-				Target:             item.Target,
-				TargetUserName:     item.TargetUserName,
-				Author:             postAuthor,
-				AuthorUserName:     postAuthorUserName,
-				Key:                item.Key,
-				Value:              item.Value,
-				Timestamp:          time.Now(),
-				SourceType:         sourceType,
-				SourceURL:          sourceURL,
-				PostAuthor:         postAuthor,
-				PostAuthorUserName: postAuthorUserName,
-			}
-
-			s.factStore.AddFactWithSource(fact)
-			LogFactSaved(fact)
+	log.Printf("URL事実抽出JSON: %d件抽出", len(extracted))
+	for _, item := range extracted {
+		// 品質フィルタリング
+		if !s.isValidFact(item.Target, item.Key, item.Value) {
+			continue
 		}
-		if err := s.factStore.Save(); err != nil {
-			log.Printf("ファクト保存エラー: %v", err)
+
+		// キーの正規化
+		item.Key = s.normalizeKey(item.Key)
+
+		// URLコンテンツからの抽出では、targetは常に__general__
+		fact := model.Fact{
+			Target:             item.Target,
+			TargetUserName:     item.TargetUserName,
+			Author:             postAuthor,
+			AuthorUserName:     postAuthorUserName,
+			Key:                item.Key,
+			Value:              item.Value,
+			Timestamp:          time.Now(),
+			SourceType:         sourceType,
+			SourceURL:          sourceURL,
+			PostAuthor:         postAuthor,
+			PostAuthorUserName: postAuthorUserName,
 		}
+
+		s.factStore.AddFactWithSource(fact)
+		LogFactSaved(fact)
+	}
+	if err := s.factStore.Save(); err != nil {
+		log.Printf("ファクト保存エラー: %v", err)
 	}
 }
 
@@ -336,46 +340,48 @@ func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summar
 		return
 	}
 
-	if len(extracted) > 0 {
-		for _, item := range extracted {
-			// 品質フィルタリング
-			if !s.isValidFact(item.Target, item.Key, item.Value) {
-				continue
-			}
+	if len(extracted) == 0 {
+		return
+	}
 
-			// キーの正規化
-			item.Key = s.normalizeKey(item.Key)
-
-			// ターゲットの補正（要約からの抽出なので、基本は会話相手）
-			target := item.Target
-			targetUserName := item.TargetUserName
-
-			// targetがunknownまたは空の場合は、userIDを使用
-			if target == "" || target == model.UnknownTarget {
-				target = userID
-				targetUserName = userID // UserNameはIDと同じにしておく（正確なUserNameは不明な場合もあるため）
-			}
-
-			fact := model.Fact{
-				Target:             target,
-				TargetUserName:     targetUserName,
-				Author:             userID, // 情報源はユーザーとの会話
-				AuthorUserName:     userID,
-				Key:                item.Key,
-				Value:              item.Value,
-				Timestamp:          time.Now(),
-				SourceType:         model.SourceTypeSummary,
-				SourceURL:          "",
-				PostAuthor:         "",
-				PostAuthorUserName: "",
-			}
-
-			s.factStore.AddFactWithSource(fact)
-			LogFactSaved(fact)
+	for _, item := range extracted {
+		// 品質フィルタリング
+		if !s.isValidFact(item.Target, item.Key, item.Value) {
+			continue
 		}
-		if err := s.factStore.Save(); err != nil {
-			log.Printf("ファクト保存エラー: %v", err)
+
+		// キーの正規化
+		item.Key = s.normalizeKey(item.Key)
+
+		// ターゲットの補正（要約からの抽出なので、基本は会話相手）
+		target := item.Target
+		targetUserName := item.TargetUserName
+
+		// targetがunknownまたは空の場合は、userIDを使用
+		if target == "" || target == model.UnknownTarget {
+			target = userID
+			targetUserName = userID // UserNameはIDと同じにしておく（正確なUserNameは不明な場合もあるため）
 		}
+
+		fact := model.Fact{
+			Target:             target,
+			TargetUserName:     targetUserName,
+			Author:             userID, // 情報源はユーザーとの会話
+			AuthorUserName:     userID,
+			Key:                item.Key,
+			Value:              item.Value,
+			Timestamp:          time.Now(),
+			SourceType:         model.SourceTypeSummary,
+			SourceURL:          "",
+			PostAuthor:         "",
+			PostAuthorUserName: "",
+		}
+
+		s.factStore.AddFactWithSource(fact)
+		LogFactSaved(fact)
+	}
+	if err := s.factStore.Save(); err != nil {
+		log.Printf("ファクト保存エラー: %v", err)
 	}
 }
 
@@ -409,6 +415,11 @@ func (s *FactService) QueryRelevantFacts(ctx context.Context, author, authorUser
 	if len(q.Keys) > 0 {
 		if len(q.TargetCandidates) == 0 {
 			q.TargetCandidates = []string{author}
+		}
+
+		// Bot自身も検索対象に含める (自己認識)
+		if s.config.BotUsername != "" {
+			q.TargetCandidates = append(q.TargetCandidates, s.config.BotUsername)
 		}
 
 		// 一般知識も常に検索対象に含める
@@ -487,6 +498,14 @@ func (s *FactService) processTargetMaintenance(ctx context.Context, target strin
 	allFacts := s.factStore.GetFactsByTarget(target)
 	if len(allFacts) == 0 {
 		return false, nil
+	}
+
+	if target == s.config.BotUsername {
+		log.Printf("自己プロファイル更新: %s (全 %d 件)", target, len(allFacts))
+		if err := s.GenerateAndSaveBotProfile(ctx, allFacts); err != nil {
+			log.Printf("自己プロファイル生成エラー: %v", err)
+			// プロファイル生成失敗はメンテナンス全体の失敗とはしない
+		}
 	}
 
 	myFacts := s.shardFacts(allFacts, instanceID, totalInstances)
@@ -573,8 +592,8 @@ func (s *FactService) archiveTargetFacts(ctx context.Context, target string, fac
 
 		var chunkArchives []model.Fact
 		jsonStr := llm.ExtractJSON(response)
-		if err := json.Unmarshal([]byte(jsonStr), &chunkArchives); err != nil {
-			log.Printf("警告: バッチ %d-%d のJSONパースエラー: %v", i+1, end, err)
+		if err := llm.UnmarshalWithRepair(jsonStr, &chunkArchives, fmt.Sprintf("アーカイブバッチ %d-%d", i+1, end)); err != nil {
+			log.Printf("警告: バッチ %d-%d のJSONパースエラー(修復失敗): %v", i+1, end, err)
 			continue
 		}
 
@@ -605,5 +624,37 @@ func (s *FactService) archiveTargetFacts(ctx context.Context, target string, fac
 	}
 	log.Printf("ターゲット %s のアーカイブ完了(担当分): %d件 -> %d件に圧縮 (永続化済み)", target, len(facts), len(allArchives))
 
+	return nil
+}
+
+// GenerateAndSaveBotProfile generates a profile summary from facts and saves it to a file
+func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []model.Fact) error {
+	if s.config.BotProfileFile == "" {
+		return nil
+	}
+
+	if len(facts) == 0 {
+		return nil
+	}
+
+	var factList strings.Builder
+	for _, f := range facts {
+		factList.WriteString(fmt.Sprintf("- %s: %v\n", f.Key, f.Value))
+	}
+
+	prompt := llm.BuildBotProfilePrompt(s.config.BotUsername, factList.String())
+
+	messages := []model.Message{{Role: "user", Content: prompt}}
+
+	profileText := s.llmClient.GenerateText(ctx, messages, "", s.config.MaxSummaryTokens, nil)
+	if profileText == "" {
+		return fmt.Errorf("プロファイル生成結果が空でした")
+	}
+
+	if err := os.WriteFile(s.config.BotProfileFile, []byte(profileText), 0644); err != nil {
+		return fmt.Errorf("プロファイルファイル保存失敗 (%s): %v", s.config.BotProfileFile, err)
+	}
+
+	log.Printf("自己プロファイルを更新しました: %s (%d文字)", s.config.BotProfileFile, len([]rune(profileText)))
 	return nil
 }

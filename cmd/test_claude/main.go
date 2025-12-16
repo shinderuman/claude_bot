@@ -18,7 +18,7 @@ import (
 	"claude_bot/internal/llm"
 	"claude_bot/internal/model"
 	"claude_bot/internal/store"
-	"claude_bot/internal/utils"
+	"claude_bot/internal/util"
 
 	"github.com/joho/godotenv"
 )
@@ -42,7 +42,7 @@ func main() {
 		log.Printf("設定ファイルを読み込みました: %s", envPath)
 	} else {
 		// デフォルト（存在する場合のみ）
-		envPath = utils.GetFilePath(".env")
+		envPath = util.GetFilePath(".env")
 		err := godotenv.Load(envPath)
 		if err != nil {
 			fmt.Printf("デフォルトの.envファイルが見つかりません（無視します）: %s\n", envPath)
@@ -191,7 +191,7 @@ func testResponse(cfg *config.Config, client *llm.Client, factService *facts.Fac
 		log.Println("関連する事実は見つかりませんでした")
 	}
 
-	response := client.GenerateResponse(ctx, session, conversation, relevantFacts, currentImages)
+	response := client.GenerateResponse(ctx, session, conversation, relevantFacts, "", currentImages)
 
 	if response == "" {
 		log.Fatal("エラー: Claudeからの応答がありません")
@@ -357,7 +357,7 @@ func testAutoPost(cfg *config.Config, client *llm.Client) {
 	log.Println()
 
 	// システムプロンプト（キャラクター設定のみ）
-	systemPrompt := llm.BuildSystemPrompt(cfg, "", "", true)
+	systemPrompt := llm.BuildSystemPrompt(cfg, "", "", "", true)
 
 	// API呼び出し
 	ctx := context.Background()
@@ -447,7 +447,7 @@ func testErrorMessageGeneration(cfg *config.Config, client *llm.Client, errorDet
 	log.Println()
 
 	// システムプロンプト（キャラクター設定のみ）
-	systemPrompt := llm.BuildSystemPrompt(cfg, "", "", true)
+	systemPrompt := llm.BuildSystemPrompt(cfg, "", "", "", true)
 
 	// API呼び出し
 	ctx := context.Background()
@@ -490,7 +490,7 @@ func testConversation(cfg *config.Config, client *llm.Client, lastMessage string
 	log.Println()
 
 	// システムプロンプト（キャラクター設定 + 要約なし）
-	systemPrompt := llm.BuildSystemPrompt(cfg, "", "", true)
+	systemPrompt := llm.BuildSystemPrompt(cfg, "", "", "", true)
 
 	// API呼び出し
 	ctx := context.Background()

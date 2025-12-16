@@ -9,7 +9,7 @@ import (
 
 	"claude_bot/internal/config"
 	"claude_bot/internal/model"
-	"claude_bot/internal/utils"
+	"claude_bot/internal/util"
 )
 
 const (
@@ -24,7 +24,7 @@ type ConversationHistory struct {
 }
 
 func InitializeHistory(cfg *config.Config) *ConversationHistory {
-	sessionsPath := utils.GetFilePath(cfg.SessionFileName)
+	sessionsPath := util.GetFilePath(cfg.SessionFileName)
 
 	history := &ConversationHistory{
 		Sessions:     make(map[string]*model.Session),

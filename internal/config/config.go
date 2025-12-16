@@ -1,7 +1,7 @@
 package config
 
 import (
-	"claude_bot/internal/utils"
+	"claude_bot/internal/util"
 	"log"
 	"os"
 	"strconv"
@@ -73,12 +73,35 @@ type Config struct {
 	// Storage Settings
 	SessionFileName   string
 	FactStoreFileName string
+	BotProfileFile    string
 	Timezone          string
+}
+
+// IsGlobalCollectionEnabled は全体（他人含む）のファクト収集が有効かどうかを返します
+func (c *Config) IsGlobalCollectionEnabled() bool {
+	return c.FactCollectionEnabled
+}
+
+// IsSelfLearningEnabled は自己学習（自身の発言からのファクト収集）が有効かどうかを返します
+func (c *Config) IsSelfLearningEnabled() bool {
+	// ファクトストアが有効で、かつホームタイムライン収集（自分の発言を含む）が有効な場合
+	return c.EnableFactStore && c.FactCollectionHome
+}
+
+// IsAnyCollectionEnabled は何らかのファクト収集（全体または自己学習）が有効かどうかを返します
+func (c *Config) IsAnyCollectionEnabled() bool {
+	return c.IsGlobalCollectionEnabled() || c.IsSelfLearningEnabled()
+}
+
+// IsFederatedStreamingEnabled は連合タイムラインのストリーミングを行うべきかを返します
+// 全体収集が有効で、かつ連合収集設定が有効な場合にのみ真となります
+func (c *Config) IsFederatedStreamingEnabled() bool {
+	return c.IsGlobalCollectionEnabled() && c.FactCollectionFederated
 }
 
 func LoadEnvironment(envPath string) {
 	if envPath == "" {
-		envPath = utils.GetFilePath(".env")
+		envPath = util.GetFilePath(".env")
 	}
 
 	if err := godotenv.Load(envPath); err != nil {
@@ -91,7 +114,7 @@ func LoadConfig() *Config {
 	cfg := &Config{
 		LLMProvider:  parseString(os.Getenv("LLM_PROVIDER")),
 		GeminiAPIKey: os.Getenv("GEMINI_API_KEY"),
-		GeminiModel:  os.Getenv("GEMINI_MODEL"),
+		GeminiModel:  parseString(os.Getenv("GEMINI_MODEL")),
 
 		AnthropicAuthToken: os.Getenv("ANTHROPIC_AUTH_TOKEN"),
 		AnthropicBaseURL:   os.Getenv("ANTHROPIC_BASE_URL"),
@@ -139,6 +162,7 @@ func LoadConfig() *Config {
 
 		SessionFileName:   parseString(os.Getenv("SESSION_FILE")),
 		FactStoreFileName: parseString(os.Getenv("FACT_STORE_FILE")),
+		BotProfileFile:    parseString(os.Getenv("BOT_PROFILE_FILE")),
 		Timezone:          parseString(os.Getenv("TIMEZONE")),
 	}
 
