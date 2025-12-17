@@ -313,20 +313,28 @@ func (c *Client) UpdateProfileFields(ctx context.Context, fields []mastodon.Fiel
 	return err
 }
 
+// GetAccountCurrentUser retrieves the authenticated user's account
+func (c *Client) GetAccountCurrentUser(ctx context.Context) (*mastodon.Account, error) {
+	return c.client.GetAccountCurrentUser(ctx)
+}
+
 // GetAccountByUsername finds an account by username
 func (c *Client) GetAccountByUsername(ctx context.Context, username string) (*mastodon.Account, error) {
 	// Use AccountsSearch to find the user
-	results, err := c.client.AccountsSearch(ctx, username, 1)
+	// Limit is set higher to increase chance of finding the exact match among fuzzy results
+	results, err := c.client.AccountsSearch(ctx, username, 5)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(results) == 0 {
-		return nil, fmt.Errorf("account not found: %s", username)
+	for _, account := range results {
+		// Strict matching: Check Username or Acct
+		if account.Username == username || account.Acct == username {
+			return account, nil
+		}
 	}
 
-	// Return the authentic match
-	return results[0], nil
+	return nil, fmt.Errorf("account not found (strict match failed): %s", username)
 }
 
 // FollowAccount follows the specified account

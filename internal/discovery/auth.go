@@ -1,4 +1,4 @@
-package util
+package discovery
 
 import (
 	"crypto/sha256"

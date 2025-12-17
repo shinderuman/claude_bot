@@ -18,6 +18,12 @@ func (b *Bot) startFactMaintenanceLoop(ctx context.Context) {
 		if err := b.factService.PerformMaintenance(ctx); err != nil {
 			log.Printf("ファクトメンテナンスエラー: %v", err)
 		}
+
+		// Peer探索とプロファイル収集（メンテナンスタイミングで実行）
+		if b.factCollector != nil {
+			log.Println("Peer探索を実行中...")
+			b.factCollector.DiscoverAndCollectPeerFacts(ctx)
+		}
 	})
 }
 

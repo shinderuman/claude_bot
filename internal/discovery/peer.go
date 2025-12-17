@@ -37,7 +37,7 @@ func (pd *PeerDiscoverer) IsPeer(account *gomastodon.Account) bool {
 		return false
 	}
 
-	authKey, err := util.GetPeerAuthKey()
+	authKey, err := GetPeerAuthKey()
 	if err != nil {
 		log.Printf("Peer認証キー生成エラー: %v", err)
 		return false
@@ -54,8 +54,8 @@ func (pd *PeerDiscoverer) IsPeer(account *gomastodon.Account) bool {
 	return false
 }
 
-// DiscoverPeersFromRegistry reads the cluster registry and follows unknown peers
-func (pd *PeerDiscoverer) DiscoverPeersFromRegistry(ctx context.Context) error {
+// DiscoverPeersFromRegistry reads the cluster registry, follows unknown peers, and executes a callback for each valid peer
+func (pd *PeerDiscoverer) DiscoverPeersFromRegistry(ctx context.Context, onPeerFound func(ctx context.Context, account *gomastodon.Account)) error {
 	registryPath := util.GetFilePath(RegistryFileName)
 	data, err := os.ReadFile(registryPath)
 	if err != nil {
@@ -94,6 +94,11 @@ func (pd *PeerDiscoverer) DiscoverPeersFromRegistry(ctx context.Context) error {
 		if !pd.IsPeer(account) {
 			log.Printf("Peer探索: ユーザー %s は正規のPeerではありません (Hash不一致)", username)
 			continue
+		}
+
+		// Execute callback for valid peer (e.g. for collecting facts)
+		if onPeerFound != nil {
+			onPeerFound(ctx, account)
 		}
 
 		// Check relationship

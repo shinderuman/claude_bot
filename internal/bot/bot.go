@@ -110,7 +110,7 @@ func NewBot(cfg *config.Config) *Bot {
 	// FactCollectorの初期化
 	// FactCollectionEnabled(全体収集) または EnableFactStore(Peer収集用) が有効な場合に初期化
 	if cfg.IsAnyCollectionEnabled() {
-		bot.factCollector = collector.NewFactCollector(cfg, factStore, llmClient, mastodonClient)
+		bot.factCollector = collector.NewFactCollector(cfg, factStore, llmClient, mastodonClient, factService)
 	}
 
 	return bot
@@ -127,10 +127,6 @@ func (b *Bot) Run(ctx context.Context) error {
 
 	if b.config.EnableFactStore {
 		discovery.StartHeartbeatLoop(ctx, b.config.BotUsername)
-		// Peer探索ループもここで開始 (FactCollectorが存在する場合)
-		if b.factCollector != nil {
-			go b.factCollector.DiscoverPeersLoop(ctx)
-		}
 	}
 
 	if b.factService != nil {
@@ -185,14 +181,6 @@ func (b *Bot) Run(ctx context.Context) error {
 				if b.shouldHandleBroadcastCommand(e.Status) {
 					go b.handleBroadcastCommand(ctx, e.Status, prevID)
 					continue
-				}
-
-				// Peerの更新イベントを処理 (FactStore有効時、かつFactCollectorが存在する場合)
-				// これはFactCollectionHomeの設定に関わらず実行される
-				if b.factCollector != nil && b.config.EnableFactStore {
-					// Peerからの投稿であれば、同僚プロファイルを更新
-					// リプライやブロードキャストコマンド等は CollectColleagueFact 側でフィルタリングされる
-					go b.factCollector.CollectColleagueFact(ctx, e.Status, e.Status.Account.Acct, e.Status.Account.DisplayName)
 				}
 
 				// ファクト収集が有効な場合、ホームタイムラインの投稿を処理

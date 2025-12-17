@@ -2,7 +2,6 @@ package discovery
 
 import (
 	"claude_bot/internal/mastodon"
-	"claude_bot/internal/util"
 	"testing"
 
 	gomastodon "github.com/mattn/go-mastodon"
@@ -10,7 +9,7 @@ import (
 
 func TestIsPeer(t *testing.T) {
 	// Setup
-	authKey, err := util.GetPeerAuthKey()
+	authKey, err := GetPeerAuthKey()
 	if err != nil {
 		t.Fatalf("Failed to get auth key: %v", err)
 	}

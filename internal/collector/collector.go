@@ -30,6 +30,7 @@ type FactCollector struct {
 	llmClient      *llm.Client
 	mastodonClient *mastodon.Client
 	peerDiscoverer *discovery.PeerDiscoverer
+	factService    *facts.FactService
 
 	// レート制限
 	semaphore      chan struct{}
@@ -49,18 +50,17 @@ const (
 	CacheTTL = 24 * time.Hour
 	// CacheCleanupInterval はキャッシュのクリーンアップ間隔
 	CacheCleanupInterval = 1 * time.Hour
-	// PeerDiscoveryInterval is the interval for periodic peer discovery
-	PeerDiscoveryInterval = 1 * time.Hour
 )
 
 // NewFactCollector は新しい FactCollector を作成します
-func NewFactCollector(cfg *config.Config, factStore *store.FactStore, llmClient *llm.Client, mastodonClient *mastodon.Client) *FactCollector {
+func NewFactCollector(cfg *config.Config, factStore *store.FactStore, llmClient *llm.Client, mastodonClient *mastodon.Client, factService *facts.FactService) *FactCollector {
 	fc := &FactCollector{
 		config:         cfg,
 		factStore:      factStore,
 		llmClient:      llmClient,
 		mastodonClient: mastodonClient,
 		peerDiscoverer: discovery.NewPeerDiscoverer(mastodonClient, cfg.BotUsername),
+		factService:    factService,
 		semaphore:      make(chan struct{}, cfg.FactCollectionMaxWorkers),
 		processedTimes: make([]time.Time, 0),
 		urlExtractor:   xurls.Strict(),
@@ -121,25 +121,10 @@ func (fc *FactCollector) Start(ctx context.Context) {
 	go fc.processEvents(ctx, eventChan)
 }
 
-// DiscoverPeersLoop runs periodic peer discovery
-func (fc *FactCollector) DiscoverPeersLoop(ctx context.Context) {
-	// 初回実行
-	if err := fc.peerDiscoverer.DiscoverPeersFromRegistry(ctx); err != nil {
-		log.Printf("Peer探索エラー(初回): %v", err)
-	}
-
-	ticker := time.NewTicker(PeerDiscoveryInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if err := fc.peerDiscoverer.DiscoverPeersFromRegistry(ctx); err != nil {
-				log.Printf("Peer探索エラー: %v", err)
-			}
-		}
+// DiscoverAndCollectPeerFacts performs a single run of peer discovery and fact collection
+func (fc *FactCollector) DiscoverAndCollectPeerFacts(ctx context.Context) {
+	if err := fc.peerDiscoverer.DiscoverPeersFromRegistry(ctx, fc.CollectColleagueFact); err != nil {
+		log.Printf("Peer探索・ファクト収集エラー: %v", err)
 	}
 }
 
@@ -216,8 +201,6 @@ func (fc *FactCollector) processStatus(ctx context.Context, status *gomastodon.S
 
 	// 投稿本文からのファクト抽出(設定で制御)
 	if fc.config.FactCollectionFromPostContent {
-		// Peer認識とColleagueFact保存
-		fc.CollectColleagueFact(ctx, status, postAuthor, postAuthorUserName)
 		fc.extractFactsFromContent(ctx, status, sourceType, sourceURL, postAuthor, postAuthorUserName)
 	}
 
@@ -463,56 +446,24 @@ func (fc *FactCollector) isCollectableStatus(status *gomastodon.Status) bool {
 }
 
 // CollectColleagueFact handles the logic for saving peer profile information
-func (fc *FactCollector) CollectColleagueFact(ctx context.Context, status *gomastodon.Status, postAuthor, postAuthorUserName string) {
-	if !fc.peerDiscoverer.IsPeer(&status.Account) {
+func (fc *FactCollector) CollectColleagueFact(ctx context.Context, account *gomastodon.Account) {
+	if !fc.peerDiscoverer.IsPeer(account) {
 		return
 	}
 
-	// 自動投稿（リプライ・メンションでない）の場合、プロフィール情報を保存
-	if status.InReplyToID != nil || len(status.Mentions) > 0 {
-		return
-	}
+	note := fc.mastodonClient.StripHTML(account.Note)
+	// 免責事項を削除
+	note = strings.ReplaceAll(note, strings.TrimSpace(facts.DisclaimerText), "")
+	note = strings.TrimSpace(note)
 
-	note := fc.mastodonClient.StripHTML(status.Account.Note)
-	displayName := status.Account.DisplayName
+	displayName := account.DisplayName
 	if displayName == "" {
-		displayName = status.Account.Username
+		displayName = account.Username
 	}
 
-	key := fmt.Sprintf("system:colleague_profile:%s", postAuthorUserName)
-	value := fmt.Sprintf("Name: %s\nBio: %s", displayName, note)
-	myUsername := fc.config.BotUsername
+	postAuthorUserName := displayName
 
-	shouldSave := true
-	existingFacts := fc.factStore.GetFactsByTarget(myUsername)
-	for _, f := range existingFacts {
-		if f.Key == key {
-			if f.Value == value {
-				shouldSave = false
-				break
-			}
-			break
-		}
-	}
-
-	if shouldSave {
-		fact := model.Fact{
-			Target:             myUsername,
-			TargetUserName:     myUsername,
-			Author:             facts.SystemAuthor,
-			AuthorUserName:     facts.SystemAuthor,
-			Key:                key,
-			Value:              value,
-			Timestamp:          time.Now(),
-			SourceType:         model.SourceTypeSystem,
-			SourceURL:          "",
-			PostAuthor:         postAuthor,
-			PostAuthorUserName: postAuthorUserName,
-		}
-		fc.factStore.AddFactWithSource(fact)
-		facts.LogFactSaved(fact)
-		if err := fc.factStore.Save(); err != nil {
-			log.Printf("ColleagueFact保存エラー: %v", err)
-		}
+	if err := fc.factService.SaveColleagueFact(ctx, postAuthorUserName, displayName, note); err != nil {
+		log.Printf("ColleagueFact保存エラー: %v", err)
 	}
 }

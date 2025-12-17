@@ -15,7 +15,6 @@ import (
 	"claude_bot/internal/mastodon"
 	"claude_bot/internal/model"
 	"claude_bot/internal/store"
-	"claude_bot/internal/util"
 
 	gomastodon "github.com/mattn/go-mastodon"
 )
@@ -174,7 +173,6 @@ func (s *FactService) SaveColleagueFact(ctx context.Context, targetUserName, dis
 	// Bot自身をターゲットとして保存（自分が知っている同僚の情報、という意味）
 	// Target = BotUsername
 	myUsername := s.config.BotUsername
-
 	// 既存のファクトを確認（差分更新）
 	existingFacts := s.factStore.GetFactsByTarget(myUsername)
 	for _, f := range existingFacts {
@@ -188,7 +186,6 @@ func (s *FactService) SaveColleagueFact(ctx context.Context, targetUserName, dis
 			// ColleagueProfileは「最新の状態」が重要なので、
 			// 本来はOverwriteが必要だが、FactStoreに特定KeyのFactを削除/更新する機能がない。
 			// 暫定的に「新しいタイムスタンプで追加」し、利用側（Query）で最新を優先する運用とする。
-			// または、FactStoreにUpdate機能を追加するのが望ましいが、今回はAddで対応。
 			break
 		}
 	}
@@ -208,7 +205,6 @@ func (s *FactService) SaveColleagueFact(ctx context.Context, targetUserName, dis
 	}
 
 	s.factStore.AddFactWithSource(fact)
-	LogFactSaved(fact)
 	return s.factStore.Save()
 }
 
@@ -744,29 +740,52 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 
 	// Mastodonのプロフィールも更新する
 	// Peer認証キーを取得して設定
-	authKey, err := util.GetPeerAuthKey()
-	var fields []gomastodon.Field
-	if err == nil {
-		fields = append(fields, gomastodon.Field{
-			Name:  discovery.PeerAuthFieldKey,
-			Value: authKey,
-		})
-	} else {
+	// Mastodonのプロフィールも更新する
+	// Peer認証キーを取得
+	authKey, err := discovery.GetPeerAuthKey()
+	if err != nil {
 		log.Printf("Peer認証キー生成失敗: %v", err)
 	}
 
-	// 既存のFieldsを維持するためには本来Getが必要だが、
-	// ここでは簡略化のため、SystemIDのみを設定する運用とする(他のFieldsはシステム管理外)
-	// ※注意: これは既存の他のFieldsを消す可能性がある。
-	// 安全のため、本当はGetProfileしてMergeすべきだが、ClientにGetProfileがない。
-	// Mastodonの仕様では、送信したFieldsのみで上書きされるか、ID指定で更新されるか...
-	// go-mastodonの挙動として、Fieldsを送信するとそれが全てになる可能性が高い。
-	// 今回はBot専用アカウント運用前提で、SystemIDを設定する。
+	// 既存のFieldsを取得してマージする (Safe Merge)
+	currentUser, err := s.mastodonClient.GetAccountCurrentUser(ctx)
+	if err == nil && authKey != "" {
+		currentFields := currentUser.Fields
+		var newFields []gomastodon.Field
+		found := false
 
-	if len(fields) > 0 {
-		if err := s.mastodonClient.UpdateProfileFields(ctx, fields); err != nil {
+		// 既存のFieldsをコピー (SystemIDがあれば更新)
+		for _, f := range currentFields {
+			if f.Name == discovery.PeerAuthFieldKey {
+				newFields = append(newFields, gomastodon.Field{
+					Name:  discovery.PeerAuthFieldKey,
+					Value: authKey,
+				})
+				found = true
+			} else {
+				// その他のフィールドはそのまま維持
+				newFields = append(newFields, f)
+			}
+		}
+
+		// まだ無ければ追加
+		if !found {
+			newFields = append(newFields, gomastodon.Field{
+				Name:  discovery.PeerAuthFieldKey,
+				Value: authKey,
+			})
+		}
+
+		// 最大個数(4つ)を超えないように調整（必要であれば）
+		// Mastodonのデフォルトは4。超えるとエラーになる可能性があるが、
+		// 既存+1で溢れる場合は既存を維持するか、エラーを許容するか。
+		// ここでは一旦そのまま送信してみる。
+
+		if err := s.mastodonClient.UpdateProfileFields(ctx, newFields); err != nil {
 			log.Printf("MastodonプロフィールFields更新エラー: %v", err)
 		}
+	} else if err != nil {
+		log.Printf("現在のアカウント情報取得失敗(Fields更新スキップ): %v", err)
 	}
 
 	if err := s.mastodonClient.UpdateProfile(ctx, s.formatProfileText(profileText)); err != nil {
