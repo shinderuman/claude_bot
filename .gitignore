@@ -25,3 +25,6 @@ data/bot_profile_*.txt
 
 # Go workspace file
 go.work
+
+# VS Code settings
+.vscode/settings.json
