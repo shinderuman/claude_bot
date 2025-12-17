@@ -147,8 +147,15 @@ func (fc *FactCollector) processEvents(ctx context.Context, eventChan <-chan gom
 
 // handleStatus handles the common logic for processing a status from any source
 func (fc *FactCollector) handleStatus(ctx context.Context, status *gomastodon.Status, sourceType string) {
+	if status == nil {
+		return
+	}
+
+	// Peerかどうか判定
+	isPeer := fc.peerDiscoverer.IsPeer(&status.Account)
+
 	// ファクト収集対象かチェック (設定・フィルタリング)
-	if !fc.isCollectableStatus(status) {
+	if !fc.isCollectableStatus(status, isPeer) {
 		return
 	}
 
@@ -159,7 +166,7 @@ func (fc *FactCollector) handleStatus(ctx context.Context, status *gomastodon.St
 	}
 
 	// 非同期で処理
-	go fc.processStatus(ctx, status, sourceType)
+	go fc.processStatus(ctx, status, sourceType, isPeer)
 }
 
 // canProcess はレート制限内で処理可能かをチェックします
@@ -190,7 +197,7 @@ func (fc *FactCollector) canProcess() bool {
 }
 
 // processStatus は投稿からファクトを抽出します
-func (fc *FactCollector) processStatus(ctx context.Context, status *gomastodon.Status, sourceType string) {
+func (fc *FactCollector) processStatus(ctx context.Context, status *gomastodon.Status, sourceType string, isPeer bool) {
 	// ソース情報
 	sourceURL := string(status.URL)
 	postAuthor := string(status.Account.Acct)
@@ -199,8 +206,8 @@ func (fc *FactCollector) processStatus(ctx context.Context, status *gomastodon.S
 		postAuthorUserName = status.Account.Username
 	}
 
-	// 投稿本文からのファクト抽出(設定で制御)
-	if fc.config.FactCollectionFromPostContent {
+	// 投稿本文からのファクト抽出(設定で制御、ただしPeerは常に許可)
+	if fc.config.FactCollectionFromPostContent || isPeer {
 		fc.extractFactsFromContent(ctx, status, sourceType, sourceURL, postAuthor, postAuthorUserName)
 	}
 
@@ -429,13 +436,10 @@ func (fc *FactCollector) isFediverseDomain(domain string) bool {
 }
 
 // isCollectableStatus checks if the status is collectable based on config and rules
-func (fc *FactCollector) isCollectableStatus(status *gomastodon.Status) bool {
+func (fc *FactCollector) isCollectableStatus(status *gomastodon.Status, isPeer bool) bool {
 	if status == nil {
 		return false
 	}
-
-	// Peerかどうか判定
-	isPeer := fc.peerDiscoverer.IsPeer(&status.Account)
 
 	// 基本的なフィルタリング（公開範囲、Bot属性など）
 	// Peerの場合はURL要件を無視する

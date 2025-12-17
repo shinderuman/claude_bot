@@ -131,9 +131,10 @@ func RepairJSON(s string) string {
 
 	// Post-processing: Close any remaining open brackets/braces
 	for i := len(stack) - 1; i >= 0; i-- {
-		if stack[i] == '{' {
+		switch stack[i] {
+		case '{':
 			sb.WriteRune('}')
-		} else if stack[i] == '[' {
+		case '[':
 			sb.WriteRune(']')
 		}
 	}
