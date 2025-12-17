@@ -434,8 +434,12 @@ func (fc *FactCollector) isCollectableStatus(status *gomastodon.Status) bool {
 		return false
 	}
 
+	// Peerかどうか判定
+	isPeer := fc.peerDiscoverer.IsPeer(&status.Account)
+
 	// 基本的なフィルタリング（公開範囲、Bot属性など）
-	if !mastodon.ShouldCollectFactsFromStatus(status) {
+	// Peerの場合はURL要件を無視する
+	if !mastodon.ShouldCollectFactsFromStatus(status, isPeer) {
 		return false
 	}
 

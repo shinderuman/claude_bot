@@ -459,7 +459,8 @@ func ExtractStatusFromEvent(event mastodon.Event) *mastodon.Status {
 // 共通条件:
 // - 本文に実際のURLを含む(http://またはhttps://)
 // - メンションを含まない
-func ShouldCollectFactsFromStatus(status *mastodon.Status) bool {
+// ignoreURLRequirement: trueの場合、URLが含まれていなくても収集対象とする（Peerなど）
+func ShouldCollectFactsFromStatus(status *mastodon.Status, ignoreURLRequirement bool) bool {
 	if status == nil {
 		return false
 	}
@@ -483,6 +484,11 @@ func ShouldCollectFactsFromStatus(status *mastodon.Status) bool {
 	// メンションを含む投稿は除外
 	if strings.Contains(content, "@") {
 		return false
+	}
+
+	// URL要件を無視する場合はここで許可
+	if ignoreURLRequirement {
+		return true
 	}
 
 	// 本文にURLパターンが含まれるかチェック
