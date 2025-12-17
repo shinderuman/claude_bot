@@ -88,9 +88,9 @@ func (c *Config) IsSelfLearningEnabled() bool {
 	return c.EnableFactStore && c.FactCollectionHome
 }
 
-// IsAnyCollectionEnabled は何らかのファクト収集（全体または自己学習）が有効かどうかを返します
+// IsAnyCollectionEnabled は何らかのファクト収集（全体、自己学習、またはPeer収集）が有効かどうかを返します
 func (c *Config) IsAnyCollectionEnabled() bool {
-	return c.IsGlobalCollectionEnabled() || c.IsSelfLearningEnabled()
+	return c.FactCollectionEnabled || c.EnableFactStore
 }
 
 // IsFederatedStreamingEnabled は連合タイムラインのストリーミングを行うべきかを返します

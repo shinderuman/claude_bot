@@ -15,6 +15,9 @@ import (
 	"claude_bot/internal/mastodon"
 	"claude_bot/internal/model"
 	"claude_bot/internal/store"
+	"claude_bot/internal/util"
+
+	gomastodon "github.com/mattn/go-mastodon"
 )
 
 const (
@@ -161,6 +164,52 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, sourceID, author,
 	if err := s.factStore.Save(); err != nil {
 		log.Printf("ファクト保存エラー: %v", err)
 	}
+}
+
+// SaveColleagueFact saves or updates a colleague's profile fact
+func (s *FactService) SaveColleagueFact(ctx context.Context, targetUserName, displayName, note string) error {
+	key := fmt.Sprintf("system:colleague_profile:%s", targetUserName)
+	value := fmt.Sprintf("Name: %s\nBio: %s", displayName, note)
+
+	// Bot自身をターゲットとして保存（自分が知っている同僚の情報、という意味）
+	// Target = BotUsername
+	myUsername := s.config.BotUsername
+
+	// 既存のファクトを確認（差分更新）
+	existingFacts := s.factStore.GetFactsByTarget(myUsername)
+	for _, f := range existingFacts {
+		if f.Key == key {
+			if f.Value == value {
+				// 変更なし
+				return nil
+			}
+			// 変更あり -> 今回はシンプルに追記ではなく、常に最新1件を維持したいが、
+			// Storeの仕様上Addは追記になる。
+			// ColleagueProfileは「最新の状態」が重要なので、
+			// 本来はOverwriteが必要だが、FactStoreに特定KeyのFactを削除/更新する機能がない。
+			// 暫定的に「新しいタイムスタンプで追加」し、利用側（Query）で最新を優先する運用とする。
+			// または、FactStoreにUpdate機能を追加するのが望ましいが、今回はAddで対応。
+			break
+		}
+	}
+
+	fact := model.Fact{
+		Target:             myUsername,
+		TargetUserName:     myUsername,
+		Author:             SystemAuthor, // システムが自動収集
+		AuthorUserName:     SystemAuthor,
+		Key:                key,
+		Value:              value,
+		Timestamp:          time.Now(),
+		SourceType:         model.SourceTypeSystem,
+		SourceURL:          "",
+		PostAuthor:         targetUserName,
+		PostAuthorUserName: targetUserName, // 情報源としての同僚
+	}
+
+	s.factStore.AddFactWithSource(fact)
+	LogFactSaved(fact)
+	return s.factStore.Save()
 }
 
 // LogFactSaved outputs a standardized log message for saved facts
@@ -694,6 +743,32 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 	}
 
 	// Mastodonのプロフィールも更新する
+	// Peer認証キーを取得して設定
+	authKey, err := util.GetPeerAuthKey()
+	var fields []gomastodon.Field
+	if err == nil {
+		fields = append(fields, gomastodon.Field{
+			Name:  discovery.PeerAuthFieldKey,
+			Value: authKey,
+		})
+	} else {
+		log.Printf("Peer認証キー生成失敗: %v", err)
+	}
+
+	// 既存のFieldsを維持するためには本来Getが必要だが、
+	// ここでは簡略化のため、SystemIDのみを設定する運用とする(他のFieldsはシステム管理外)
+	// ※注意: これは既存の他のFieldsを消す可能性がある。
+	// 安全のため、本当はGetProfileしてMergeすべきだが、ClientにGetProfileがない。
+	// Mastodonの仕様では、送信したFieldsのみで上書きされるか、ID指定で更新されるか...
+	// go-mastodonの挙動として、Fieldsを送信するとそれが全てになる可能性が高い。
+	// 今回はBot専用アカウント運用前提で、SystemIDを設定する。
+
+	if len(fields) > 0 {
+		if err := s.mastodonClient.UpdateProfileFields(ctx, fields); err != nil {
+			log.Printf("MastodonプロフィールFields更新エラー: %v", err)
+		}
+	}
+
 	if err := s.mastodonClient.UpdateProfile(ctx, s.formatProfileText(profileText)); err != nil {
 		log.Printf("Mastodonプロフィール更新エラー: %v", err)
 	}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"claude_bot/internal/config"
+	"claude_bot/internal/discovery"
 	"claude_bot/internal/facts"
 	"claude_bot/internal/fetcher"
 	"claude_bot/internal/llm"
@@ -28,6 +29,7 @@ type FactCollector struct {
 	factStore      *store.FactStore
 	llmClient      *llm.Client
 	mastodonClient *mastodon.Client
+	peerDiscoverer *discovery.PeerDiscoverer
 
 	// レート制限
 	semaphore      chan struct{}
@@ -47,6 +49,8 @@ const (
 	CacheTTL = 24 * time.Hour
 	// CacheCleanupInterval はキャッシュのクリーンアップ間隔
 	CacheCleanupInterval = 1 * time.Hour
+	// PeerDiscoveryInterval is the interval for periodic peer discovery
+	PeerDiscoveryInterval = 1 * time.Hour
 )
 
 // NewFactCollector は新しい FactCollector を作成します
@@ -56,6 +60,7 @@ func NewFactCollector(cfg *config.Config, factStore *store.FactStore, llmClient 
 		factStore:      factStore,
 		llmClient:      llmClient,
 		mastodonClient: mastodonClient,
+		peerDiscoverer: discovery.NewPeerDiscoverer(mastodonClient, cfg.BotUsername),
 		semaphore:      make(chan struct{}, cfg.FactCollectionMaxWorkers),
 		processedTimes: make([]time.Time, 0),
 		urlExtractor:   xurls.Strict(),
@@ -114,6 +119,28 @@ func (fc *FactCollector) Start(ctx context.Context) {
 	go fc.mastodonClient.StreamPublic(ctx, eventChan)
 	// イベント処理ループ
 	go fc.processEvents(ctx, eventChan)
+}
+
+// DiscoverPeersLoop runs periodic peer discovery
+func (fc *FactCollector) DiscoverPeersLoop(ctx context.Context) {
+	// 初回実行
+	if err := fc.peerDiscoverer.DiscoverPeersFromRegistry(ctx); err != nil {
+		log.Printf("Peer探索エラー(初回): %v", err)
+	}
+
+	ticker := time.NewTicker(PeerDiscoveryInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := fc.peerDiscoverer.DiscoverPeersFromRegistry(ctx); err != nil {
+				log.Printf("Peer探索エラー: %v", err)
+			}
+		}
+	}
 }
 
 // ProcessHomeEvent はBot側から渡されたホームタイムラインのイベントを処理します
@@ -189,6 +216,8 @@ func (fc *FactCollector) processStatus(ctx context.Context, status *gomastodon.S
 
 	// 投稿本文からのファクト抽出(設定で制御)
 	if fc.config.FactCollectionFromPostContent {
+		// Peer認識とColleagueFact保存
+		fc.CollectColleagueFact(ctx, status, postAuthor, postAuthorUserName)
 		fc.extractFactsFromContent(ctx, status, sourceType, sourceURL, postAuthor, postAuthorUserName)
 	}
 
@@ -431,4 +460,59 @@ func (fc *FactCollector) isCollectableStatus(status *gomastodon.Status) bool {
 
 	// 全体収集が有効なら、ここまでのチェック(ShouldCollectFactsFromStatus)でOK
 	return fc.config.IsGlobalCollectionEnabled()
+}
+
+// CollectColleagueFact handles the logic for saving peer profile information
+func (fc *FactCollector) CollectColleagueFact(ctx context.Context, status *gomastodon.Status, postAuthor, postAuthorUserName string) {
+	if !fc.peerDiscoverer.IsPeer(&status.Account) {
+		return
+	}
+
+	// 自動投稿（リプライ・メンションでない）の場合、プロフィール情報を保存
+	if status.InReplyToID != nil || len(status.Mentions) > 0 {
+		return
+	}
+
+	note := fc.mastodonClient.StripHTML(status.Account.Note)
+	displayName := status.Account.DisplayName
+	if displayName == "" {
+		displayName = status.Account.Username
+	}
+
+	key := fmt.Sprintf("system:colleague_profile:%s", postAuthorUserName)
+	value := fmt.Sprintf("Name: %s\nBio: %s", displayName, note)
+	myUsername := fc.config.BotUsername
+
+	shouldSave := true
+	existingFacts := fc.factStore.GetFactsByTarget(myUsername)
+	for _, f := range existingFacts {
+		if f.Key == key {
+			if f.Value == value {
+				shouldSave = false
+				break
+			}
+			break
+		}
+	}
+
+	if shouldSave {
+		fact := model.Fact{
+			Target:             myUsername,
+			TargetUserName:     myUsername,
+			Author:             facts.SystemAuthor,
+			AuthorUserName:     facts.SystemAuthor,
+			Key:                key,
+			Value:              value,
+			Timestamp:          time.Now(),
+			SourceType:         model.SourceTypeSystem,
+			SourceURL:          "",
+			PostAuthor:         postAuthor,
+			PostAuthorUserName: postAuthorUserName,
+		}
+		fc.factStore.AddFactWithSource(fact)
+		facts.LogFactSaved(fact)
+		if err := fc.factStore.Save(); err != nil {
+			log.Printf("ColleagueFact保存エラー: %v", err)
+		}
+	}
 }
