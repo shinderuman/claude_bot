@@ -13,6 +13,15 @@ func (b *Bot) startFactMaintenanceLoop(ctx context.Context) {
 		return
 	}
 
+	// Maintenance loop jitter: 0 (or random, but for now fixed 0 is fine/simple)
+	jitterFunc := func(interval time.Duration) time.Duration {
+		// Maintenance usually doesn't need strict jitter, but let's add some to avoid thundering herd if multiple bots
+		minutes := int64(interval.Minutes())
+		if minutes > 0 {
+			return time.Duration(time.Now().UnixNano()%minutes) * time.Minute
+		}
+		return 0
+	}
 	b.runInWindowedLoop(ctx, FactMaintenanceInterval, "ファクトメンテナンス", func(ctx context.Context) {
 		log.Println("ファクトメンテナンスを実行中...")
 		if err := b.factService.PerformMaintenance(ctx); err != nil {
@@ -24,7 +33,7 @@ func (b *Bot) startFactMaintenanceLoop(ctx context.Context) {
 			log.Println("Peer探索を実行中...")
 			b.factCollector.DiscoverAndCollectPeerFacts(ctx)
 		}
-	})
+	}, jitterFunc)
 }
 
 func (b *Bot) startAutoPostLoop(ctx context.Context) {
@@ -33,10 +42,22 @@ func (b *Bot) startAutoPostLoop(ctx context.Context) {
 	}
 
 	interval := time.Duration(b.config.AutoPostIntervalHours) * time.Hour
-	b.runInWindowedLoop(ctx, interval, "自動投稿", b.executeAutoPost)
+	// Default jitter: Random within interval
+	jitterFunc := func(interval time.Duration) time.Duration {
+		minutes := int64(interval.Minutes())
+		if minutes > 0 {
+			return time.Duration(time.Now().UnixNano()%minutes) * time.Minute
+		}
+		return 0
+	}
+
+	b.runInWindowedLoop(ctx, interval, "自動投稿", b.executeAutoPost, jitterFunc)
 }
 
-func (b *Bot) runInWindowedLoop(ctx context.Context, interval time.Duration, taskName string, task func(context.Context)) {
+// jitterFunc returns the delay duration relative to window start
+type jitterFunc func(interval time.Duration) time.Duration
+
+func (b *Bot) runInWindowedLoop(ctx context.Context, interval time.Duration, taskName string, task func(context.Context), getJitter jitterFunc) {
 	log.Printf("%sループを開始しました (間隔: %v)", taskName, interval)
 
 	// 起動時間を基準にする
@@ -44,23 +65,42 @@ func (b *Bot) runInWindowedLoop(ctx context.Context, interval time.Duration, tas
 
 	go func() {
 		for {
-			// interval.Minutes() (分) の範囲内でランダムな分数を決定
-			randomMinutes := time.Duration(time.Now().UnixNano() % int64(interval.Minutes()))
+			// Panic Recovery for the loop
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("CRITICAL: %sループ内でパニックが発生しました (回復): %v", taskName, r)
+					}
+				}()
 
-			// ウィンドウ開始からrandomMinutes後に実行
-			scheduledTime := windowStart.Add(randomMinutes * time.Minute)
+				// Jitter計算 (テスト時は固定値を返すことで制御可能)
+				offset := getJitter(interval)
 
-			log.Printf("次回の%s予定: %s", taskName, scheduledTime.Format(DateTimeFormat))
+				// ウィンドウ開始からoffset後に実行
+				scheduledTime := windowStart.Add(offset)
 
-			select {
-			case <-ctx.Done():
+				log.Printf("次回の%s予定: %s", taskName, scheduledTime.Format(DateTimeFormat))
+
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(time.Until(scheduledTime)):
+					// 実行
+					task(ctx)
+				}
+			}()
+
+			// コンテキストチェック（パニック回復後もここを通るため）
+			if ctx.Err() != nil {
 				return
-			case <-time.After(time.Until(scheduledTime)):
-				task(ctx)
 			}
 
-			// 次のウィンドウへ（＝現在のウィンドウの終わり）
+			// 次のウィンドウへ
 			windowStart = windowStart.Add(interval)
+
+			// Catch-up: もし現在時刻がすでに次のウィンドウを超えていても、
+			// 待機ロジック(Before check)がfalseになるだけなので即座に次へ進む
+
 			if time.Now().Before(windowStart) {
 				log.Printf("次の%sウィンドウ開始(%s)まで待機します", taskName, windowStart.Format(DateTimeFormat))
 				select {
