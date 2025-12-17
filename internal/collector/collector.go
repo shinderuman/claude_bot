@@ -441,9 +441,14 @@ func (fc *FactCollector) isCollectableStatus(status *gomastodon.Status, isPeer b
 		return false
 	}
 
+	// Peerなら設定に関わらず常に許可する（ストリームさえ来ていれば収集する）
+	if isPeer {
+		return true
+	}
+
 	// 基本的なフィルタリング（公開範囲、Bot属性など）
 	// Peerの場合はURL要件を無視する
-	if !mastodon.ShouldCollectFactsFromStatus(status, isPeer) {
+	if !mastodon.ShouldCollectFactsFromStatus(status) {
 		return false
 	}
 
