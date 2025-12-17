@@ -709,6 +709,74 @@ func (s *FactService) LoadBotProfile(ctx context.Context) error {
 	return s.GenerateAndSaveBotProfile(ctx, facts)
 }
 
+// SanitizeFacts uses LLM to identify and remove conflicting facts
+func (s *FactService) SanitizeFacts(ctx context.Context, facts []model.Fact) ([]model.Fact, int, error) {
+	if len(facts) == 0 {
+		return facts, 0, nil
+	}
+
+	// Format facts for prompt
+	var factList strings.Builder
+	for _, f := range facts {
+		// Include ID (UniqueKey) to allow LLM to specify which one to delete
+		factList.WriteString(fmt.Sprintf("- [ID:%s] %s: %v\n", f.ComputeUniqueKey(), f.Key, f.Value))
+	}
+
+	prompt := llm.BuildFactSanitizationPrompt(s.config.CharacterPrompt, factList.String())
+	messages := []model.Message{{Role: "user", Content: prompt}}
+
+	// Using FactExtraction system message as base (it asks for JSON output)
+	response := s.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, s.config.MaxFactTokens, nil)
+	if response == "" {
+		return facts, 0, nil
+	}
+
+	var result struct {
+		ConflictingFactIDs []string `json:"conflicting_fact_ids"`
+	}
+	jsonStr := llm.ExtractJSON(response)
+	// If parsing fails or empty, just return original facts (safer than deleting wrong things)
+	if err := llm.UnmarshalWithRepair(jsonStr, &result, "FactSanitization"); err != nil {
+		log.Printf("SanitizeFacts: JSON parse failed (skip sanitization): %v", err)
+		return facts, 0, nil
+	}
+
+	if len(result.ConflictingFactIDs) == 0 {
+		return facts, 0, nil
+	}
+
+	// Create a set of IDs to remove
+	toRemove := make(map[string]bool)
+	for _, id := range result.ConflictingFactIDs {
+		toRemove[id] = true
+	}
+
+	// Execute removal in store
+	// All profile facts should have the same target (the bot)
+	target := facts[0].Target
+	deleted, err := s.factStore.RemoveFacts(target, func(f model.Fact) bool {
+		return toRemove[f.ComputeUniqueKey()]
+	})
+
+	if err != nil {
+		return facts, 0, err
+	}
+
+	if deleted > 0 {
+		log.Printf("SanitizeFacts: %d 件の矛盾するファクトを削除しました (Target: %s)", deleted, target)
+		// Filter returned facts for next step
+		var cleanFacts []model.Fact
+		for _, f := range facts {
+			if !toRemove[f.ComputeUniqueKey()] {
+				cleanFacts = append(cleanFacts, f)
+			}
+		}
+		return cleanFacts, deleted, nil
+	}
+
+	return facts, 0, nil
+}
+
 // GenerateAndSaveBotProfile generates a profile summary from facts and saves it to a file
 func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []model.Fact) error {
 	if s.config.BotProfileFile == "" {
@@ -717,6 +785,19 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 
 	if len(facts) == 0 {
 		return nil
+	}
+
+	// 自己浄化プロセス: キャラクター設定と矛盾するファクトを除外・削除
+	cleanFacts, deleted, err := s.SanitizeFacts(ctx, facts)
+	if err != nil {
+		log.Printf("自己浄化プロセスでエラー発生（無視して続行）: %v", err)
+	} else if deleted > 0 {
+		log.Printf("自己浄化により %d 件のファクトが削除されました。プロファイル生成には浄化後のデータを使用します。", deleted)
+		facts = cleanFacts // 浄化済みのリストを使用
+		if len(facts) == 0 {
+			log.Printf("浄化の結果、ファクトが0件になりました。プロファイル生成をスキップします。")
+			return nil
+		}
 	}
 
 	var factList strings.Builder

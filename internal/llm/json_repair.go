@@ -6,84 +6,143 @@ import (
 	"strings"
 )
 
-// RepairJSON attempts to repair a truncated JSON string.
-// Currently, it specifically targets JSON arrays that have been cut off.
-// It tries to find the last valid object closing "}" and appends "]" to close the array.
+// RepairJSON attempts to repair a truncated or malformed JSON string.
+// It uses a hybrid strategy:
+// 1. For unclosed top-level arrays, it truncates to the last valid object.
+// 2. For others (objects, nested issues), it uses a stack-based structural repair.
 func RepairJSON(s string) string {
 	s = strings.TrimSpace(s)
 
-	// Double Array check: strictly [[...]] format
+	// Strategy 0: Double Array check (Legacy support)
 	// If it starts with [[ and ends with ]], remove the outer brackets
 	if strings.HasPrefix(s, "[[") && strings.HasSuffix(s, "]]") {
 		s = s[1 : len(s)-1]
 	}
 
-	// 配列で始まっていない場合は対象外（あるいは既に単純な文字列など）
-	if !strings.HasPrefix(s, "[") {
-		return s
+	// Strategy 1: Truncated Top-Level Array Repair
+	// Apply ONLY if it looks like a standard array that got cut off.
+	// Condition: Starts with '[' AND does NOT end with ']'
+	if strings.HasPrefix(s, "[") && !strings.HasSuffix(s, "]") {
+		lastObjEnd := strings.LastIndex(s, "}")
+		if lastObjEnd != -1 {
+			return s[:lastObjEnd+1] + "]"
+		}
+		// If no '}' found, risk returning empty array
+		return "[]"
 	}
 
-	// Escape control characters (newlines, etc.) within string literals
-	// This uses a simple state machine to detect if we are inside quotes
+	// Strategy 2: Structural Repair (Stack-based)
+	// Handles objects, closed arrays with internal issues, etc.
 	var sb strings.Builder
+	var stack []rune // Stack of open brackets/braces: '{' or '['
 	inString := false
 	escaped := false
+
+	// Helper to get stack top
+	peek := func() rune {
+		if len(stack) == 0 {
+			return 0
+		}
+		return stack[len(stack)-1]
+	}
+
+	// First pass: scanning and repairing inline mismatches
 	for _, r := range s {
+		// Handle string literals
 		if escaped {
 			sb.WriteRune(r)
 			escaped = false
 			continue
 		}
-
 		if r == '\\' {
-			escaped = true
 			sb.WriteRune(r)
+			escaped = true
 			continue
 		}
-
 		if r == '"' {
 			inString = !inString
 			sb.WriteRune(r)
 			continue
 		}
-
 		if inString {
+			// Escape control characters if specific cases need it (reusing logic from previous impl if needed)
+			// But for simplicity in this rewrite, we assume input string content is mostly valid or we fix minimal escapes.
+			// Let's reuse the newline escape logic from previous impl to be safe.
 			switch r {
 			case '\n':
 				sb.WriteString("\\n")
 			case '\r':
-				// ignore or escape? let's escape to \r just in case, or ignore.
-				// JSON spec: \r is also not allowed in strings.
 				sb.WriteString("\\r")
 			case '\t':
-				// raw tabs are often allowed by some parsers but strictly invalid in strings?
-				// Actually unescaped tab IS invalid in JSON strings (0x00-0x1F are invalid).
 				sb.WriteString("\\t")
 			default:
 				sb.WriteRune(r)
 			}
-		} else {
+			continue
+		}
+
+		// Structure handling
+		switch r {
+		case '{', '[':
+			stack = append(stack, r)
+			sb.WriteRune(r)
+		case '}':
+			// If stack top is '[', we are missing a ']'
+			if peek() == '[' {
+				// Insert missing ']' before '}'
+				sb.WriteRune(']')
+				stack = stack[:len(stack)-1] // Pop '['
+				// Now handle the '}' again (recurse logic technically, or just proceed)
+				// Check if stack is now empty or has '{'
+				if peek() == '{' {
+					stack = stack[:len(stack)-1] // Pop '{'
+				}
+				sb.WriteRune('}')
+			} else if peek() == '{' {
+				stack = stack[:len(stack)-1] // Pop '{'
+				sb.WriteRune('}')
+			} else {
+				// Stack empty or mismatch, ignore extra '}' or treat as error?
+				// Treating as valid closing of potential implicit root?
+				// For robustness, if stack is empty, we might ignore, or just append.
+				sb.WriteRune('}')
+			}
+		case ']':
+			// If stack top is '{', we are missing a '}' -> Invalid JSON mostly, but let's try to fix
+			if peek() == '{' {
+				// Insert missing '}' before ']'
+				sb.WriteRune('}')
+				stack = stack[:len(stack)-1] // Pop '{'
+
+				if peek() == '[' {
+					stack = stack[:len(stack)-1] // Pop '['
+				}
+				sb.WriteRune(']')
+			} else if peek() == '[' {
+				stack = stack[:len(stack)-1] // Pop '['
+				sb.WriteRune(']')
+			} else {
+				sb.WriteRune(']')
+			}
+		default:
 			sb.WriteRune(r)
 		}
 	}
-	s = sb.String()
 
-	// 既に閉じている場合はそのまま返す
-	if strings.HasSuffix(s, "]") {
-		return s
+	// Post-processing: Close any remaining open brackets/braces
+	for i := len(stack) - 1; i >= 0; i-- {
+		if stack[i] == '{' {
+			sb.WriteRune('}')
+		} else if stack[i] == '[' {
+			sb.WriteRune(']')
+		}
 	}
 
-	// 最後の "}" を探す
-	lastObjEnd := strings.LastIndex(s, "}")
-	if lastObjEnd == -1 {
-		// オブジェクトが一つも見つからない場合は空配列を返す（リスク回避）
-		return "[]"
-	}
+	return sb.String()
+}
 
-	// 最後の "}" まで切り取り、"]" を付与
-	// これにより、途中で切れた最後の要素は捨てられる
-	repaired := s[:lastObjEnd+1] + "]"
-	return repaired
+func IsDoubleArray(s string) bool {
+	return strings.HasPrefix(s, "[[") && strings.HasSuffix(s, "]]")
 }
 
 // UnmarshalWithRepair tries to unmarshal JSON. If it fails, it attempts to repair the JSON and tries again.

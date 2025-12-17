@@ -644,6 +644,41 @@ func (s *FactStore) ReplaceFacts(target string, factsToRemove, factsToAdd []mode
 	return nil
 }
 
+// RemoveFacts removes facts that match the given condition for a specific target
+// and persists the changes to disk immediately using SaveOverwrite.
+func (s *FactStore) RemoveFacts(target string, shouldRemove func(model.Fact) bool) (int, error) {
+	s.mu.Lock()
+
+	initialCount := len(s.Facts)
+	newFacts := make([]model.Fact, 0, initialCount)
+	deletedCount := 0
+
+	for _, fact := range s.Facts {
+		// ターゲットが一致し、かつ条件に合致する場合は削除対象（newFactsに追加しない）
+		if fact.Target == target && shouldRemove(fact) {
+			deletedCount++
+			continue
+		}
+		newFacts = append(newFacts, fact)
+	}
+
+	if deletedCount > 0 {
+		s.Facts = newFacts
+	}
+	s.mu.Unlock()
+
+	if deletedCount > 0 {
+		// 変更があった場合のみディスクに保存
+		// SaveOverwriteを使うことで、マージによる復活を防ぐ
+		if err := s.SaveOverwrite(); err != nil {
+			return deletedCount, fmt.Errorf("failed to save facts after removal: %w", err)
+		}
+		log.Printf("RemoveFacts: ターゲット %s から %d 件のファクトを削除しました", target, deletedCount)
+	}
+
+	return deletedCount, nil
+}
+
 // SyncFromDisk checks for updates on disk and merges them into memory
 func (s *FactStore) SyncFromDisk() error {
 	stat, err := os.Stat(s.saveFilePath)

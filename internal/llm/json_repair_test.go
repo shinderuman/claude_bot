@@ -71,6 +71,16 @@ ue"}]`,
 			// Use expected standard JSON format for 'want'
 			want: `[{"target":"deepseekroid","target_username":"白夜シエル","key":"attribute","value":"他人の苦しみを笑いものにする人を苦手と   る"},{"target":"deepseekroid","target_username":"白夜シエル☁️ ","key":"attribute","value":"約束を平気で破る人を苦手とする"},{"target":"deepseekroid","target_username":"白夜シエル☁️ ","key":"experience","value":"かつての貴族社会についての知識がある"},{"target":"deepseekroid","target_username":"白夜シエル☁️ ","key":"attribute","value":"\n母から言葉に責任を持つことを教わった"}]`,
 		},
+		{
+			name:  "Object with unclosed array (The reported error)",
+			input: `{"conflicting_fact_ids": ["id1", "id2" }`,
+			want:  `{"conflicting_fact_ids": ["id1", "id2" ]}`,
+		},
+		{
+			name:  "Object with unclosed array and missing comma",
+			input: `{"key": ["val1", "val2"`,
+			want:  `{"key": ["val1", "val2"]}`,
+		},
 	}
 
 	for _, tt := range tests {

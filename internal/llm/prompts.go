@@ -220,6 +220,11 @@ func BuildBotProfilePrompt(factsList string) string {
 	return fmt.Sprintf(Templates.BotProfileGeneration, factsList)
 }
 
+// BuildFactSanitizationPrompt creates a prompt for detecting conflicting facts
+func BuildFactSanitizationPrompt(characterPrompt, factsList string) string {
+	return fmt.Sprintf(Templates.FactSanitization, characterPrompt, factsList)
+}
+
 // -----------------------------------------------------------------------------
 // Complex Prompt Builders (Continuing logic and string building)
 // -----------------------------------------------------------------------------
