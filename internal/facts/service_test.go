@@ -191,6 +191,7 @@ func TestBuildProfileFields(t *testing.T) {
 		authKey          string
 		wantMentionValue string
 		wantSystemID     string
+		timezone         string
 	}{
 		{
 			name:        "Allow Remote Users: True",
@@ -201,6 +202,7 @@ func TestBuildProfileFields(t *testing.T) {
 			authKey:          "test-auth-key",
 			wantMentionValue: mastodon.MentionStatusPublic,
 			wantSystemID:     "test-auth-key",
+			timezone:         "UTC",
 		},
 		{
 			name:        "Allow Remote Users: False",
@@ -211,18 +213,22 @@ func TestBuildProfileFields(t *testing.T) {
 			authKey:          "test-auth-key",
 			wantMentionValue: mastodon.MentionStatusStopped,
 			wantSystemID:     "test-auth-key",
+			timezone:         "UTC",
 		},
 		{
-			name:        "Update Existing Fields",
+			name:        "Update Existing Managed Fields & Preserve Others",
 			allowRemote: true,
 			existingFields: []gomastodon.Field{
+				{Name: "First", Value: "1"}, // Should stay first
 				{Name: mastodon.ProfileFieldSystemID, Value: "old-key"},
+				{Name: mastodon.ProfileFieldLastUpdated, Value: "old-time"},
+				{Name: "Second", Value: "2"}, // Should stay second (before managed fields)
 				{Name: mastodon.ProfileFieldMentionStatus, Value: "old-status"},
-				{Name: "KeepThis", Value: "Kept"},
 			},
 			authKey:          "new-auth-key",
 			wantMentionValue: mastodon.MentionStatusPublic,
 			wantSystemID:     "new-auth-key",
+			timezone:         "UTC",
 		},
 	}
 
@@ -231,53 +237,131 @@ func TestBuildProfileFields(t *testing.T) {
 			s := getTestService()
 			s.config = &config.Config{
 				AllowRemoteUsers: tt.allowRemote,
+				Timezone:         tt.timezone,
 			}
 
 			got := s.buildProfileFields(tt.existingFields, tt.authKey)
 
-			// Check SystemID
-			foundSystemID := false
+			// 1. Verify Managed Fields Exist and match values
+			managedFound := map[string]bool{
+				mastodon.ProfileFieldSystemID:      false,
+				mastodon.ProfileFieldMentionStatus: false,
+				mastodon.ProfileFieldLastUpdated:   false,
+			}
+
 			for _, f := range got {
 				if f.Name == mastodon.ProfileFieldSystemID {
 					if f.Value != tt.wantSystemID {
 						t.Errorf("SystemID = %v, want %v", f.Value, tt.wantSystemID)
 					}
-					foundSystemID = true
+					managedFound[mastodon.ProfileFieldSystemID] = true
 				}
-			}
-			if !foundSystemID {
-				t.Error("SystemID field not found")
-			}
-
-			// Check Mention Status
-			foundMention := false
-			for _, f := range got {
 				if f.Name == mastodon.ProfileFieldMentionStatus {
 					if f.Value != tt.wantMentionValue {
 						t.Errorf("MentionStatus = %v, want %v", f.Value, tt.wantMentionValue)
 					}
-					foundMention = true
+					managedFound[mastodon.ProfileFieldMentionStatus] = true
+				}
+				if f.Name == mastodon.ProfileFieldLastUpdated {
+					// Time check is loose (just check it exists and has length)
+					if len(f.Value) == 0 {
+						t.Error("LastUpdated field is empty")
+					}
+					managedFound[mastodon.ProfileFieldLastUpdated] = true
 				}
 			}
-			if !foundMention {
-				t.Error("MentionStatus field not found")
+
+			for k, found := range managedFound {
+				if !found {
+					t.Errorf("Managed field %s not found", k)
+				}
 			}
 
-			// Check preserved fields
-			foundKept := false
-			for _, f := range got {
-				if f.Name == "KeepThis" {
-					if f.Value == "Kept" {
-						foundKept = true
+			// 2. Verify Order
+			// Expected order: [User Fields...] -> SystemID -> MentionStatus -> LastUpdated
+
+			// Find indices
+			var idxSystemID, idxMention, idxLastUpdated int = -1, -1, -1
+			for i, f := range got {
+				switch f.Name {
+				case mastodon.ProfileFieldSystemID:
+					idxSystemID = i
+				case mastodon.ProfileFieldMentionStatus:
+					idxMention = i
+				case mastodon.ProfileFieldLastUpdated:
+					idxLastUpdated = i
+				}
+			}
+
+			if idxSystemID == -1 || idxMention == -1 || idxLastUpdated == -1 {
+				t.Fatal("One or more managed fields missing, cannot verify order")
+			}
+
+			if idxSystemID > idxMention {
+				t.Errorf("Order invalid: SystemID (%d) should be before MentionStatus (%d)", idxSystemID, idxMention)
+			}
+			if idxMention > idxLastUpdated {
+				t.Errorf("Order invalid: MentionStatus (%d) should be before LastUpdated (%d)", idxMention, idxLastUpdated)
+			}
+
+			// Verify User fields are BEFORE managed fields
+			for i, f := range got {
+				if _, isManaged := managedFound[f.Name]; !isManaged {
+					if i > idxSystemID { // SystemID is the first managed field
+						t.Errorf("User field %s found at index %d, expected before SystemID (%d)", f.Name, i, idxSystemID)
 					}
 				}
 			}
-			// Only check if it was expected to be there
-			for _, f := range tt.existingFields {
-				if f.Name == "KeepThis" && !foundKept {
-					t.Error("Existing field KeepThis was lost")
-				}
-			}
 		})
+	}
+}
+
+func TestBuildProfileFields_OrderGuarantee(t *testing.T) {
+	s := getTestService()
+	s.config = &config.Config{
+		AllowRemoteUsers: true,
+		Timezone:         "UTC",
+	}
+
+	// Input with scrambled order and managed fields mixed with user fields
+	input := []gomastodon.Field{
+		{Name: mastodon.ProfileFieldLastUpdated, Value: "old-time"},     // Should move to end
+		{Name: "UserField1", Value: "1"},                                // Should be first
+		{Name: mastodon.ProfileFieldMentionStatus, Value: "old-status"}, // Should move to middle
+		{Name: "UserField2", Value: "2"},                                // Should be second
+		{Name: mastodon.ProfileFieldSystemID, Value: "old-key"},         // Should move to start of managed block
+	}
+
+	authKey := "new-auth-key"
+	got := s.buildProfileFields(input, authKey)
+
+	// Expected Order:
+	// 1. UserField1
+	// 2. UserField2
+	// 3. SystemID
+	// 4. MentionStatus
+	// 5. LastUpdated
+
+	if len(got) != 5 {
+		t.Fatalf("Expected 5 fields, got %d", len(got))
+	}
+
+	expectedNames := []string{
+		"UserField1",
+		"UserField2",
+		mastodon.ProfileFieldSystemID,
+		mastodon.ProfileFieldMentionStatus,
+		mastodon.ProfileFieldLastUpdated,
+	}
+
+	for i, name := range expectedNames {
+		if got[i].Name != name {
+			t.Errorf("Index %d: expected name %s, got %s", i, name, got[i].Name)
+		}
+	}
+
+	// Verify SystemID update
+	if got[2].Value != authKey {
+		t.Errorf("SystemID value mismatch: got %s, want %s", got[2].Value, authKey)
 	}
 }

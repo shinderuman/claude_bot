@@ -903,7 +903,7 @@ func (s *FactService) formatProfileText(text string) string {
 	return text + DisclaimerText
 }
 
-// buildProfileFields constructs the profile fields, including SystemID and Mention Status
+// buildProfileFields constructs the profile fields, including SystemID, Mention Status, and Last Updated
 func (s *FactService) buildProfileFields(currentFields []gomastodon.Field, authKey string) []gomastodon.Field {
 	var newFields []gomastodon.Field
 
@@ -911,9 +911,10 @@ func (s *FactService) buildProfileFields(currentFields []gomastodon.Field, authK
 	targetKeys := map[string]struct{}{
 		mastodon.ProfileFieldSystemID:      {},
 		mastodon.ProfileFieldMentionStatus: {},
+		mastodon.ProfileFieldLastUpdated:   {},
 	}
 
-	// 1. Existing fields: Keep non-target fields
+	// 1. Existing fields: Keep non-target fields (Preserve user order)
 	for _, f := range currentFields {
 		if _, isTarget := targetKeys[f.Name]; isTarget {
 			continue
@@ -921,7 +922,8 @@ func (s *FactService) buildProfileFields(currentFields []gomastodon.Field, authK
 		newFields = append(newFields, f)
 	}
 
-	// 2. Add/Append managed fields
+	// 2. Add/Append managed fields in fixed order
+
 	// SystemID
 	newFields = append(newFields, gomastodon.Field{
 		Name:  mastodon.ProfileFieldSystemID,
@@ -936,6 +938,22 @@ func (s *FactService) buildProfileFields(currentFields []gomastodon.Field, authK
 	newFields = append(newFields, gomastodon.Field{
 		Name:  mastodon.ProfileFieldMentionStatus,
 		Value: mentionStatus,
+	})
+
+	// Last Updated
+	// Load timezone from config
+	loc, err := time.LoadLocation(s.config.Timezone)
+	if err != nil {
+		// Fallback to UTC if timezone is invalid or load fails
+		loc = time.UTC
+		log.Printf("タイムゾーン読み込みエラー (%s): %v. UTCを使用します。", s.config.Timezone, err)
+	}
+	now := time.Now().In(loc)
+	lastUpdated := now.Format("2006/01/02 15:04")
+
+	newFields = append(newFields, gomastodon.Field{
+		Name:  mastodon.ProfileFieldLastUpdated,
+		Value: lastUpdated,
 	})
 
 	return newFields
