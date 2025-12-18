@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -106,9 +107,30 @@ func (f *Fact) ComputeUniqueKey() string {
 	return fmt.Sprintf("%s|%s|%v", f.Target, f.Key, f.Value)
 }
 
+type StringArray []string
+
+// UnmarshalJSON handles both single string and array of strings
+func (s *StringArray) UnmarshalJSON(data []byte) error {
+	// 1. Try as []string
+	var arr []string
+	if err := json.Unmarshal(data, &arr); err == nil {
+		*s = StringArray(arr)
+		return nil
+	}
+
+	// 2. Try as string (treat as single element array)
+	var str string
+	if err := json.Unmarshal(data, &str); err == nil {
+		*s = StringArray{str}
+		return nil
+	}
+
+	return fmt.Errorf("StringArray: cannot unmarshal data")
+}
+
 type SearchQuery struct {
-	TargetCandidates []string `json:"target_candidates"`
-	Keys             []string `json:"keys"`
+	TargetCandidates StringArray `json:"target_candidates"`
+	Keys             StringArray `json:"keys"`
 }
 
 type Image struct {
