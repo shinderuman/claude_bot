@@ -834,37 +834,7 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 	// 既存のFieldsを取得してマージする (Safe Merge)
 	currentUser, err := s.mastodonClient.GetAccountCurrentUser(ctx)
 	if err == nil && authKey != "" {
-		currentFields := currentUser.Fields
-		var newFields []gomastodon.Field
-		found := false
-
-		// 既存のFieldsをコピー (SystemIDがあれば更新)
-		for _, f := range currentFields {
-			if f.Name == discovery.PeerAuthFieldKey {
-				newFields = append(newFields, gomastodon.Field{
-					Name:  discovery.PeerAuthFieldKey,
-					Value: authKey,
-				})
-				found = true
-			} else {
-				// その他のフィールドはそのまま維持
-				newFields = append(newFields, f)
-			}
-		}
-
-		// まだ無ければ追加
-		if !found {
-			newFields = append(newFields, gomastodon.Field{
-				Name:  discovery.PeerAuthFieldKey,
-				Value: authKey,
-			})
-		}
-
-		// 最大個数(4つ)を超えないように調整（必要であれば）
-		// Mastodonのデフォルトは4。超えるとエラーになる可能性があるが、
-		// 既存+1で溢れる場合は既存を維持するか、エラーを許容するか。
-		// ここでは一旦そのまま送信してみる。
-
+		newFields := s.buildProfileFields(currentUser.Fields, authKey)
 		if err := s.mastodonClient.UpdateProfileFields(ctx, newFields); err != nil {
 			log.Printf("MastodonプロフィールFields更新エラー: %v", err)
 		}
@@ -931,6 +901,44 @@ func (s *FactService) formatProfileText(text string) string {
 
 	// 3. 免責文の結合
 	return text + DisclaimerText
+}
+
+// buildProfileFields constructs the profile fields, including SystemID and Mention Status
+func (s *FactService) buildProfileFields(currentFields []gomastodon.Field, authKey string) []gomastodon.Field {
+	var newFields []gomastodon.Field
+
+	// Track which keys update logic has handled
+	targetKeys := map[string]struct{}{
+		mastodon.ProfileFieldSystemID:      {},
+		mastodon.ProfileFieldMentionStatus: {},
+	}
+
+	// 1. Existing fields: Keep non-target fields
+	for _, f := range currentFields {
+		if _, isTarget := targetKeys[f.Name]; isTarget {
+			continue
+		}
+		newFields = append(newFields, f)
+	}
+
+	// 2. Add/Append managed fields
+	// SystemID
+	newFields = append(newFields, gomastodon.Field{
+		Name:  mastodon.ProfileFieldSystemID,
+		Value: authKey,
+	})
+
+	// Mention Status
+	mentionStatus := mastodon.MentionStatusStopped
+	if s.config.AllowRemoteUsers {
+		mentionStatus = mastodon.MentionStatusPublic
+	}
+	newFields = append(newFields, gomastodon.Field{
+		Name:  mastodon.ProfileFieldMentionStatus,
+		Value: mentionStatus,
+	})
+
+	return newFields
 }
 
 // archiveTargetFactsRecursion handles the recursive step of compression.

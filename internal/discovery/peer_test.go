@@ -26,7 +26,7 @@ func TestIsPeer(t *testing.T) {
 			name: "Valid Peer",
 			account: &gomastodon.Account{
 				Fields: []gomastodon.Field{
-					{Name: PeerAuthFieldKey, Value: authKey},
+					{Name: mastodon.ProfileFieldSystemID, Value: authKey},
 				},
 			},
 			expected: true,
@@ -35,7 +35,7 @@ func TestIsPeer(t *testing.T) {
 			name: "Invalid Peer (Wrong Key)",
 			account: &gomastodon.Account{
 				Fields: []gomastodon.Field{
-					{Name: PeerAuthFieldKey, Value: "wrong_key"},
+					{Name: mastodon.ProfileFieldSystemID, Value: "wrong_key"},
 				},
 			},
 			expected: false,

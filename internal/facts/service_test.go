@@ -6,7 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"claude_bot/internal/config"
+	"claude_bot/internal/mastodon"
 	"claude_bot/internal/model"
+
+	gomastodon "github.com/mattn/go-mastodon"
 )
 
 func getTestService() *FactService {
@@ -176,5 +180,104 @@ func TestSmallBatchSkipping(t *testing.T) {
 		t.Log("Warning: One instance got all 5 facts and decided to archive. Rare but valid.")
 	} else {
 		t.Log("Success: No instance reached the threshold of 5. Archiving skipped as expected.")
+	}
+}
+
+func TestBuildProfileFields(t *testing.T) {
+	tests := []struct {
+		name             string
+		allowRemote      bool
+		existingFields   []gomastodon.Field
+		authKey          string
+		wantMentionValue string
+		wantSystemID     string
+	}{
+		{
+			name:        "Allow Remote Users: True",
+			allowRemote: true,
+			existingFields: []gomastodon.Field{
+				{Name: "Other", Value: "Value"},
+			},
+			authKey:          "test-auth-key",
+			wantMentionValue: mastodon.MentionStatusPublic,
+			wantSystemID:     "test-auth-key",
+		},
+		{
+			name:        "Allow Remote Users: False",
+			allowRemote: false,
+			existingFields: []gomastodon.Field{
+				{Name: "Other", Value: "Value"},
+			},
+			authKey:          "test-auth-key",
+			wantMentionValue: mastodon.MentionStatusStopped,
+			wantSystemID:     "test-auth-key",
+		},
+		{
+			name:        "Update Existing Fields",
+			allowRemote: true,
+			existingFields: []gomastodon.Field{
+				{Name: mastodon.ProfileFieldSystemID, Value: "old-key"},
+				{Name: mastodon.ProfileFieldMentionStatus, Value: "old-status"},
+				{Name: "KeepThis", Value: "Kept"},
+			},
+			authKey:          "new-auth-key",
+			wantMentionValue: mastodon.MentionStatusPublic,
+			wantSystemID:     "new-auth-key",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := getTestService()
+			s.config = &config.Config{
+				AllowRemoteUsers: tt.allowRemote,
+			}
+
+			got := s.buildProfileFields(tt.existingFields, tt.authKey)
+
+			// Check SystemID
+			foundSystemID := false
+			for _, f := range got {
+				if f.Name == mastodon.ProfileFieldSystemID {
+					if f.Value != tt.wantSystemID {
+						t.Errorf("SystemID = %v, want %v", f.Value, tt.wantSystemID)
+					}
+					foundSystemID = true
+				}
+			}
+			if !foundSystemID {
+				t.Error("SystemID field not found")
+			}
+
+			// Check Mention Status
+			foundMention := false
+			for _, f := range got {
+				if f.Name == mastodon.ProfileFieldMentionStatus {
+					if f.Value != tt.wantMentionValue {
+						t.Errorf("MentionStatus = %v, want %v", f.Value, tt.wantMentionValue)
+					}
+					foundMention = true
+				}
+			}
+			if !foundMention {
+				t.Error("MentionStatus field not found")
+			}
+
+			// Check preserved fields
+			foundKept := false
+			for _, f := range got {
+				if f.Name == "KeepThis" {
+					if f.Value == "Kept" {
+						foundKept = true
+					}
+				}
+			}
+			// Only check if it was expected to be there
+			for _, f := range tt.existingFields {
+				if f.Name == "KeepThis" && !foundKept {
+					t.Error("Existing field KeepThis was lost")
+				}
+			}
+		})
 	}
 }

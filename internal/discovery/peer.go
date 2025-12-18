@@ -12,11 +12,6 @@ import (
 	gomastodon "github.com/mattn/go-mastodon"
 )
 
-const (
-	// PeerAuthFieldKey is the key name for the peer authentication hash in the profile fields
-	PeerAuthFieldKey = "SystemID"
-)
-
 // PeerDiscoverer handles the discovery and authentication of peer bots
 type PeerDiscoverer struct {
 	mastodonClient *mastodon.Client
@@ -44,7 +39,7 @@ func (pd *PeerDiscoverer) IsPeer(account *gomastodon.Account) bool {
 	}
 
 	for _, field := range account.Fields {
-		if field.Name == PeerAuthFieldKey {
+		if field.Name == mastodon.ProfileFieldSystemID {
 			if field.Value == authKey {
 				return true
 			}
