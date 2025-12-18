@@ -2,6 +2,7 @@ package facts
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +11,90 @@ import (
 
 func getTestService() *FactService {
 	return &FactService{}
+}
+
+func TestFormatProfileText(t *testing.T) {
+	service := getTestService()
+
+	// 免責文の長さを考慮したMaxBodyLenを計算
+	tests := []struct {
+		name     string
+		input    string
+		wantEnd  string
+		wantLen  int
+		checkCut bool
+	}{
+		{
+			name:    "Short text",
+			input:   "Short profile.",
+			wantEnd: DisclaimerText,
+			wantLen: 500,
+		},
+		{
+			name:    "Long text with separators",
+			input:   strings.Repeat("あ", 300) + "\n" + strings.Repeat("い", 300),
+			wantEnd: DisclaimerText,
+			wantLen: 500,
+		},
+		{
+			name:     "Long text WITHOUT separators",
+			input:    strings.Repeat("無", 600),
+			wantEnd:  DisclaimerText,
+			wantLen:  500,
+			checkCut: true,
+		},
+		{
+			name:     "English text with periods (currently ignored)",
+			input:    strings.Repeat("This is a sentence. ", 40), // approx 800 chars
+			wantEnd:  DisclaimerText,
+			wantLen:  500,
+			checkCut: true,
+		},
+		{
+			name:    "Exact limit length (No cut)",
+			input:   strings.Repeat("あ", 456), // 500 - 44(Disclaimer length approx)
+			wantEnd: DisclaimerText,
+			wantLen: 500,
+		},
+		{
+			name:     "Limit + 1 length (Forced cut)",
+			input:    strings.Repeat("あ", 457), // 1 char over limit
+			wantEnd:  DisclaimerText,
+			wantLen:  500,
+			checkCut: true,
+		},
+		{
+			name:    "Separator exactly at limit",
+			input:   strings.Repeat("あ", 455) + "。\n" + "い", // Separator at 456th char
+			wantEnd: DisclaimerText,
+			wantLen: 500,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := service.formatProfileText(tt.input)
+
+			// 1. 全体の長さチェック
+			if len([]rune(got)) > MaxMastodonProfileChars {
+				t.Errorf("Length %d > %d", len([]rune(got)), MaxMastodonProfileChars)
+			}
+
+			// 2. 免責文が含まれているか
+			if !strings.HasSuffix(got, tt.wantEnd) {
+				t.Errorf("Disclaimer missing or corrupted. Got suffix: %q", string([]rune(got)[len([]rune(got))-20:]))
+			}
+
+			// 3. 強制カットの確認
+			if tt.checkCut {
+				body := strings.TrimSuffix(got, DisclaimerText)
+				expectedBodyLen := MaxMastodonProfileChars - len([]rune(DisclaimerText))
+				if len([]rune(body)) != expectedBodyLen {
+					t.Errorf("Body length %d != expected %d", len([]rune(body)), expectedBodyLen)
+				}
+			}
+		})
+	}
 }
 
 func TestShardingDistribution(t *testing.T) {
