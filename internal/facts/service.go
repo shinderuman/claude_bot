@@ -16,8 +16,6 @@ import (
 	"claude_bot/internal/model"
 	"claude_bot/internal/slack"
 	"claude_bot/internal/store"
-
-	gomastodon "github.com/mattn/go-mastodon"
 )
 
 const (
@@ -64,12 +62,10 @@ var (
 
 const (
 	// Archive
-	ArchiveFactThreshold    = 10
-	ArchiveMinFactCount     = 2
-	ArchiveAgeDays          = 30
-	FactArchiveBatchSize    = 200
-	DisclaimerText          = "\n\n※このアカウントの投稿には事実に基づく内容が含まれることもありますが、すべての正確性は保証できません。"
-	MaxMastodonProfileChars = 500
+	ArchiveFactThreshold = 10
+	ArchiveMinFactCount  = 2
+	ArchiveAgeDays       = 30
+	FactArchiveBatchSize = 200
 
 	// Archive Reasons
 	ArchiveReasonThresholdMet = "割り当て件数が閾値を超えていたため"
@@ -823,26 +819,13 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 	}
 
 	// Mastodonのプロフィールも更新する
-	// Peer認証キーを取得して設定
-	// Mastodonのプロフィールも更新する
 	// Peer認証キーを取得
 	authKey, err := discovery.GetPeerAuthKey()
 	if err != nil {
 		log.Printf("Peer認証キー生成失敗: %v", err)
 	}
 
-	// 既存のFieldsを取得してマージする (Safe Merge)
-	currentUser, err := s.mastodonClient.GetAccountCurrentUser(ctx)
-	if err == nil && authKey != "" {
-		newFields := s.buildProfileFields(currentUser.Fields, authKey)
-		if err := s.mastodonClient.UpdateProfileFields(ctx, newFields); err != nil {
-			log.Printf("MastodonプロフィールFields更新エラー: %v", err)
-		}
-	} else if err != nil {
-		log.Printf("現在のアカウント情報取得失敗(Fields更新スキップ): %v", err)
-	}
-
-	if err := s.mastodonClient.UpdateProfile(ctx, s.formatProfileText(profileText)); err != nil {
+	if err := s.mastodonClient.UpdateProfileWithFields(ctx, s.config, profileText, authKey); err != nil {
 		log.Printf("Mastodonプロフィール更新エラー: %v", err)
 	}
 
@@ -860,103 +843,6 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 	}
 
 	return nil
-}
-
-// formatProfileText formats the profile text for Mastodon (compaction, truncation, disclaimer)
-func (s *FactService) formatProfileText(text string) string {
-	// 1. 過剰な改行の削除（空行を詰める）
-	lines := strings.Split(text, "\n")
-	var compacted []string
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed != "" {
-			compacted = append(compacted, trimmed)
-		}
-	}
-	text = strings.Join(compacted, "\n")
-
-	// 2. 文字数制限（500文字）への適合
-	// 免責文を含めて500文字以内にする必要があるため、本文の上限を計算
-	maxBodyLen := MaxMastodonProfileChars - len([]rune(DisclaimerText))
-
-	runes := []rune(text)
-	if len(runes) > maxBodyLen {
-		// 上限を超えている場合、切り詰める
-		truncated := runes[:maxBodyLen]
-
-		// 文の途中で切れるのを避けるため、最後の句点か改行を探す
-		lastPeriod := -1
-		for i := len(truncated) - 1; i >= 0; i-- {
-			if truncated[i] == '。' || truncated[i] == '\n' {
-				lastPeriod = i
-				break
-			}
-		}
-
-		if lastPeriod != -1 {
-			truncated = truncated[:lastPeriod+1]
-		}
-		text = string(truncated)
-	}
-
-	// 3. 免責文の結合
-	return text + DisclaimerText
-}
-
-// buildProfileFields constructs the profile fields, including SystemID, Mention Status, and Last Updated
-func (s *FactService) buildProfileFields(currentFields []gomastodon.Field, authKey string) []gomastodon.Field {
-	var newFields []gomastodon.Field
-
-	// Track which keys update logic has handled
-	targetKeys := map[string]struct{}{
-		mastodon.ProfileFieldSystemID:      {},
-		mastodon.ProfileFieldMentionStatus: {},
-		mastodon.ProfileFieldLastUpdated:   {},
-	}
-
-	// 1. Existing fields: Keep non-target fields (Preserve user order)
-	for _, f := range currentFields {
-		if _, isTarget := targetKeys[f.Name]; isTarget {
-			continue
-		}
-		newFields = append(newFields, f)
-	}
-
-	// 2. Add/Append managed fields in fixed order
-
-	// SystemID
-	newFields = append(newFields, gomastodon.Field{
-		Name:  mastodon.ProfileFieldSystemID,
-		Value: authKey,
-	})
-
-	// Mention Status
-	mentionStatus := mastodon.MentionStatusStopped
-	if s.config.AllowRemoteUsers {
-		mentionStatus = mastodon.MentionStatusPublic
-	}
-	newFields = append(newFields, gomastodon.Field{
-		Name:  mastodon.ProfileFieldMentionStatus,
-		Value: mentionStatus,
-	})
-
-	// Last Updated
-	// Load timezone from config
-	loc, err := time.LoadLocation(s.config.Timezone)
-	if err != nil {
-		// Fallback to UTC if timezone is invalid or load fails
-		loc = time.UTC
-		log.Printf("タイムゾーン読み込みエラー (%s): %v. UTCを使用します。", s.config.Timezone, err)
-	}
-	now := time.Now().In(loc)
-	lastUpdated := now.Format("2006/01/02 15:04")
-
-	newFields = append(newFields, gomastodon.Field{
-		Name:  mastodon.ProfileFieldLastUpdated,
-		Value: lastUpdated,
-	})
-
-	return newFields
 }
 
 // archiveTargetFactsRecursion handles the recursive step of compression.

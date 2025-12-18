@@ -13,7 +13,7 @@ import (
 
 	"claude_bot/internal/model"
 
-	"github.com/mattn/go-mastodon"
+	gomastodon "github.com/mattn/go-mastodon"
 	"golang.org/x/net/html"
 )
 
@@ -43,12 +43,12 @@ const (
 )
 
 type Client struct {
-	client *mastodon.Client
+	client *gomastodon.Client
 	config Config
 }
 
 func NewClient(cfg Config) *Client {
-	c := mastodon.NewClient(&mastodon.Config{
+	c := gomastodon.NewClient(&gomastodon.Config{
 		Server:      cfg.Server,
 		AccessToken: cfg.AccessToken,
 	})
@@ -59,7 +59,7 @@ func NewClient(cfg Config) *Client {
 }
 
 // StreamUser はホームタイムラインのストリーミングを開始し、イベントをチャネルに送信します
-func (c *Client) StreamUser(ctx context.Context, eventChan chan<- mastodon.Event) {
+func (c *Client) StreamUser(ctx context.Context, eventChan chan<- gomastodon.Event) {
 	events, err := c.client.StreamingUser(ctx)
 	if err != nil {
 		log.Printf("ユーザーストリーミング接続エラー: %v", err)
@@ -75,7 +75,7 @@ func (c *Client) StreamUser(ctx context.Context, eventChan chan<- mastodon.Event
 	log.Println("ユーザーストリーミング接続が切断されました")
 }
 
-func (c *Client) GetRootStatusID(ctx context.Context, notification *mastodon.Notification) string {
+func (c *Client) GetRootStatusID(ctx context.Context, notification *gomastodon.Notification) string {
 	if notification.Status.InReplyToID == nil {
 		return string(notification.Status.ID)
 	}
@@ -93,26 +93,26 @@ func (c *Client) GetRootStatusID(ctx context.Context, notification *mastodon.Not
 	return string(currentStatus.ID)
 }
 
-func (c *Client) convertToIDAndFetchStatus(ctx context.Context, inReplyToID any) (*mastodon.Status, error) {
+func (c *Client) convertToIDAndFetchStatus(ctx context.Context, inReplyToID any) (*gomastodon.Status, error) {
 	statusID := fmt.Sprintf("%v", inReplyToID)
 	return c.GetStatus(ctx, statusID)
 }
 
 // GetStatus retrieves a status by ID
-func (c *Client) GetStatus(ctx context.Context, statusID string) (*mastodon.Status, error) {
-	id := mastodon.ID(statusID)
+func (c *Client) GetStatus(ctx context.Context, statusID string) (*gomastodon.Status, error) {
+	id := gomastodon.ID(statusID)
 	return c.client.GetStatus(ctx, id)
 }
 
 // Message extraction and HTML parsing
 
-func (c *Client) ExtractUserMessage(notification *mastodon.Notification) string {
+func (c *Client) ExtractUserMessage(notification *gomastodon.Notification) string {
 	content, _, _ := c.ExtractContentFromStatus(notification.Status)
 	return content
 }
 
 // ExtractContentFromStatus extracts clean text content and images from a status
-func (c *Client) ExtractContentFromStatus(status *mastodon.Status) (string, []model.Image, error) {
+func (c *Client) ExtractContentFromStatus(status *gomastodon.Status) (string, []model.Image, error) {
 	content := stripHTML(string(status.Content))
 	words := strings.Fields(content)
 
@@ -199,10 +199,10 @@ func (c *Client) BuildMention(acct string) string {
 	return "@" + acct + " "
 }
 
-func (c *Client) PostResponseWithSplit(ctx context.Context, inReplyToID, mention, response, visibility string) ([]*mastodon.Status, error) {
+func (c *Client) PostResponseWithSplit(ctx context.Context, inReplyToID, mention, response, visibility string) ([]*gomastodon.Status, error) {
 	parts := splitResponse(response, mention, c.config.MaxPostChars)
 
-	var postedStatuses []*mastodon.Status
+	var postedStatuses []*gomastodon.Status
 	currentReplyID := inReplyToID
 	for i, part := range parts {
 		// 2投稿目以降は待機して投稿順序を保証
@@ -234,11 +234,11 @@ func (c *Client) PostResponseWithMedia(ctx context.Context, inReplyToID, mention
 
 	// Post with media
 	fullResponse := mention + " " + response
-	toot := &mastodon.Toot{
+	toot := &gomastodon.Toot{
 		Status:      fullResponse,
-		InReplyToID: mastodon.ID(inReplyToID),
+		InReplyToID: gomastodon.ID(inReplyToID),
 		Visibility:  visibility,
-		MediaIDs:    []mastodon.ID{attachment.ID},
+		MediaIDs:    []gomastodon.ID{attachment.ID},
 	}
 
 	status, err := c.client.PostStatus(ctx, toot)
@@ -254,10 +254,10 @@ func (c *Client) PostResponseWithMedia(ctx context.Context, inReplyToID, mention
 	return string(status.ID), nil
 }
 
-func (c *Client) postReply(ctx context.Context, inReplyToID, content, visibility string) (*mastodon.Status, error) {
-	toot := &mastodon.Toot{
+func (c *Client) postReply(ctx context.Context, inReplyToID, content, visibility string) (*gomastodon.Status, error) {
+	toot := &gomastodon.Toot{
 		Status:      content,
-		InReplyToID: mastodon.ID(inReplyToID),
+		InReplyToID: gomastodon.ID(inReplyToID),
 		Visibility:  visibility,
 	}
 
@@ -276,8 +276,8 @@ func (c *Client) postReply(ctx context.Context, inReplyToID, content, visibility
 
 // PostStatus posts a new status (not a reply)
 // PostStatus posts a new status (not a reply)
-func (c *Client) PostStatus(ctx context.Context, content, visibility string) (*mastodon.Status, error) {
-	toot := &mastodon.Toot{
+func (c *Client) PostStatus(ctx context.Context, content, visibility string) (*gomastodon.Status, error) {
+	toot := &gomastodon.Toot{
 		Status:     content,
 		Visibility: visibility,
 	}
@@ -296,7 +296,7 @@ func (c *Client) PostStatus(ctx context.Context, content, visibility string) (*m
 
 // UpdateProfile updates the account profile (note)
 func (c *Client) UpdateProfile(ctx context.Context, note string) error {
-	profile := &mastodon.Profile{
+	profile := &gomastodon.Profile{
 		Note: &note,
 	}
 	_, err := c.client.AccountUpdate(ctx, profile)
@@ -304,9 +304,9 @@ func (c *Client) UpdateProfile(ctx context.Context, note string) error {
 }
 
 // UpdateProfileFields updates the account profile fields
-func (c *Client) UpdateProfileFields(ctx context.Context, fields []mastodon.Field) error {
+func (c *Client) UpdateProfileFields(ctx context.Context, fields []gomastodon.Field) error {
 	// go-mastodon should handle mapping Fields to fields_attributes if supported
-	profile := &mastodon.Profile{
+	profile := &gomastodon.Profile{
 		Fields: &fields,
 	}
 	_, err := c.client.AccountUpdate(ctx, profile)
@@ -314,12 +314,12 @@ func (c *Client) UpdateProfileFields(ctx context.Context, fields []mastodon.Fiel
 }
 
 // GetAccountCurrentUser retrieves the authenticated user's account
-func (c *Client) GetAccountCurrentUser(ctx context.Context) (*mastodon.Account, error) {
+func (c *Client) GetAccountCurrentUser(ctx context.Context) (*gomastodon.Account, error) {
 	return c.client.GetAccountCurrentUser(ctx)
 }
 
 // GetAccountByUsername finds an account by username
-func (c *Client) GetAccountByUsername(ctx context.Context, username string) (*mastodon.Account, error) {
+func (c *Client) GetAccountByUsername(ctx context.Context, username string) (*gomastodon.Account, error) {
 	// Use AccountsSearch to find the user
 	// Limit is set higher to increase chance of finding the exact match among fuzzy results
 	results, err := c.client.AccountsSearch(ctx, username, 5)
@@ -339,7 +339,7 @@ func (c *Client) GetAccountByUsername(ctx context.Context, username string) (*ma
 
 // FollowAccount follows the specified account
 func (c *Client) FollowAccount(ctx context.Context, accountID string) error {
-	_, err := c.client.AccountFollow(ctx, mastodon.ID(accountID))
+	_, err := c.client.AccountFollow(ctx, gomastodon.ID(accountID))
 	return err
 }
 
@@ -408,7 +408,7 @@ func skipLeadingNewlines(runes []rune, pos int) int {
 	return pos
 }
 
-func (c *Client) FormatCard(card *mastodon.Card) string {
+func (c *Client) FormatCard(card *gomastodon.Card) string {
 	var sb strings.Builder
 	sb.WriteString("\n\n[参照URL情報]\n")
 	sb.WriteString(fmt.Sprintf("URL: %s\n", card.URL))
@@ -422,7 +422,7 @@ func (c *Client) FormatCard(card *mastodon.Card) string {
 }
 
 // StreamPublic は連合タイムラインのストリーミングを開始し、イベントをチャネルに送信します
-func (c *Client) StreamPublic(ctx context.Context, eventChan chan<- mastodon.Event) {
+func (c *Client) StreamPublic(ctx context.Context, eventChan chan<- gomastodon.Event) {
 	events, err := c.client.StreamingPublic(ctx, false) // false = 連合タイムライン
 	if err != nil {
 		log.Printf("連合ストリーミング接続エラー: %v", err)
@@ -439,11 +439,11 @@ func (c *Client) StreamPublic(ctx context.Context, eventChan chan<- mastodon.Eve
 }
 
 // ExtractStatusFromEvent はイベントから Status を抽出します
-func ExtractStatusFromEvent(event mastodon.Event) *mastodon.Status {
+func ExtractStatusFromEvent(event gomastodon.Event) *gomastodon.Status {
 	switch e := event.(type) {
-	case *mastodon.UpdateEvent:
+	case *gomastodon.UpdateEvent:
 		return e.Status
-	case *mastodon.NotificationEvent:
+	case *gomastodon.NotificationEvent:
 		return e.Notification.Status
 	default:
 		return nil
@@ -460,7 +460,7 @@ func ExtractStatusFromEvent(event mastodon.Event) *mastodon.Status {
 // - 本文に実際のURLを含む(http://またはhttps://)
 // - メンションを含まない
 // ignoreURLRequirement: trueの場合、URLが含まれていなくても収集対象とする（Peerなど）
-func ShouldCollectFactsFromStatus(status *mastodon.Status, ignoreURLRequirement bool) bool {
+func ShouldCollectFactsFromStatus(status *gomastodon.Status, ignoreURLRequirement bool) bool {
 	if status == nil {
 		return false
 	}
@@ -498,8 +498,8 @@ func ShouldCollectFactsFromStatus(status *mastodon.Status, ignoreURLRequirement 
 }
 
 // fetchStatuses iterates through account statuses with pagination using a callback
-func (c *Client) fetchStatuses(ctx context.Context, accountID string, maxID mastodon.ID, handler func([]*mastodon.Status) (bool, error)) error {
-	pg := &mastodon.Pagination{
+func (c *Client) fetchStatuses(ctx context.Context, accountID string, maxID gomastodon.ID, handler func([]*gomastodon.Status) (bool, error)) error {
+	pg := &gomastodon.Pagination{
 		MaxID: maxID,
 		Limit: DefaultPageLimit,
 	}
@@ -512,7 +512,7 @@ func (c *Client) fetchStatuses(ctx context.Context, accountID string, maxID mast
 			break
 		}
 
-		statuses, err := c.client.GetAccountStatuses(ctx, mastodon.ID(accountID), pg)
+		statuses, err := c.client.GetAccountStatuses(ctx, gomastodon.ID(accountID), pg)
 		apiCalls++
 
 		if err != nil {
@@ -533,7 +533,7 @@ func (c *Client) fetchStatuses(ctx context.Context, accountID string, maxID mast
 
 		// 次のページへ
 		nextMaxID := statuses[len(statuses)-1].ID
-		pg = &mastodon.Pagination{
+		pg = &gomastodon.Pagination{
 			MaxID: nextMaxID,
 			Limit: DefaultPageLimit,
 		}
@@ -542,8 +542,8 @@ func (c *Client) fetchStatuses(ctx context.Context, accountID string, maxID mast
 }
 
 // GetStatusesByRange retrieves statuses within a specified ID range
-func (c *Client) GetStatusesByRange(ctx context.Context, accountID string, startID, endID string) ([]*mastodon.Status, error) {
-	var allStatuses []*mastodon.Status
+func (c *Client) GetStatusesByRange(ctx context.Context, accountID string, startID, endID string) ([]*gomastodon.Status, error) {
+	var allStatuses []*gomastodon.Status
 
 	// IDの大小関係を確認し、必要なら入れ替える（startID < endID）
 	if startID > endID {
@@ -558,7 +558,7 @@ func (c *Client) GetStatusesByRange(ctx context.Context, accountID string, start
 		log.Printf("終了IDのステータス取得失敗（削除されている可能性があります）: %v", err)
 	}
 
-	err = c.fetchStatuses(ctx, accountID, mastodon.ID(endID), func(statuses []*mastodon.Status) (bool, error) {
+	err = c.fetchStatuses(ctx, accountID, gomastodon.ID(endID), func(statuses []*gomastodon.Status) (bool, error) {
 		for _, status := range statuses {
 			// IDがstartIDより小さい（古い）場合は終了
 			if string(status.ID) < startID {
@@ -605,7 +605,7 @@ func (c *Client) GetStatusesByRange(ctx context.Context, accountID string, start
 	if !hasStartID {
 		startStatus, err := c.GetStatus(ctx, startID)
 		if err == nil && startStatus != nil {
-			allStatuses = append([]*mastodon.Status{startStatus}, allStatuses...)
+			allStatuses = append([]*gomastodon.Status{startStatus}, allStatuses...)
 		}
 	}
 
@@ -613,11 +613,11 @@ func (c *Client) GetStatusesByRange(ctx context.Context, accountID string, start
 }
 
 // GetStatusesByDateRange retrieves statuses within a specified date range (JST)
-func (c *Client) GetStatusesByDateRange(ctx context.Context, accountID string, startTime, endTime time.Time) ([]*mastodon.Status, error) {
-	var allStatuses []*mastodon.Status
+func (c *Client) GetStatusesByDateRange(ctx context.Context, accountID string, startTime, endTime time.Time) ([]*gomastodon.Status, error) {
+	var allStatuses []*gomastodon.Status
 	count := 0
 
-	err := c.fetchStatuses(ctx, accountID, "", func(statuses []*mastodon.Status) (bool, error) {
+	err := c.fetchStatuses(ctx, accountID, "", func(statuses []*gomastodon.Status) (bool, error) {
 		for _, status := range statuses {
 			// UTCからJSTに変換して比較
 			createdAtJST := status.CreatedAt.In(startTime.Location())
@@ -661,7 +661,7 @@ func (c *Client) GetStatusesByDateRange(ctx context.Context, accountID string, s
 }
 
 // sortStatusesByID sorts statuses by ID in ascending order (older to newer)
-func (c *Client) sortStatusesByID(statuses []*mastodon.Status) {
+func (c *Client) sortStatusesByID(statuses []*gomastodon.Status) {
 	sort.Slice(statuses, func(i, j int) bool {
 		return string(statuses[i].ID) < string(statuses[j].ID)
 	})

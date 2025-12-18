@@ -464,10 +464,8 @@ func (fc *FactCollector) CollectColleagueFact(ctx context.Context, account *goma
 		return
 	}
 
-	note := fc.mastodonClient.StripHTML(account.Note)
-	// 免責事項を削除
-	note = strings.ReplaceAll(note, strings.TrimSpace(facts.DisclaimerText), "")
-	note = strings.TrimSpace(note)
+	// 免責事項の削除とクリーンアップ（集約メソッドを使用）
+	note := fc.mastodonClient.ExtractCleanProfileNote(account.Note)
 
 	displayName := account.DisplayName
 	if displayName == "" {

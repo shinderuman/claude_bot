@@ -13,12 +13,16 @@ import (
 	gomastodon "github.com/mattn/go-mastodon"
 )
 
-func getTestService() *FactService {
-	return &FactService{}
+func getTestService() (*FactService, *mastodon.Client) {
+	m := &mastodon.Client{}
+	s := &FactService{
+		mastodonClient: m,
+	}
+	return s, m
 }
 
 func TestFormatProfileText(t *testing.T) {
-	service := getTestService()
+	_, m := getTestService()
 
 	// 免責文の長さを考慮したMaxBodyLenを計算
 	tests := []struct {
@@ -31,57 +35,57 @@ func TestFormatProfileText(t *testing.T) {
 		{
 			name:    "Short text",
 			input:   "Short profile.",
-			wantEnd: DisclaimerText,
+			wantEnd: mastodon.DisclaimerText,
 			wantLen: 500,
 		},
 		{
 			name:    "Long text with separators",
 			input:   strings.Repeat("あ", 300) + "\n" + strings.Repeat("い", 300),
-			wantEnd: DisclaimerText,
+			wantEnd: mastodon.DisclaimerText,
 			wantLen: 500,
 		},
 		{
 			name:     "Long text WITHOUT separators",
 			input:    strings.Repeat("無", 600),
-			wantEnd:  DisclaimerText,
+			wantEnd:  mastodon.DisclaimerText,
 			wantLen:  500,
 			checkCut: true,
 		},
 		{
 			name:     "English text with periods (currently ignored)",
 			input:    strings.Repeat("This is a sentence. ", 40), // approx 800 chars
-			wantEnd:  DisclaimerText,
+			wantEnd:  mastodon.DisclaimerText,
 			wantLen:  500,
 			checkCut: true,
 		},
 		{
 			name:    "Exact limit length (No cut)",
 			input:   strings.Repeat("あ", 456), // 500 - 44(Disclaimer length approx)
-			wantEnd: DisclaimerText,
+			wantEnd: mastodon.DisclaimerText,
 			wantLen: 500,
 		},
 		{
 			name:     "Limit + 1 length (Forced cut)",
 			input:    strings.Repeat("あ", 457), // 1 char over limit
-			wantEnd:  DisclaimerText,
+			wantEnd:  mastodon.DisclaimerText,
 			wantLen:  500,
 			checkCut: true,
 		},
 		{
 			name:    "Separator exactly at limit",
 			input:   strings.Repeat("あ", 455) + "。\n" + "い", // Separator at 456th char
-			wantEnd: DisclaimerText,
+			wantEnd: mastodon.DisclaimerText,
 			wantLen: 500,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := service.formatProfileText(tt.input)
+			got := m.FormatProfileText(tt.input)
 
 			// 1. 全体の長さチェック
-			if len([]rune(got)) > MaxMastodonProfileChars {
-				t.Errorf("Length %d > %d", len([]rune(got)), MaxMastodonProfileChars)
+			if len([]rune(got)) > mastodon.MaxMastodonProfileChars {
+				t.Errorf("Length %d > %d", len([]rune(got)), mastodon.MaxMastodonProfileChars)
 			}
 
 			// 2. 免責文が含まれているか
@@ -91,8 +95,8 @@ func TestFormatProfileText(t *testing.T) {
 
 			// 3. 強制カットの確認
 			if tt.checkCut {
-				body := strings.TrimSuffix(got, DisclaimerText)
-				expectedBodyLen := MaxMastodonProfileChars - len([]rune(DisclaimerText))
+				body := strings.TrimSuffix(got, mastodon.DisclaimerText)
+				expectedBodyLen := mastodon.MaxMastodonProfileChars - len([]rune(mastodon.DisclaimerText))
 				if len([]rune(body)) != expectedBodyLen {
 					t.Errorf("Body length %d != expected %d", len([]rune(body)), expectedBodyLen)
 				}
@@ -117,7 +121,7 @@ func TestShardingDistribution(t *testing.T) {
 
 	counts := make(map[int]int)
 	processedFacts := make(map[string]bool)
-	service := getTestService()
+	service, _ := getTestService()
 
 	for i := 0; i < totalInstances; i++ {
 		assigned := service.shardFacts(facts, i, totalInstances)
@@ -165,7 +169,7 @@ func TestSmallBatchSkipping(t *testing.T) {
 	t.Log("Simulating 5 facts distribution (Threshold per bot: 5):")
 
 	anyArchived := false
-	service := getTestService()
+	service, _ := getTestService()
 	for i := range totalInstances {
 		assigned := service.shardFacts(facts, i, totalInstances)
 		shouldArchive := len(assigned) >= threshold
@@ -234,13 +238,14 @@ func TestBuildProfileFields(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := getTestService()
-			s.config = &config.Config{
+			s, m := getTestService()
+			cfg := &config.Config{
 				AllowRemoteUsers: tt.allowRemote,
 				Timezone:         tt.timezone,
 			}
+			s.config = cfg
 
-			got := s.buildProfileFields(tt.existingFields, tt.authKey)
+			got := m.BuildProfileFields(cfg, tt.existingFields, tt.authKey)
 
 			// 1. Verify Managed Fields Exist and match values
 			managedFound := map[string]bool{
@@ -281,7 +286,7 @@ func TestBuildProfileFields(t *testing.T) {
 			// Expected order: [User Fields...] -> SystemID -> MentionStatus -> LastUpdated
 
 			// Find indices
-			var idxSystemID, idxMention, idxLastUpdated int = -1, -1, -1
+			var idxSystemID, idxMention, idxLastUpdated = -1, -1, -1
 			for i, f := range got {
 				switch f.Name {
 				case mastodon.ProfileFieldSystemID:
@@ -317,8 +322,8 @@ func TestBuildProfileFields(t *testing.T) {
 }
 
 func TestBuildProfileFields_OrderGuarantee(t *testing.T) {
-	s := getTestService()
-	s.config = &config.Config{
+	_, m := getTestService()
+	cfg := &config.Config{
 		AllowRemoteUsers: true,
 		Timezone:         "UTC",
 	}
@@ -333,7 +338,7 @@ func TestBuildProfileFields_OrderGuarantee(t *testing.T) {
 	}
 
 	authKey := "new-auth-key"
-	got := s.buildProfileFields(input, authKey)
+	got := m.BuildProfileFields(cfg, input, authKey)
 
 	// Expected Order:
 	// 1. UserField1
