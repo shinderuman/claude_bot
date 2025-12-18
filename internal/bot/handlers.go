@@ -112,7 +112,8 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 	tmpPngFilename := fmt.Sprintf(TempImageFilenamePNG, os.TempDir(), time.Now().Unix())
 	if err := image.ConvertSVGToPNG(tmpSvgFilename, tmpPngFilename); err != nil {
 		log.Printf("PNG変換エラー: %v", err)
-		// 変換失敗時はエラーログを出してSVGを使用
+		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.ImageGeneration)
+		return false
 	} else {
 		defer os.Remove(tmpPngFilename) //nolint:errcheck // クリーンアップ
 	}
