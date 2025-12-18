@@ -67,7 +67,7 @@ func main() {
 		log.Printf("テストモード: %s を使用します", factsFile)
 	}
 	factStore := store.NewFactStore(factsFile)
-	factService := facts.NewFactService(cfg, factStore, llmClient, nil)
+	factService := facts.NewFactService(cfg, factStore, llmClient, nil, nil)
 
 	switch *mode {
 	case "response":

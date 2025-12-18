@@ -127,6 +127,7 @@ multiselect_services() {
     # data/.env* -> claude_bot OR claude_bot_suffix
     for f in data/.env*; do
         [ -e "$f" ] || continue
+        [[ "$f" == "data/.env" ]] && continue # 共通設定ファイル (.env) は除外
         [[ "$f" == *"example"* ]] && continue # exampleは除外
         
         local filename=$(basename "$f")

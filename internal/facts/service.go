@@ -14,6 +14,7 @@ import (
 	"claude_bot/internal/llm"
 	"claude_bot/internal/mastodon"
 	"claude_bot/internal/model"
+	"claude_bot/internal/slack"
 	"claude_bot/internal/store"
 
 	gomastodon "github.com/mattn/go-mastodon"
@@ -87,14 +88,16 @@ type FactService struct {
 	factStore      *store.FactStore
 	llmClient      *llm.Client
 	mastodonClient *mastodon.Client
+	slackClient    *slack.Client
 }
 
-func NewFactService(cfg *config.Config, store *store.FactStore, llm *llm.Client, mastodon *mastodon.Client) *FactService {
+func NewFactService(cfg *config.Config, store *store.FactStore, llm *llm.Client, mastodon *mastodon.Client, slack *slack.Client) *FactService {
 	return &FactService{
 		config:         cfg,
 		factStore:      store,
 		llmClient:      llm,
 		mastodonClient: mastodon,
+		slackClient:    slack,
 	}
 }
 
@@ -874,6 +877,17 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 	}
 
 	log.Printf("自己プロファイルを更新しました: %s (%d文字)", s.config.BotProfileFile, len([]rune(profileText)))
+
+	// Slackにも通知
+	if s.slackClient != nil {
+		message := fmt.Sprintf(`🤖 プロフィールを更新しました
+アカウント: %s 
+
+`+"```\n%s\n```", s.config.BotUsername, profileText)
+		if err := s.slackClient.PostMessage(ctx, message); err != nil {
+			log.Printf("Slack通知エラー: %v", err)
+		}
+	}
 
 	return nil
 }

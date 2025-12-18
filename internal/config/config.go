@@ -28,6 +28,10 @@ type Config struct {
 	AllowRemoteUsers bool
 	EnableFactStore  bool
 
+	// Slack Settings
+	SlackBotToken  string
+	SlackChannelID string
+
 	// 会話管理設定
 	ConversationMessageCompressThreshold int
 	ConversationMessageKeepCount         int
@@ -100,14 +104,23 @@ func (c *Config) IsFederatedStreamingEnabled() bool {
 }
 
 func LoadEnvironment(envPath string) {
+	// 1. 個別設定ファイルの読み込み
 	if envPath == "" {
+		// 指定がない場合はデフォルトの .env を探す
 		envPath = util.GetFilePath(".env")
 	}
 
 	if err := godotenv.Load(envPath); err != nil {
-		log.Fatal("環境設定ファイルが見つかりません: ", envPath)
+		log.Fatal("個別環境設定ファイルが見つかりません: ", envPath)
 	}
-	log.Printf("環境設定ファイルを読み込みました: %s", envPath)
+
+	// 2. 共通設定ファイルの読み込み (data/.env)
+	// godotenv.Load は既存の環境変数を上書きしないため、
+	// 個別設定で未定義の項目のみがここから読み込まれる。
+	commonEnvPath := util.GetFilePath(".env")
+	if err := godotenv.Load(commonEnvPath); err == nil {
+		log.Printf("共通環境設定ファイルなしか読み込み失敗（無視します）: %s", commonEnvPath)
+	}
 }
 
 func LoadConfig() *Config {
@@ -127,6 +140,10 @@ func LoadConfig() *Config {
 		CharacterPrompt:  os.Getenv("CHARACTER_PROMPT"),
 		AllowRemoteUsers: parseBool(os.Getenv("ALLOW_REMOTE_USERS")),
 		EnableFactStore:  parseBool(os.Getenv("ENABLE_FACT_STORE")),
+
+		// Slack Settings
+		SlackBotToken:  os.Getenv("SLACK_BOT_TOKEN"),
+		SlackChannelID: os.Getenv("SLACK_CHANNEL_ID"),
 
 		ConversationMessageCompressThreshold: parseInt(os.Getenv("CONVERSATION_MESSAGE_COMPRESS_THRESHOLD")),
 		ConversationMessageKeepCount:         parseInt(os.Getenv("CONVERSATION_MESSAGE_KEEP_COUNT")),

@@ -16,6 +16,7 @@ import (
 	"claude_bot/internal/llm"
 	"claude_bot/internal/mastodon"
 	"claude_bot/internal/model"
+	"claude_bot/internal/slack"
 	"claude_bot/internal/store"
 	"claude_bot/internal/util"
 
@@ -66,6 +67,7 @@ type Bot struct {
 	factStore         *store.FactStore
 	llmClient         *llm.Client
 	mastodonClient    *mastodon.Client
+	slackClient       *slack.Client
 	factCollector     *collector.FactCollector
 	factService       *facts.FactService
 	imageGenerator    *image.ImageGenerator
@@ -87,9 +89,12 @@ func NewBot(cfg *config.Config) *Bot {
 	}
 	mastodonClient := mastodon.NewClient(mastodonConfig)
 
+	// Slack Client
+	slackClient := slack.NewClient(cfg.SlackBotToken, cfg.SlackChannelID)
+
 	factStore := store.InitializeFactStore(cfg)
 
-	factService := facts.NewFactService(cfg, factStore, llmClient, mastodonClient)
+	factService := facts.NewFactService(cfg, factStore, llmClient, mastodonClient, slackClient)
 
 	var imageGen *image.ImageGenerator
 	if cfg.EnableImageGeneration {
@@ -102,6 +107,7 @@ func NewBot(cfg *config.Config) *Bot {
 		factStore:         factStore,
 		llmClient:         llmClient,
 		mastodonClient:    mastodonClient,
+		slackClient:       slackClient,
 		factService:       factService,
 		imageGenerator:    imageGen,
 		lastUserStatusMap: make(map[string]string),
