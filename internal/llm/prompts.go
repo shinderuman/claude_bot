@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/mattn/go-mastodon"
+	gomastodon "github.com/mattn/go-mastodon"
 )
 
 // Messages holds all static message strings used by the bot
@@ -218,6 +219,23 @@ func BuildURLContentFactExtractionPrompt(urlContent string) string {
 // BuildBotProfilePrompt creates a prompt for generating the bot's self-perception profile
 func BuildBotProfilePrompt(factsList string) string {
 	return fmt.Sprintf(Templates.BotProfileGeneration, factsList)
+}
+
+// BuildCardPrompt creates a prompt context from a Mastodon card
+func BuildCardPrompt(card *gomastodon.Card) string {
+	if card == nil {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\n\n[参照URL情報]\n")
+	sb.WriteString(fmt.Sprintf("URL: %s\n", card.URL))
+	if card.Title != "" {
+		sb.WriteString(fmt.Sprintf("タイトル: %s\n", card.Title))
+	}
+	if card.Description != "" {
+		sb.WriteString(fmt.Sprintf("説明: %s\n", card.Description))
+	}
+	return sb.String()
 }
 
 // BuildFactSanitizationPrompt creates a prompt for detecting conflicting facts

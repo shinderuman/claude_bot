@@ -100,8 +100,7 @@ func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, 
 				continue
 			}
 
-			// MIMEタイプ処理（Geminiがサポートする形式か簡易チェックするなど）
-			// ここではそのまま渡す
+			// MIMEタイプ処理
 			parts = append(parts, genai.ImageData(img.MediaType, data))
 		}
 	}

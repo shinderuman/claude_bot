@@ -136,7 +136,6 @@ func (b *Bot) Run(ctx context.Context) error {
 	}
 
 	if b.factService != nil {
-		// 起動時に自己プロファイルを読み込む（メンテナンスは非同期でランダムに実行される）
 		go func() {
 			log.Println("起動時自己プロファイル読み込みを開始します...")
 			if err := b.factService.LoadBotProfile(ctx); err != nil {
@@ -178,8 +177,7 @@ func (b *Bot) Run(ctx context.Context) error {
 				}
 			case *gomastodon.UpdateEvent:
 				// ユーザーの最新ステータスIDを更新
-				// 注: StreamUserはホームタイムラインも含むため、フォローしているユーザーの投稿も来る
-				// ここでは発言者のAcctをキーにしてIDを保存する
+				// StreamUserはホームTLも含むため発言者のAcctをキーにしてIDを保存
 				prevID := b.lastUserStatusMap[e.Status.Account.Acct]
 				b.lastUserStatusMap[e.Status.Account.Acct] = string(e.Status.ID)
 
@@ -211,7 +209,6 @@ func (b *Bot) logStartupInfo() {
 	log.Printf("Bot: @%s @ %s | Mode: %s | %s",
 		b.config.BotUsername, b.config.MastodonServer, strings.ToUpper(b.config.LLMProvider), modelInfo)
 
-	// 機能設定
 	// 機能設定
 	log.Printf("機能: リモートユーザー=%t, 事実ストア=%t, 画像認識=%t, ファクト収集(全体/自己/連合)=%t/%t/%t",
 		b.config.AllowRemoteUsers, b.config.EnableFactStore, b.config.EnableImageRecognition,
@@ -264,13 +261,12 @@ func (b *Bot) handleNotification(ctx context.Context, notification *gomastodon.N
 		return
 	}
 
-	// アシスタント機能（発言分析）のチェックはprocessResponse内のclassifyIntentで行うため、ここでは削除
-	// 以前のコードブロックは削除済み
+	// アシスタント機能（発言分析）のチェックはprocessResponse内のclassifyIntentで行う
 
 	// ブロードキャストコマンドのチェックと除去
 	if b.isBroadcastCommand(userMessage) {
 		log.Printf("リプライ内ブロードキャストコマンドを検出: %s", userMessage)
-		// コマンド部分を除去（単純な置換でOK、isBroadcastCommandで検証済み）
+		// リプライ内ブロードキャストコマンドを検出して除去
 		userMessage = strings.Replace(userMessage, b.config.BroadcastCommand, "", 1)
 		userMessage = strings.TrimSpace(userMessage)
 	}

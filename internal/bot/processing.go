@@ -110,7 +110,7 @@ func (b *Bot) extractFactsFromMentionURLs(ctx context.Context, notification *gom
 func (b *Bot) extractURLContext(ctx context.Context, notification *gomastodon.Notification, content string) string {
 	// 1. Mastodon Card (優先)
 	if notification.Status.Card != nil {
-		return b.mastodonClient.FormatCard(notification.Status.Card)
+		return llm.BuildCardPrompt(notification.Status.Card)
 	}
 
 	// 2. 独自取得 (Cardがない場合)

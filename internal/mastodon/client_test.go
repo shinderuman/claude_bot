@@ -92,3 +92,41 @@ func TestFindLastNewline(t *testing.T) {
 		})
 	}
 }
+
+func TestStripHTML(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "Simple P tag",
+			input: "<p>Hello</p>",
+			want:  "Hello",
+		},
+		{
+			name:  "With BR",
+			input: "<p>Line1<br />Line2</p>",
+			want:  "Line1\nLine2",
+		},
+		{
+			name:  "Complex",
+			input: "<p>Link: <a href=\"example.com\">Example</a></p>",
+			want:  "Link: Example",
+		},
+		{
+			name:  "No HTML",
+			input: "Plain Text",
+			want:  "Plain Text",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stripHTML(tt.input)
+			if got != tt.want {
+				t.Errorf("stripHTML() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

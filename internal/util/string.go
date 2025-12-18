@@ -7,7 +7,7 @@ func ExtractIDFromURL(url string) string {
 	parts := strings.Split(url, "/")
 	if len(parts) > 0 {
 		lastPart := parts[len(parts)-1]
-		// 数字のみかチェック（簡易的）
+		// 数字のみかチェック
 		for _, r := range lastPart {
 			if r < '0' || r > '9' {
 				return ""

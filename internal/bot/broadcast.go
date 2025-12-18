@@ -63,9 +63,7 @@ func (b *Bot) handleBroadcastCommand(ctx context.Context, status *gomastodon.Sta
 	// ステータスのコピーを作成（元のステータスを変更しないため）
 	statusCopy := *status
 
-	// コンテンツからコマンドを除去（単純な置換）
-	// 注意: HTMLタグを考慮していないが、!allのような単純なコマンドなら通常は問題ない
-	// 将来的にはより堅牢なHTML解析が必要になる可能性あり
+	// コマンド除去 (HTMLタグ未考慮だが単純なコマンドなら問題なし)
 	statusCopy.Content = strings.Replace(status.Content, b.config.BroadcastCommand, "", 1)
 
 	// 擬似的なメンション通知を作成して処理を委譲

@@ -83,7 +83,7 @@ func ExtractJSON(s string) string {
 	}
 
 	if start == -1 {
-		return "{}" // デフォルトは空オブジェクト（文脈によるが安全策）
+		return "{}" // デフォルトは空オブジェクト
 	}
 
 	endObj := strings.LastIndex(s, "}")

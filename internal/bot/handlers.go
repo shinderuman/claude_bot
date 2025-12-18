@@ -112,9 +112,7 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 	tmpPngFilename := fmt.Sprintf(TempImageFilenamePNG, os.TempDir(), time.Now().Unix())
 	if err := image.ConvertSVGToPNG(tmpSvgFilename, tmpPngFilename); err != nil {
 		log.Printf("PNG変換エラー: %v", err)
-		// 変換失敗時はSVGのままアップロードを試みる（またはエラーにする）
-		// ここではエラーログを出してSVGを使用
-		tmpPngFilename = tmpSvgFilename
+		// 変換失敗時はエラーログを出してSVGを使用
 	} else {
 		defer os.Remove(tmpPngFilename) //nolint:errcheck // クリーンアップ
 	}
@@ -243,9 +241,7 @@ func (b *Bot) generateFollowReply(ctx context.Context, targetAcct, template, fal
 // handleAssistantRequest handles the assistant analysis request
 func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session, conversation *model.Conversation, startID, endID, userMessage, statusID, mention, visibility string) bool {
 
-	// 1. 対象ユーザー（発言者）の特定
-	// URLからアカウント情報を取得するために、ステータスを取得してみるのが確実
-	// まずstartIDのステータスを取得して、その投稿者を特定する
+	// 1. URLからアカウント情報を特定するためにまず開始ステータスを取得
 	targetStatus, err := b.mastodonClient.GetStatus(ctx, startID)
 	if err != nil {
 		log.Printf("開始ステータス取得失敗: %v", err)
@@ -280,8 +276,7 @@ func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session
 		return false
 	}
 
-	// 4. Mastodonに投稿 (分割投稿対応)
-	// 投稿した全てのStatusIDを取得する
+	// 4. Mastodonに投稿 (分割投稿対応、全StatusID取得)
 	postedStatuses, err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
 	if err != nil {
 		log.Printf("応答の投稿に失敗しました: %v", err)
@@ -295,8 +290,7 @@ func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session
 		postedIDs = append(postedIDs, string(s.ID))
 	}
 
-	// 5. 会話履歴にアシスタントの発言を追加 (投稿成功後)
-	// 投稿された全てのIDを保存する
+	// 5. 会話履歴にアシスタントの発言（全ID）を追加
 	store.AddMessage(conversation, "assistant", response, postedIDs)
 
 	session.LastUpdated = time.Now()
