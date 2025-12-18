@@ -656,6 +656,8 @@ func (s *FactStore) RemoveFacts(target string, shouldRemove func(model.Fact) boo
 	for _, fact := range s.Facts {
 		// ターゲットが一致し、かつ条件に合致する場合は削除対象（newFactsに追加しない）
 		if fact.Target == target && shouldRemove(fact) {
+			jsonBytes, _ := json.Marshal(fact)
+			log.Printf("🗑️ ファクト削除: %s", string(jsonBytes))
 			deletedCount++
 			continue
 		}

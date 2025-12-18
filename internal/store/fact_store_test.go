@@ -12,7 +12,9 @@ func TestFactStore_SearchFuzzy_TargetUserName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name()) // cleanup
+	t.Cleanup(func() {
+		_ = os.Remove(tmpFile.Name())
+	})
 
 	store := NewFactStore(tmpFile.Name())
 
@@ -90,5 +92,56 @@ func TestFactStore_SearchFuzzy_TargetUserName(t *testing.T) {
 	results7 := store.SearchFuzzy([]string{"nomatch"}, []string{"preference"})
 	if len(results7) != 0 {
 		t.Errorf("Mismatch Search should fail: got %d results, want 0", len(results7))
+	}
+}
+
+func TestFactStore_RemoveFacts(t *testing.T) {
+	// Setup temporary fact store
+	tmpFile, err := os.CreateTemp("", "fact_store_test_remove_*.json")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Remove(tmpFile.Name())
+	})
+
+	store := NewFactStore(tmpFile.Name())
+
+	target := "target@example.com"
+	// Add test facts
+	facts := []model.Fact{
+		{
+			Target: target,
+			Key:    "key1",
+			Value:  "keep",
+		},
+		{
+			Target: target,
+			Key:    "key2",
+			Value:  "delete",
+		},
+		{
+			Target: "other@example.com",
+			Key:    "key2",
+			Value:  "keep_other",
+		},
+	}
+	store.Facts = facts
+
+	// Remove logic: delete if Value is "delete"
+	deleted, err := store.RemoveFacts(target, func(f model.Fact) bool {
+		return f.Value == "delete"
+	})
+
+	if err != nil {
+		t.Errorf("RemoveFacts returned error: %v", err)
+	}
+
+	if deleted != 1 {
+		t.Errorf("RemoveFacts deleted count = %d, want 1", deleted)
+	}
+
+	if len(store.Facts) != 2 {
+		t.Errorf("Store facts count = %d, want 2", len(store.Facts))
 	}
 }
