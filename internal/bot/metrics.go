@@ -52,7 +52,7 @@ func (b *Bot) collectAndLogMetrics() error {
 	if err != nil {
 		return fmt.Errorf("failed to open metrics log file: %w", err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	// Facts Metrics
 	factsCount := len(b.factStore.Facts)
