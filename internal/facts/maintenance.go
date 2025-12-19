@@ -61,18 +61,32 @@ func (s *FactService) processTargetMaintenance(ctx context.Context, target strin
 		return false, nil
 	}
 
-	shouldArchive, reason := s.shouldArchiveFacts(myFacts, totalInstances)
+	// アーカイブ対象のフィルタリング
+	// システム管理用のファクト（同僚プロファイルなど）はアーカイブ対象外とする
+	var archiveCandidateFacts []model.Fact
+	for _, f := range myFacts {
+		if !strings.HasPrefix(f.Key, "system:") {
+			archiveCandidateFacts = append(archiveCandidateFacts, f)
+		}
+	}
+
+	// アーカイブ候補がなければスキップ
+	if len(archiveCandidateFacts) == 0 {
+		return false, nil
+	}
+
+	shouldArchive, reason := s.shouldArchiveFacts(archiveCandidateFacts, totalInstances)
 
 	if shouldArchive {
-		log.Printf("ターゲット %s: %d件を担当 -> アーカイブを実行します (理由: %s, Instance %d)", target, len(myFacts), reason, instanceID)
-		if err := s.archiveTargetFacts(ctx, target, myFacts); err != nil {
+		log.Printf("ターゲット %s: %d件を担当 -> アーカイブを実行します (理由: %s, Instance %d)", target, len(archiveCandidateFacts), reason, instanceID)
+		if err := s.archiveTargetFacts(ctx, target, archiveCandidateFacts); err != nil {
 			log.Printf("ターゲット %s のアーカイブ失敗: %v", target, err)
 			return false, err
 		}
 		return true, nil
 	}
 
-	log.Printf("ターゲット %s: %d件を担当 -> スキップします (件数不足, Instance %d)", target, len(myFacts), instanceID)
+	log.Printf("ターゲット %s: %d件を担当 -> スキップします (件数不足, Instance %d)", target, len(archiveCandidateFacts), instanceID)
 	return false, nil
 }
 
@@ -341,12 +355,20 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 		}
 	}
 
-	var factList strings.Builder
+	// ファクトリストの構築（同僚情報は除外）
+	var factsBuilder strings.Builder
+
 	for _, f := range facts {
-		factList.WriteString(fmt.Sprintf("- %s: %v\n", f.Key, f.Value))
+		// system:colleague_profile で始まるキーは同僚情報（知識）なので、自己プロファイル生成の入力からは除外する
+		if strings.HasPrefix(f.Key, "system:colleague_profile") {
+			continue
+		}
+
+		line := fmt.Sprintf("- %s: %v\n", f.Key, f.Value)
+		factsBuilder.WriteString(line)
 	}
 
-	prompt := llm.BuildBotProfilePrompt(factList.String())
+	prompt := llm.BuildBotProfilePrompt(factsBuilder.String())
 
 	messages := []model.Message{{Role: "user", Content: prompt}}
 

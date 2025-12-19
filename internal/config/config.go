@@ -123,7 +123,7 @@ func LoadEnvironment(envPath string) {
 	// godotenv.Load は既存の環境変数を上書きしないため、
 	// 個別設定で未定義の項目のみがここから読み込まれる。
 	commonEnvPath := util.GetFilePath(".env")
-	if err := godotenv.Load(commonEnvPath); err == nil {
+	if err := godotenv.Load(commonEnvPath); err != nil {
 		log.Printf("共通環境設定ファイルなしか読み込み失敗（無視します）: %s", commonEnvPath)
 	}
 }

@@ -291,3 +291,42 @@ func TestFactStore_ZombieProtection(t *testing.T) {
 		t.Error("New Fact B missing! It should have been saved.")
 	}
 }
+
+func TestFactStore_RemoveFactsByKey(t *testing.T) {
+	// Setup temporary fact store
+	tmpFile, err := os.CreateTemp("", "fact_store_test_remove_key_*.json")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Remove(tmpFile.Name())
+	})
+
+	store := NewFactStore(tmpFile.Name(), slack.NewClient("", "", ""))
+
+	target := "target@example.com"
+	key := "target_key"
+	facts := []model.Fact{
+		{Target: target, Key: key, Value: "v1", Timestamp: time.Now()},
+		{Target: target, Key: key, Value: "v2", Timestamp: time.Now()}, // Duplicate key
+		{Target: target, Key: "other_key", Value: "v3", Timestamp: time.Now()},
+		{Target: "other", Key: key, Value: "v4", Timestamp: time.Now()},
+	}
+	store.Facts = facts
+
+	count := store.RemoveFactsByKey(target, key)
+
+	if count != 2 {
+		t.Errorf("Removed count = %d, want 2", count)
+	}
+
+	if len(store.Facts) != 2 {
+		t.Errorf("Remaining facts = %d, want 2", len(store.Facts))
+	}
+
+	for _, f := range store.Facts {
+		if f.Target == target && f.Key == key {
+			t.Error("Found fact that should be removed")
+		}
+	}
+}

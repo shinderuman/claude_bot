@@ -207,18 +207,10 @@ func (s *FactService) SaveColleagueFact(ctx context.Context, targetUserName, dis
 
 	// Bot自身をターゲットとして保存
 	myUsername := s.config.BotUsername
-	// 既存のファクトを確認（差分更新）
-	existingFacts := s.factStore.GetFactsByTarget(myUsername)
-	for _, f := range existingFacts {
-		if f.Key == key {
-			if f.Value == value {
-				// 変更なし
-				return nil
-			}
-			// 暫定的に「新しいタイムスタンプで追加」して最新を優先する
-			break
-		}
-	}
+
+	// 既存の同僚ファクトを削除（上書き）して、常に最新の状態を維持する
+	// これにより、重複したプロフィール情報が蓄積されるのを防ぐ
+	s.factStore.RemoveFactsByKey(myUsername, key)
 
 	fact := model.Fact{
 		Target:             myUsername,

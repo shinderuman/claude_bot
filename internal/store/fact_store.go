@@ -113,3 +113,21 @@ func (s *FactStore) GetFactsByTarget(target string) []model.Fact {
 	}
 	return results
 }
+
+// RemoveFactsByKey removes all facts matching the target and key
+func (s *FactStore) RemoveFactsByKey(target, key string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var newFacts []model.Fact
+	count := 0
+	for _, fact := range s.Facts {
+		if fact.Target == target && fact.Key == key {
+			count++
+			continue
+		}
+		newFacts = append(newFacts, fact)
+	}
+	s.Facts = newFacts
+	return count
+}
