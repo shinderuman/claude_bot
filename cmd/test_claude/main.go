@@ -19,9 +19,6 @@ import (
 	"claude_bot/internal/model"
 	"claude_bot/internal/slack"
 	"claude_bot/internal/store"
-	"claude_bot/internal/util"
-
-	"github.com/joho/godotenv"
 )
 
 func main() {
@@ -36,20 +33,14 @@ func main() {
 	var envPath string
 	if flag.NArg() > 0 {
 		envPath = flag.Arg(0)
-		err := godotenv.Load(envPath)
-		if err != nil {
-			log.Fatalf("指定された.envファイルの読み込みに失敗しました: %s (エラー: %v)", envPath, err)
-		}
+	}
+
+	// 環境変数の読み込み（共通設定ファイル .env の読み込みも含む）
+	config.LoadEnvironment(envPath)
+	if envPath != "" {
 		log.Printf("設定ファイルを読み込みました: %s", envPath)
 	} else {
-		// デフォルト（存在する場合のみ）
-		envPath = util.GetFilePath(".env")
-		err := godotenv.Load(envPath)
-		if err != nil {
-			fmt.Printf("デフォルトの.envファイルが見つかりません（無視します）: %s\n", envPath)
-		} else {
-			log.Printf("デフォルト設定ファイルを読み込みました: %s", envPath)
-		}
+		log.Printf("デフォルト設定ファイルを読み込みました")
 	}
 
 	// config.LoadConfig()内で環境変数は参照される
