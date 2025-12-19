@@ -157,6 +157,11 @@ func (b *Bot) Run(ctx context.Context) error {
 	// ファクト収集の開始
 	if b.factCollector != nil {
 		b.factCollector.Start(ctx)
+		// 起動時にもPeer探索を実行
+		go func() {
+			log.Println("起動時Peer探索を開始します...")
+			b.factCollector.DiscoverAndCollectPeerFacts(ctx)
+		}()
 	}
 
 	// 定期的なファクトメンテナンス（1日1回）
