@@ -129,6 +129,13 @@ func (b *Bot) Run(ctx context.Context) error {
 	// Initialize URL Blacklist with file watching
 	b.config.URLBlacklist = config.InitializeURLBlacklist(ctx, os.Getenv("URL_BLACKLIST"))
 
+	// JSON修復エラー時のSlack通知設定
+	if b.config.SlackErrorChannelID != "" {
+		llm.SetErrorNotifier(func(msg, details string) {
+			b.slackClient.PostMessageToChannel(ctx, b.config.SlackErrorChannelID, fmt.Sprintf("⚠️ %s\n```\n%s\n```", msg, details))
+		})
+	}
+
 	b.logStartupInfo()
 
 	if b.config.EnableFactStore {

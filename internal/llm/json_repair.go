@@ -2,9 +2,20 @@ package llm
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"strings"
 )
+
+// ErrorNotifierFunc defines the callback signature for error notifications
+type ErrorNotifierFunc func(message, details string)
+
+var errorNotifier ErrorNotifierFunc
+
+// SetErrorNotifier sets the callback function for error notifications
+func SetErrorNotifier(notifier ErrorNotifierFunc) {
+	errorNotifier = notifier
+}
 
 // RepairJSON attempts to repair a truncated or malformed JSON string.
 // It uses a hybrid strategy:
@@ -153,7 +164,13 @@ func UnmarshalWithRepair(jsonStr string, v interface{}, logPrefix string) error 
 		// リトライ: JSON修復を試みる
 		repairedJSON := RepairJSON(jsonStr)
 		if err := json.Unmarshal([]byte(repairedJSON), v); err != nil {
-			log.Printf("%sJSONパースエラー(修復後): %v\nOriginal: %s\nRepaired: %s", logPrefix, err, jsonStr, repairedJSON)
+			msg := fmt.Sprintf("%sJSONパースエラー(修復後): %v", logPrefix, err)
+			detail := fmt.Sprintf("Original: %s\nRepaired: %s", jsonStr, repairedJSON)
+			log.Printf("%s\n%s", msg, detail)
+
+			if errorNotifier != nil {
+				go errorNotifier(msg, detail)
+			}
 			return err
 		}
 	}

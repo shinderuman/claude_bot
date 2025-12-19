@@ -15,7 +15,7 @@ type Client struct {
 
 // NewClient creates a new Slack client
 func NewClient(token, channelID string) *Client {
-	if token == "" || channelID == "" {
+	if token == "" {
 		return &Client{
 			enabled: false,
 		}
@@ -30,6 +30,11 @@ func NewClient(token, channelID string) *Client {
 
 // PostMessage sends a message to the configured Slack channel
 func (c *Client) PostMessage(ctx context.Context, message string) error {
+	return c.PostMessageToChannel(ctx, c.channelID, message)
+}
+
+// PostMessageToChannel sends a message to a specific Slack channel
+func (c *Client) PostMessageToChannel(ctx context.Context, channelID, message string) error {
 	if !c.enabled {
 		log.Printf("Slack通知スキップ (未設定)")
 		return nil
@@ -41,7 +46,7 @@ func (c *Client) PostMessage(ctx context.Context, message string) error {
 	}
 
 	// MsgOptionText の第二引数は escape (true/false)
-	_, _, err := c.client.PostMessageContext(ctx, c.channelID, slack.MsgOptionText(message, false))
+	_, _, err := c.client.PostMessageContext(ctx, channelID, slack.MsgOptionText(message, false))
 	if err != nil {
 		log.Printf("Slack投稿エラー: %v", err)
 		return err

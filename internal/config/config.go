@@ -29,8 +29,9 @@ type Config struct {
 	EnableFactStore  bool
 
 	// Slack Settings
-	SlackBotToken  string
-	SlackChannelID string
+	SlackBotToken       string
+	SlackChannelID      string
+	SlackErrorChannelID string
 
 	// 会話管理設定
 	ConversationMessageCompressThreshold int
@@ -146,8 +147,9 @@ func LoadConfig() *Config {
 		EnableFactStore:  parseBool(os.Getenv("ENABLE_FACT_STORE")),
 
 		// Slack Settings
-		SlackBotToken:  os.Getenv("SLACK_BOT_TOKEN"),
-		SlackChannelID: os.Getenv("SLACK_CHANNEL_ID"),
+		SlackBotToken:       os.Getenv("SLACK_BOT_TOKEN"),
+		SlackChannelID:      os.Getenv("SLACK_CHANNEL_ID"),
+		SlackErrorChannelID: os.Getenv("SLACK_ERROR_CHANNEL_ID"),
 
 		ConversationMessageCompressThreshold: parseInt(os.Getenv("CONVERSATION_MESSAGE_COMPRESS_THRESHOLD")),
 		ConversationMessageKeepCount:         parseInt(os.Getenv("CONVERSATION_MESSAGE_KEEP_COUNT")),
