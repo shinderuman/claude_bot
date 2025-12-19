@@ -57,6 +57,9 @@ const (
 	// Conversation
 
 	BroadcastContinuityThreshold = 10 * time.Minute
+
+	// Startup
+	StartupMaxDelay = 5 * time.Minute // 300 seconds
 )
 
 // resolveBroadcastRootID determines the root ID if the broadcast command should continue the previous conversation
@@ -144,14 +147,8 @@ func (b *Bot) Run(ctx context.Context) error {
 		discovery.StartHeartbeatLoop(ctx, b.config.BotUsername)
 	}
 
-	if b.factService != nil {
-		go func() {
-			log.Println("起動時自己プロファイル読み込みを開始します...")
-			if err := b.factService.LoadBotProfile(ctx); err != nil {
-				log.Printf("起動時自己プロファイル読み込みエラー: %v", err)
-			}
-		}()
-	}
+	// ファクト関連のバックグラウンド処理（競合回避のためランダム遅延を入れて開始）
+	go b.executeStartupTasks(ctx)
 
 	// Start Metrics Logger
 	go b.startMetricsLogger(ctx)
@@ -159,15 +156,7 @@ func (b *Bot) Run(ctx context.Context) error {
 	// ファクト収集の開始
 	if b.factCollector != nil {
 		b.factCollector.Start(ctx)
-		// 起動時にもPeer探索を実行
-		go func() {
-			log.Println("起動時Peer探索を開始します...")
-			b.factCollector.DiscoverAndCollectPeerFacts(ctx)
-		}()
 	}
-
-	// 定期的なファクトメンテナンス（1日1回）
-	go b.startFactMaintenanceLoop(ctx)
 
 	// メンションのストリーミング
 	eventChan := make(chan gomastodon.Event)
