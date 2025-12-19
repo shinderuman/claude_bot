@@ -8,7 +8,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"time"
 
@@ -16,13 +18,14 @@ import (
 	"claude_bot/internal/facts"
 	"claude_bot/internal/image"
 	"claude_bot/internal/llm"
+	"claude_bot/internal/mastodon"
 	"claude_bot/internal/model"
 	"claude_bot/internal/slack"
 	"claude_bot/internal/store"
 )
 
 func main() {
-	mode := flag.String("mode", "response", "テストモード: response, summary, fact")
+	mode := flag.String("mode", "response", "テストモード: response, summary, fact, profile")
 	message := flag.String("message", "Hello", "テストメッセージ")
 	imagePath := flag.String("image", "", "画像ファイルパス (responseモード用)")
 	existingSummary := flag.String("existing-summary", "", "既存の要約（summaryモード用）")
@@ -79,6 +82,8 @@ func main() {
 		testGenerateImage(imageGen, *message)
 	case "error":
 		testErrorMessageGeneration(cfg, llmClient, *message)
+	case "profile":
+		testProfileUpdate(cfg, factService)
 	default:
 		log.Fatalf("不明なモード: %s (使用可能: response, summary, fact, raw-image, auto-post, conversation, generate-image, error)", *mode)
 	}
@@ -497,4 +502,102 @@ func testConversation(cfg *config.Config, client *llm.Client, lastMessage string
 	log.Println("--- 応答 ---")
 	log.Println(response)
 	log.Println("------------------")
+}
+
+func testProfileUpdate(cfg *config.Config, factService *facts.FactService) {
+	log.Println("=== プロフィール生成テスト（モックモード） ===")
+	log.Println("現在のFactsから自己紹介文（Profile.txt）を生成し、モックサーバーへの更新を検証します。")
+	log.Println()
+
+	if cfg.LLMProvider == "claude" && cfg.AnthropicAuthToken == "" {
+		log.Fatal("エラー: ANTHROPIC_AUTH_TOKEN環境変数が設定されていません")
+	}
+
+	// プロファイル生成による上書き防止のため、一時ファイルに出力先を変更
+	// ユーザー要望により、生成されたファイルは確認後に削除する
+	originalProfileFile := cfg.BotProfileFile
+	tempProfileFile := fmt.Sprintf("Profile_TEST_%d.txt", time.Now().Unix())
+	cfg.BotProfileFile = tempProfileFile
+	defer func() {
+		if err := os.Remove(tempProfileFile); err != nil {
+			log.Printf("警告: テスト用プロファイルファイルの削除に失敗しました: %v", err)
+		} else {
+			log.Printf("テスト用プロファイルファイルを削除しました: %s", tempProfileFile)
+		}
+		cfg.BotProfileFile = originalProfileFile
+	}()
+
+	// 1. Mastodon APIのモックサーバーを起動
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("[MockServer] Request Received: %s %s", r.Method, r.URL.Path)
+
+		// 期待されるAPIエンドポイント
+		if r.Method == "PATCH" && r.URL.Path == "/api/v1/accounts/update_credentials" {
+			log.Println("[MockServer] プロフィール更新リクエスト受信成功")
+
+			// リクエストボディの解析（必要に応じて検証）
+			body, _ := io.ReadAll(r.Body)
+			log.Printf("[MockServer] Body: %s", string(body))
+
+			// 成功レスポンス（最小限のJSON）
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintln(w, `{"id": "123456", "username": "bot", "note": "updated profile"}`)
+			return
+		}
+
+		// その他のリクエストは404
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+	log.Printf("[MockServer] Started at %s", ts.URL)
+
+	// 2. モック用Mastodonクライアントの作成
+	mockConfig := mastodon.Config{
+		Server:           ts.URL,        // モックサーバーのURL
+		AccessToken:      "dummy_token", // ダミー
+		BotUsername:      "bot",
+		AllowRemoteUsers: true,
+	}
+	mockClient := mastodon.NewClient(mockConfig)
+
+	// 3. リフレクションを使ってFactServiceのprivateフィールドに注入
+	// 注意: internalパッケージのprivateフィールドへのアクセスは通常推奨されませんが、
+	// テスト目的かつプロダクションコードを変更しないための特例措置です。
+	fsVal := reflect.ValueOf(factService).Elem()
+	clientField := fsVal.FieldByName("mastodonClient")
+	if !clientField.IsValid() {
+		log.Fatal("エラー: mastodonClientフィールドが見つかりません。構造体定義が変更された可能性があります。")
+	}
+
+	// reflect.Valueは通常privateフィールドにSetできないが、
+	// unsafe.Pointerを使わずにアクセシビリティをバイパスする方法はないため、
+	// Goのreflect仕様上、exportedされていないフィールドへのSetはpanicする。
+	// しかし、reflect.NewAtなどの黒魔術を使えば可能です。
+	// ここでは安全のため、reflect.NewAtを使用します。
+	clientFieldptr := reflect.NewAt(clientField.Type(), clientField.Addr().UnsafePointer()).Elem()
+	clientFieldptr.Set(reflect.ValueOf(mockClient))
+
+	log.Println("成功: モックMastodonクライアントを注入しました")
+
+	// 4. プロファイル生成実行
+	ctx := context.Background()
+	log.Println("LoadBotProfileを実行します...")
+	if err := factService.LoadBotProfile(ctx); err != nil {
+		log.Fatalf("プロフィール生成エラー: %v", err)
+	}
+
+	log.Println()
+	log.Println("成功: プロフィール生成およびモックリクエスト処理が完了しました")
+
+	// 生成されたファイルの内容を表示
+	if cfg.BotProfileFile != "" {
+		content, err := os.ReadFile(cfg.BotProfileFile)
+		if err != nil {
+			log.Printf("警告: 生成されたファイル(%s)の読み込みに失敗しました: %v", cfg.BotProfileFile, err)
+			return
+		}
+		log.Println("--- 生成されたProfile.txt ---")
+		log.Println(string(content))
+		log.Println("-----------------------------")
+	}
 }
