@@ -144,6 +144,9 @@ func (b *Bot) Run(ctx context.Context) error {
 		}()
 	}
 
+	// Start Metrics Logger
+	go b.startMetricsLogger(ctx)
+
 	// ファクト収集の開始
 	if b.factCollector != nil {
 		b.factCollector.Start(ctx)

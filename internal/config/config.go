@@ -79,6 +79,10 @@ type Config struct {
 	FactStoreFileName string
 	BotProfileFile    string
 	Timezone          string
+
+	// Metrics Settings
+	MetricsLogFile            string
+	MetricsLogIntervalMinutes int
 }
 
 // IsGlobalCollectionEnabled は全体（他人含む）のファクト収集が有効かどうかを返します
@@ -181,6 +185,9 @@ func LoadConfig() *Config {
 		FactStoreFileName: parseString(os.Getenv("FACT_STORE_FILE")),
 		BotProfileFile:    parseString(os.Getenv("BOT_PROFILE_FILE")),
 		Timezone:          parseString(os.Getenv("TIMEZONE")),
+
+		MetricsLogFile:            parseString(os.Getenv("METRICS_LOG_FILE")),
+		MetricsLogIntervalMinutes: parseInt(os.Getenv("METRICS_LOG_INTERVAL_MINUTES")),
 	}
 
 	// プロバイダー固有のバリデーション
