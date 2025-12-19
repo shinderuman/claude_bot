@@ -58,8 +58,9 @@ const (
 
 	BroadcastContinuityThreshold = 10 * time.Minute
 
-	// Startup
-	StartupMaxDelay = 5 * time.Minute // 300 seconds
+	// Startup Delays (Staggered to prevent race/load)
+	StartupInitSlotDuration        = 1 * time.Minute // For lightweight init tasks
+	StartupMaintenanceSlotDuration = 5 * time.Minute // For heavy maintenance tasks
 )
 
 // resolveBroadcastRootID determines the root ID if the broadcast command should continue the previous conversation

@@ -225,9 +225,27 @@ func (s *FactStore) ReplaceFacts(target string, factsToRemove, factsToAdd []mode
 	return nil
 }
 
-// RemoveFacts removes facts matching the condition and persists changes immediately via SaveOverwrite
+// RemoveFacts removes facts matching the condition and persists changes immediately via Atomic Update
 func (s *FactStore) RemoveFacts(ctx context.Context, target string, shouldRemove func(model.Fact) bool) (int, error) {
+	// 1. Acquire File Lock FIRST to prevent concurrent Saves/Reads
+	// This ensures no one reads the "dirty" state while we are deleting
+	flockCtx, cancel := context.WithTimeout(ctx, 2*time.Second) // Longer timeout for maintenance
+	defer cancel()
+
+	locked, err := s.fileLock.TryLockContext(flockCtx, 100*time.Millisecond)
+	if err != nil || !locked {
+		return 0, fmt.Errorf("failed to acquire file lock for removal: %v", err)
+	}
+	defer s.fileLock.Unlock() //nolint:errcheck
+
 	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// 2. Refresh from disk to ensure we are deleting from latest state
+	// (Though Reload handles startup, redundant safety here is good)
+	if err := s.syncFromDiskUnsafe(); err != nil {
+		log.Printf("[RemoveFacts] Warning: Failed to sync from disk before removal: %v", err)
+	}
 
 	initialCount := len(s.Facts)
 	newFacts := make([]model.Fact, 0, initialCount)
@@ -251,14 +269,22 @@ func (s *FactStore) RemoveFacts(ctx context.Context, target string, shouldRemove
 
 	if deletedCount > 0 {
 		s.Facts = newFacts
-	}
-	s.mu.Unlock()
 
-	if deletedCount > 0 {
-		// 変更があった場合のみディスクに保存（SaveOverwriteでマージなし保存）
-		if err := s.SaveOverwrite(); err != nil {
-			return deletedCount, fmt.Errorf("failed to save facts after removal: %w", err)
+		// 3. Save directly (Atomic Write)
+		data, err := json.MarshalIndent(s.Facts, "", "  ")
+		if err != nil {
+			return deletedCount, fmt.Errorf("failed to marshal facts: %v", err)
 		}
+
+		if err := s.atomicWriteFile(data); err != nil {
+			return deletedCount, fmt.Errorf("failed to write facts to disk: %w", err)
+		}
+
+		// Update timestamp
+		if stat, err := os.Stat(s.saveFilePath); err == nil {
+			s.lastModTime = stat.ModTime()
+		}
+
 		log.Printf("RemoveFacts: ターゲット %s から %d 件のファクトを削除しました", target, deletedCount)
 	}
 

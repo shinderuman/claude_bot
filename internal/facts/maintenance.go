@@ -23,9 +23,7 @@ func (s *FactService) PerformMaintenance(ctx context.Context) error {
 	// クラスタ位置の取得
 	instanceID, totalInstances, err := discovery.GetMyPosition(s.config.BotUsername)
 	if err != nil {
-		log.Printf("クラスタ位置取得エラー (分散処理無効): %v", err)
-		instanceID = 0
-		totalInstances = 1
+		log.Fatalf("クラスタ位置取得エラー (分散処理無効): %v", err)
 	}
 	log.Printf("分散メンテナンス開始: Instance %d/%d (Bot: %s)", instanceID, totalInstances, s.config.BotUsername)
 

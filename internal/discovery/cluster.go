@@ -32,6 +32,7 @@ type Registry struct {
 type Node struct {
 	Username    string    `json:"username"`
 	LastUpdated time.Time `json:"last_updated"`
+	JoinedAt    time.Time `json:"joined_at"`
 }
 
 // StartHeartbeatLoop starts a background loop to keep the bot registered
@@ -58,6 +59,7 @@ func StartHeartbeatLoop(ctx context.Context, username string) {
 }
 
 // GetMyPosition registers the current bot and returns its position and total count
+// Sorting is based on JoinedAt (Arrival Order) to ensure deterministic indexing.
 func GetMyPosition(username string) (int, int, error) {
 	// util.GetFilePath already handles the "data/" prefix logic
 	registryPath := util.GetFilePath(RegistryFileName)
@@ -101,7 +103,6 @@ func GetMyPosition(username string) (int, int, error) {
 	}
 
 	// Update list: Remove expired nodes, Update/Add self
-	// Update list: Remove expired nodes, Update/Add self
 	now := time.Now()
 	threshold := now.Add(-HeartbeatDuration)
 
@@ -109,7 +110,7 @@ func GetMyPosition(username string) (int, int, error) {
 	nodeMap := make(map[string]Node)
 
 	for _, node := range registry.Nodes {
-		// Skip self (will be added fresh later)
+		// Skip self (will be handled specifically later)
 		if node.Username == username {
 			continue
 		}
@@ -120,18 +121,56 @@ func GetMyPosition(username string) (int, int, error) {
 			continue
 		}
 
-		// Handle duplicates: Keep the one with latest timestamp
+		// Handle duplicates: Keep the one with latest timestamp, but prefer oldest JoinedAt
 		if existing, exists := nodeMap[node.Username]; exists {
-			if node.LastUpdated.After(existing.LastUpdated) {
-				nodeMap[node.Username] = node
+			// Merge logic: keep oldest JoinedAt, latest LastUpdated
+			bestJoinedAt := existing.JoinedAt
+			if bestJoinedAt.IsZero() || (!node.JoinedAt.IsZero() && node.JoinedAt.Before(bestJoinedAt)) {
+				bestJoinedAt = node.JoinedAt
 			}
+
+			bestLastUpdated := existing.LastUpdated
+			if node.LastUpdated.After(bestLastUpdated) {
+				bestLastUpdated = node.LastUpdated
+			}
+
+			merged := Node{
+				Username:    node.Username,
+				LastUpdated: bestLastUpdated,
+				JoinedAt:    bestJoinedAt,
+			}
+			nodeMap[node.Username] = merged
 		} else {
 			nodeMap[node.Username] = node
 		}
 	}
 
-	// Add self (always latest)
-	nodeMap[username] = Node{Username: username, LastUpdated: now}
+	// Handle Self
+	var selfNode Node
+	// Find previous state of self from registry (before we excluded it from map)
+	var oldSelf *Node
+	for _, node := range registry.Nodes {
+		if node.Username == username {
+			oldSelf = &node
+			break
+		}
+	}
+
+	if oldSelf != nil {
+		selfNode = *oldSelf
+		selfNode.LastUpdated = now
+		if selfNode.JoinedAt.IsZero() {
+			selfNode.JoinedAt = now // Migration: First time seeing JoinedAt
+		}
+	} else {
+		// New entry
+		selfNode = Node{
+			Username:    username,
+			LastUpdated: now,
+			JoinedAt:    now,
+		}
+	}
+	nodeMap[username] = selfNode
 
 	// Convert map back to slice
 	var activeNodes []Node
@@ -139,8 +178,13 @@ func GetMyPosition(username string) (int, int, error) {
 		activeNodes = append(activeNodes, node)
 	}
 
-	// Sort nodes by username to ensure deterministic ordering
+	// Sort nodes by JoinedAt (Arrival Order)
 	sort.Slice(activeNodes, func(i, j int) bool {
+		// If JoinedAt is equal (unlikely) or zero (legacy), fall back to Username
+		// Zero time comes first in Go (Before returns true), which is what we want (Legacy first)
+		if !activeNodes[i].JoinedAt.Equal(activeNodes[j].JoinedAt) {
+			return activeNodes[i].JoinedAt.Before(activeNodes[j].JoinedAt)
+		}
 		return activeNodes[i].Username < activeNodes[j].Username
 	})
 

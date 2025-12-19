@@ -27,6 +27,11 @@ func (s *FactStore) load() error {
 		return err
 	}
 
+	// Set lastModTime to establish baseline
+	if stat, err := os.Stat(s.saveFilePath); err == nil {
+		s.lastModTime = stat.ModTime()
+	}
+
 	return nil
 }
 
@@ -47,21 +52,24 @@ func (s *FactStore) Save() error {
 	s.mu.RLock()
 	currentMemoryFacts := make([]model.Fact, len(s.Facts))
 	copy(currentMemoryFacts, s.Facts)
-	s.mu.RUnlock() // ディスク読み込み等のために一旦解除
+	lastSyncTime := s.lastModTime // Capture sync time for zombie checking
+	s.mu.RUnlock()                // ディスク読み込み等のために一旦解除
 
 	// 1. ディスクから最新をロード
 	var diskFacts []model.Fact
 	data, err := os.ReadFile(s.saveFilePath)
 	if err == nil {
 		// ファイルが存在する場合のみパース
-		if err := json.Unmarshal(data, &diskFacts); err != nil {
-			log.Printf("ファクトデータのパースエラー: %v", err)
-			return fmt.Errorf("failed to parse facts: %w", err)
+		if len(data) > 0 {
+			if err := json.Unmarshal(data, &diskFacts); err != nil {
+				log.Printf("ファクトデータのパースエラー: %v", err)
+				return fmt.Errorf("failed to parse facts: %w", err)
+			}
 		}
 	}
 
-	// 2. マージ（重複排除: Target+Key+Valueが完全一致するもの）
-	mergedFacts := s.mergeFacts(diskFacts, currentMemoryFacts)
+	// 2. マージ（重複排除 & ゾンビ排除）
+	mergedFacts := s.mergeFacts(diskFacts, currentMemoryFacts, lastSyncTime)
 
 	// 3. 保存
 	data, err = json.MarshalIndent(mergedFacts, "", "  ")
@@ -86,11 +94,18 @@ func (s *FactStore) Save() error {
 	return nil
 }
 
-// mergeFacts はディスク上のデータとメモリ上のデータをマージします
-// Target+Key+Valueが完全一致するもののみ重複排除します
-func (s *FactStore) mergeFacts(disk, memory []model.Fact) []model.Fact {
+// mergeFacts merges disk and memory facts.
+// It detects potential "Zombie Facts" (facts present in memory but missing from disk)
+// and discards them if they are older than lastSyncTime (implying another process deleted them).
+func (s *FactStore) mergeFacts(disk, memory []model.Fact, lastSync time.Time) []model.Fact {
+	// 1. Build map of disk facts for fast lookup
+	diskMap := make(map[string]bool)
 	archiveTimestamps := make(map[string]time.Time)
+
 	for _, f := range disk {
+		uniqueKey := f.ComputeUniqueKey()
+		diskMap[uniqueKey] = true
+
 		if f.SourceType == model.SourceTypeArchive {
 			if ts, ok := archiveTimestamps[f.Target]; !ok || f.Timestamp.After(ts) {
 				archiveTimestamps[f.Target] = f.Timestamp
@@ -101,27 +116,49 @@ func (s *FactStore) mergeFacts(disk, memory []model.Fact) []model.Fact {
 	seen := make(map[string]bool)
 	var result []model.Fact
 
-	add := func(list []model.Fact, checkZombie bool) {
-		for _, f := range list {
-			if checkZombie {
-				if archiveTime, ok := archiveTimestamps[f.Target]; ok {
-					if f.SourceType != model.SourceTypeArchive && f.Timestamp.Before(archiveTime) {
-						continue
-					}
-				}
-			}
-
-			uniqueKey := f.ComputeUniqueKey()
-
-			if !seen[uniqueKey] {
-				seen[uniqueKey] = true
-				result = append(result, f)
-			}
+	// Helper to add fact if unique
+	addFact := func(f model.Fact) {
+		uniqueKey := f.ComputeUniqueKey()
+		if !seen[uniqueKey] {
+			seen[uniqueKey] = true
+			result = append(result, f)
 		}
 	}
 
-	add(disk, false)
-	add(memory, true)
+	// 2. Add all disk facts (Source of Truth)
+	for _, f := range disk {
+		addFact(f)
+	}
+
+	// 3. Add memory facts ONLY if they are valid
+	for _, f := range memory {
+		uniqueKey := f.ComputeUniqueKey()
+
+		// If in disk, it was already added (or we can just skip to avoid duplicates logic, handled by seen)
+		if diskMap[uniqueKey] {
+			continue
+		}
+
+		// ZOMBIE CHECK:
+		// If NOT in disk, check timestamp against lastSyncTime.
+		// If fact is older than lastSyncTime, it means it existed when we last synced,
+		// but now it's gone from disk. Someone else deleted it. -> DROP IT.
+		if !f.Timestamp.IsZero() && !lastSync.IsZero() && f.Timestamp.Before(lastSync) {
+			// This is a Zombie. Drop it.
+			// log.Printf("Dropped Zombie Fact: %s", uniqueKey)
+			continue
+		}
+
+		// Logic for Archive overwrite (from original code)
+		if archiveTime, ok := archiveTimestamps[f.Target]; ok {
+			if f.SourceType != model.SourceTypeArchive && f.Timestamp.Before(archiveTime) {
+				continue
+			}
+		}
+
+		// Valid new/preserved fact
+		addFact(f)
+	}
 
 	return result
 }
@@ -201,11 +238,48 @@ func (s *FactStore) SyncFromDisk() error {
 
 	// マージ実行
 	// メモリ上のデータとディスク上のデータをマージ（ディスク優先）
-	mergedFacts := s.mergeFacts(diskFacts, s.Facts)
+	mergedFacts := s.mergeFacts(diskFacts, s.Facts, s.lastModTime)
 	s.Facts = mergedFacts
 	s.lastModTime = stat.ModTime()
 
 	log.Printf("SyncFromDisk: ディスクから同期完了 (%d件)", len(s.Facts))
+	return nil
+}
+
+// syncFromDiskUnsafe loads checks disk state and merges updates WITHOUT internal locking.
+// Caller MUST hold s.mu and s.fileLock.
+func (s *FactStore) syncFromDiskUnsafe() error {
+	stat, err := os.Stat(s.saveFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	// 変更がなければスキップ
+	if !stat.ModTime().After(s.lastModTime) {
+		return nil
+	}
+
+	// ディスクから読み込み
+	data, err := os.ReadFile(s.saveFilePath)
+	if err != nil {
+		return err
+	}
+
+	var diskFacts []model.Fact
+	if err := json.Unmarshal(data, &diskFacts); err != nil {
+		return fmt.Errorf("failed to unmarshal facts: %w", err)
+	}
+
+	// マージ実行
+	// メモリ上のデータとディスク上のデータをマージ（ディスク優先）
+	mergedFacts := s.mergeFacts(diskFacts, s.Facts, s.lastModTime)
+	s.Facts = mergedFacts
+	s.lastModTime = stat.ModTime()
+
+	log.Printf("syncFromDiskUnsafe: ディスクから同期完了 (Total: %d)", len(s.Facts))
 	return nil
 }
 
@@ -255,6 +329,49 @@ func (s *FactStore) atomicWriteFile(data []byte) error {
 	if err := os.Rename(tmpPath, s.saveFilePath); err != nil {
 		return fmt.Errorf("failed to rename temp file to target: %w", err)
 	}
+
+	return nil
+}
+
+// Reload discards in-memory facts older than the cutoff time and reloads from disk.
+// This is used to refresh the state after a long delay (e.g., startup), preserving
+// only the facts that were newly added during that delay.
+func (s *FactStore) Reload(cutoff time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// 1. ディスクから最新をロード
+	var diskFacts []model.Fact
+	data, err := os.ReadFile(s.saveFilePath)
+	if err == nil {
+		if err := json.Unmarshal(data, &diskFacts); err != nil {
+			return fmt.Errorf("failed to parse facts from disk: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("failed to read facts from disk: %w", err)
+	}
+
+	// 2. メモリ上の「新しい」ファクトのみを抽出
+	var newMemoryFacts []model.Fact
+	for _, f := range s.Facts {
+		if f.Timestamp.After(cutoff) {
+			newMemoryFacts = append(newMemoryFacts, f)
+		}
+	}
+
+	// 3. マージ（ディスク優先、ただし新しいメモリファクトは追加）
+	// mergeFactsは内部で重複チェックを行う
+	mergedFacts := s.mergeFacts(diskFacts, newMemoryFacts, s.lastModTime)
+
+	s.Facts = mergedFacts
+
+	// Update lastModTime to matches disk if we loaded successfully
+	if stat, err := os.Stat(s.saveFilePath); err == nil {
+		s.lastModTime = stat.ModTime()
+	}
+
+	log.Printf("Reload完了: ディスク(%d) + 新規メモリ(%d) -> 統合(%d)",
+		len(diskFacts), len(newMemoryFacts), len(s.Facts))
 
 	return nil
 }

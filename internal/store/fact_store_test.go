@@ -38,14 +38,11 @@ func TestFactStore_SearchFuzzy_TargetUserName(t *testing.T) {
 	}
 	store.Facts = facts
 
-	// Test Case 1: Search by Target (exact match)
 	results1 := store.SearchFuzzy([]string{"user1@example.com"}, []string{"preference"})
 	if len(results1) != 1 {
 		t.Errorf("Search by Target failed: got %d results, want 1", len(results1))
 	}
 
-	// Test Case 2: Search by TargetUserName (exact match)
-	// This is the fix we implemented
 	results2 := store.SearchFuzzy([]string{"User1"}, []string{"preference"})
 	if len(results2) != 1 {
 		t.Errorf("Search by TargetUserName failed: got %d results, want 1", len(results2))
@@ -54,16 +51,11 @@ func TestFactStore_SearchFuzzy_TargetUserName(t *testing.T) {
 		t.Errorf("Unexpected result target: %s", results2[0].Target)
 	}
 
-	// Test Case 3: Partial Key Match
 	results3 := store.SearchFuzzy([]string{"User1"}, []string{"pref"})
 	if len(results3) != 1 {
 		t.Errorf("Search by Partial Key failed: got %d results, want 1", len(results3))
 	}
 
-	// Test Case 4: Prefix Match (Length >= 5)
-	// "User1" (5 chars) matches "User1" (Exact) - wait, Prefix test needs partial
-	// Let's us "User123" -> matches "User1" ? No.
-	// Let's use a longer name for Partial tests.
 	store.Facts = append(store.Facts, model.Fact{
 		Target:         "longname@example.com",
 		TargetUserName: "LongNameUser",
@@ -71,27 +63,21 @@ func TestFactStore_SearchFuzzy_TargetUserName(t *testing.T) {
 		Value:          "Active",
 	})
 
-	// "LongN" (5 chars) matches "LongNameUser" (Prefix)
 	results4 := store.SearchFuzzy([]string{"LongN"}, []string{"status"})
 	if len(results4) != 1 {
 		t.Errorf("Prefix Match (5 chars) failed: got %d results, want 1", len(results4))
 	}
 
-	// Test Case 5: Suffix Match (Length >= 5)
-	// "eUser" (5 chars) matches "LongNameUser" (Suffix)
 	results5 := store.SearchFuzzy([]string{"eUser"}, []string{"status"})
 	if len(results5) != 1 {
 		t.Errorf("Suffix Match (5 chars) failed: got %d results, want 1", len(results5))
 	}
 
-	// Test Case 6: Short Query Mismatch (Length < 5)
-	// "Long" (4 chars) should NOT match "LongNameUser" (Prefix)
 	results6 := store.SearchFuzzy([]string{"Long"}, []string{"status"})
 	if len(results6) != 0 {
 		t.Errorf("Short Prefix Search should fail: got %d results, want 0", len(results6))
 	}
 
-	// Test Case 7: Mismatch
 	results7 := store.SearchFuzzy([]string{"nomatch"}, []string{"preference"})
 	if len(results7) != 0 {
 		t.Errorf("Mismatch Search should fail: got %d results, want 0", len(results7))
@@ -111,27 +97,28 @@ func TestFactStore_RemoveFacts(t *testing.T) {
 	store := NewFactStore(tmpFile.Name(), slack.NewClient("", "", ""))
 
 	target := "target@example.com"
-	// Add test facts
 	facts := []model.Fact{
 		{
-			Target: target,
-			Key:    "key1",
-			Value:  "keep",
+			Target:    target,
+			Key:       "key1",
+			Value:     "keep",
+			Timestamp: time.Now(),
 		},
 		{
-			Target: target,
-			Key:    "key2",
-			Value:  "delete",
+			Target:    target,
+			Key:       "key2",
+			Value:     "delete",
+			Timestamp: time.Now(),
 		},
 		{
-			Target: "other@example.com",
-			Key:    "key2",
-			Value:  "keep_other",
+			Target:    "other@example.com",
+			Key:       "key2",
+			Value:     "keep_other",
+			Timestamp: time.Now(),
 		},
 	}
 	store.Facts = facts
 
-	// Remove logic: delete if Value is "delete"
 	deleted, err := store.RemoveFacts(context.Background(), target, func(f model.Fact) bool {
 		return f.Value == "delete"
 	})
@@ -146,6 +133,17 @@ func TestFactStore_RemoveFacts(t *testing.T) {
 
 	if len(store.Facts) != 2 {
 		t.Errorf("Store facts count = %d, want 2", len(store.Facts))
+	}
+
+	store2 := NewFactStore(tmpFile.Name(), slack.NewClient("", "", ""))
+	if len(store2.Facts) != 2 {
+		t.Errorf("Disk facts count = %d, want 2 (persistence verification)", len(store2.Facts))
+	}
+
+	for _, f := range store2.Facts {
+		if f.Value == "delete" {
+			t.Error("Deleted fact found on disk")
+		}
 	}
 }
 
@@ -163,7 +161,6 @@ func TestFactStore_IO_SaveAndLoad(t *testing.T) {
 
 	store := NewFactStore(tmpFile.Name(), slack.NewClient("", "", ""))
 
-	// Add facts
 	fact := model.Fact{
 		Target: "io_test",
 		Key:    "io_key",
@@ -171,27 +168,12 @@ func TestFactStore_IO_SaveAndLoad(t *testing.T) {
 	}
 	store.AddFactWithSource(fact)
 
-	// Save to disk
 	if err := store.Save(); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
 
 	// Create new store instance pointing to same file
 	store2 := NewFactStore(tmpFile.Name(), slack.NewClient("", "", ""))
-	// Should auto-load or be empty? NewFactStore calls load().
-	// Wait, NewFactStore implementation:
-	/*
-		func NewFactStore(filePath string) *FactStore {
-			fs := &FactStore{
-				saveFilePath: filePath,
-			}
-			if err := fs.load(); err != nil {
-				// handled by returning empty store usually, or error log
-			}
-			return fs
-		}
-	*/
-	// Let's verify load works.
 
 	if len(store2.Facts) != 1 {
 		t.Errorf("Loaded facts count = %d, want 1", len(store2.Facts))
@@ -222,8 +204,7 @@ func TestFactStore_Cleanup(t *testing.T) {
 		{Value: "old", Timestamp: oldTime},
 	}
 
-	// Retention 30 days. Old (31 days) should be removed.
-	removed := store.Cleanup(30 * 24 * time.Hour) // Duration
+	removed := store.Cleanup(30 * 24 * time.Hour)
 
 	if removed != 1 {
 		t.Errorf("Cleanup removed %d, want 1", removed)
@@ -248,7 +229,6 @@ func TestFactStore_GetRecentFacts(t *testing.T) {
 		{Value: "middle", Timestamp: now.Add(-1 * time.Hour)},
 	}
 
-	// GetRecentFacts sorts by Timestamp desc
 	recent := store.GetRecentFacts(2)
 
 	if len(recent) != 2 {
@@ -260,5 +240,54 @@ func TestFactStore_GetRecentFacts(t *testing.T) {
 	}
 	if recent[1].Value != "newest" {
 		t.Errorf("Second result should be newest (second last), got %v", recent[1].Value)
+	}
+}
+
+func TestFactStore_ZombieProtection(t *testing.T) {
+	// Setup
+	tmpFile, err := os.CreateTemp("", "fact_store_zombie_*.json")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath) //nolint:errcheck
+
+	store := NewFactStore(tmpPath, slack.NewClient("", "", ""))
+
+	factA := model.Fact{Target: "t1", Key: "A", Value: "valA", Timestamp: time.Now().Add(-1 * time.Hour)}
+	store.Facts = []model.Fact{factA}
+	store.Save() //nolint:errcheck
+
+	emptyData := []byte("[]")
+	if err := os.WriteFile(tmpPath, emptyData, 0644); err != nil {
+		t.Fatalf("failed to simulate external deletion: %v", err)
+	}
+
+	store.Facts = append(store.Facts, model.Fact{Target: "t1", Key: "B", Value: "valB", Timestamp: time.Now()})
+
+	time.Sleep(100 * time.Millisecond)
+
+	if err := store.Save(); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	finalStore := NewFactStore(tmpPath, slack.NewClient("", "", ""))
+
+	hasA := false
+	hasB := false
+	for _, f := range finalStore.Facts {
+		if f.Key == "A" {
+			hasA = true
+		}
+		if f.Key == "B" {
+			hasB = true
+		}
+	}
+
+	if hasA {
+		t.Error("Zombie Fact A resurrected! It should have been dropped.")
+	}
+	if !hasB {
+		t.Error("New Fact B missing! It should have been saved.")
 	}
 }
