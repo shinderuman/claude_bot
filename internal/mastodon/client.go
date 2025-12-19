@@ -46,3 +46,11 @@ func NewClient(cfg Config) *Client {
 		config: cfg,
 	}
 }
+
+// errorNotifier is a function to report fatal errors to external systems (e.g., Slack)
+var errorNotifier func(msg, details string)
+
+// SetErrorNotifier sets the error notification function
+func SetErrorNotifier(notifier func(msg, details string)) {
+	errorNotifier = notifier
+}

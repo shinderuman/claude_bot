@@ -131,9 +131,11 @@ func (b *Bot) Run(ctx context.Context) error {
 
 	// JSON修復エラー時のSlack通知設定
 	if b.config.SlackErrorChannelID != "" {
-		llm.SetErrorNotifier(func(msg, details string) {
+		notifier := func(msg, details string) {
 			_ = b.slackClient.PostErrorMessage(ctx, fmt.Sprintf("⚠️ %s\n```\n%s\n```", msg, details))
-		})
+		}
+		llm.SetErrorNotifier(notifier)
+		mastodon.SetErrorNotifier(notifier)
 	}
 
 	b.logStartupInfo()

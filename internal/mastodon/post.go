@@ -124,6 +124,9 @@ func (c *Client) PostResponseWithSplit(ctx context.Context, inReplyToID, mention
 		status, err := c.postReply(ctx, currentReplyID, content, visibility)
 		if err != nil {
 			log.Printf("分割投稿失敗 (%d/%d): %v", i+1, len(parts), err)
+			if errorNotifier != nil {
+				go errorNotifier("分割投稿失敗", err.Error())
+			}
 			return postedStatuses, err
 		}
 		currentReplyID = string(status.ID)
@@ -139,6 +142,9 @@ func (c *Client) PostResponseWithMedia(ctx context.Context, inReplyToID, mention
 	attachment, err := c.client.UploadMedia(ctx, mediaPath)
 	if err != nil {
 		log.Printf("メディアアップロードエラー: %v", err)
+		if errorNotifier != nil {
+			go errorNotifier("メディアアップロードエラー", err.Error())
+		}
 		return "", err
 	}
 
@@ -157,6 +163,9 @@ func (c *Client) PostResponseWithMedia(ctx context.Context, inReplyToID, mention
 		if strings.Contains(err.Error(), "422") {
 			log.Printf("⚠️ 422 Error detected. Content length: %d", len([]rune(fullResponse)))
 			log.Printf("Rejected Content: %s", fullResponse)
+		}
+		if errorNotifier != nil {
+			go errorNotifier("投稿エラー (Media)", err.Error())
 		}
 		return "", err
 	}
@@ -178,6 +187,9 @@ func (c *Client) postReply(ctx context.Context, inReplyToID, content, visibility
 			log.Printf("⚠️ 422 Error detected (Reply). Content length: %d", len([]rune(content)))
 			log.Printf("Rejected Content: %s", content)
 		}
+		if errorNotifier != nil {
+			go errorNotifier("投稿エラー (Reply)", err.Error())
+		}
 		return nil, err
 	}
 
@@ -197,6 +209,9 @@ func (c *Client) PostStatus(ctx context.Context, content, visibility string) (*g
 		if strings.Contains(err.Error(), "422") {
 			log.Printf("⚠️ 422 Error detected (Status). Content length: %d", len([]rune(content)))
 			log.Printf("Rejected Content: %s", content)
+		}
+		if errorNotifier != nil {
+			go errorNotifier("投稿エラー (Status)", err.Error())
 		}
 		return nil, err
 	}

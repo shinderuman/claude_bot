@@ -13,6 +13,9 @@ func (c *Client) UpdateProfile(ctx context.Context, note string) error {
 		Note: &note,
 	}
 	_, err := c.client.AccountUpdate(ctx, profile)
+	if err != nil && errorNotifier != nil {
+		go errorNotifier("プロフィール更新エラー (Note)", err.Error())
+	}
 	return err
 }
 
@@ -23,6 +26,9 @@ func (c *Client) UpdateProfileFields(ctx context.Context, fields []gomastodon.Fi
 		Fields: &fields,
 	}
 	_, err := c.client.AccountUpdate(ctx, profile)
+	if err != nil && errorNotifier != nil {
+		go errorNotifier("プロフィール更新エラー (Fields)", err.Error())
+	}
 	return err
 }
 
