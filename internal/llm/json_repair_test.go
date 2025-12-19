@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -93,6 +94,40 @@ ue"}]`,
 				// 厳密な一致が難しい場合（改行など）、意味的なチェックが必要かもしれないが
 				// 今回の実装は単純切り出しなので完全一致するはず
 				t.Errorf("RepairJSON() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRepairJSON_JapaneseChars(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "Full-width colon",
+			input: `[{"key"："value"}]`,
+			want:  `[{"key":"value"}]`,
+		},
+		{
+			name:  "Full-width colon and brackets for value",
+			input: `[{"key"："「value」"}]`,
+			want:  `[{"key":"value"}]`,
+		},
+		{
+			name:  "Invalid character '}' after object key",
+			input: `[{"key":"value"},{"key"："valid"}]`,
+			want:  `[{"key":"value"},{"key":"valid"}]`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RepairJSON(tt.input)
+			var v interface{}
+			if err := json.Unmarshal([]byte(got), &v); err != nil {
+				t.Errorf("Repaired JSON is invalid: %v\nInput: %s\nGot: %s", err, tt.input, got)
 			}
 		})
 	}

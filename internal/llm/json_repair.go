@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 )
 
@@ -22,6 +23,7 @@ func SetErrorNotifier(notifier ErrorNotifierFunc) {
 // 1. For unclosed top-level arrays, it truncates to the last valid object.
 // 2. For others (objects, nested issues), it uses a stack-based structural repair.
 func RepairJSON(s string) string {
+	s = preprocessJSON(s)
 	s = strings.TrimSpace(s)
 
 	// Strategy 0: Double Array check (Legacy support)
@@ -151,6 +153,33 @@ func RepairJSON(s string) string {
 	}
 
 	return sb.String()
+}
+
+// preprocessJSON handles common LLM formatting issues like full-width characters
+func preprocessJSON(s string) string {
+	// 1. Replace all full-width colons with half-width
+	// Note: This might replace colons inside strings, but for "Repair" purposes
+	// it's a necessary compromise if the structure is broken.
+	s = strings.ReplaceAll(s, "：", ":")
+
+	// 2. Handle Japanese quotes 「...」 used as value delimiters
+	// Pattern: : "..." is standard. : 「...」 is observed.
+	// We want to replace start `：「` with `: "`
+	// And end `」` with `"` if it's likely a closing quote (followed by comma, brace, or bracket)
+
+	// Replace start tag
+	reStart := regexp.MustCompile(`:\s*「`)
+	s = reStart.ReplaceAllString(s, `: "`)
+
+	// Replace end tag
+	// Logic: replace `」` that is followed by `} `, `] `, `, ` or end of line (ignoring whitespace)
+	reEnd := regexp.MustCompile(`」(\s*[\}\],])`)
+	s = reEnd.ReplaceAllString(s, `"$1`)
+
+	// Also handle trailing `」` at end of string if it looks like end of json?
+	// But `RepairJSON` main logic handles structure. Let's just focus on delimiters.
+
+	return s
 }
 
 func IsDoubleArray(s string) bool {
