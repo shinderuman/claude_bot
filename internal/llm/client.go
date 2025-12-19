@@ -55,6 +55,9 @@ func (c *Client) GenerateText(ctx context.Context, messages []model.Message, sys
 	content, err := c.provider.GenerateContent(ctx, messages, systemPrompt, maxTokens, currentImages)
 	if err != nil {
 		log.Printf("LLM生成エラー: %v", err)
+		if errorNotifier != nil {
+			go errorNotifier("LLM生成エラー", err.Error())
+		}
 		return ""
 	}
 	return content
