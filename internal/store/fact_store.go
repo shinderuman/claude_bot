@@ -10,6 +10,7 @@ import (
 
 	"claude_bot/internal/config"
 	"claude_bot/internal/model"
+	"claude_bot/internal/slack"
 	"claude_bot/internal/util"
 )
 
@@ -21,19 +22,21 @@ type FactStore struct {
 	Facts        []model.Fact
 	saveFilePath string
 	lastModTime  time.Time
+	slackClient  *slack.Client
 }
 
-func InitializeFactStore(cfg *config.Config) *FactStore {
+func InitializeFactStore(cfg *config.Config, slackClient *slack.Client) *FactStore {
 	factsPath := util.GetFilePath(cfg.FactStoreFileName)
-	return NewFactStore(factsPath)
+	return NewFactStore(factsPath, slackClient)
 }
 
 // NewFactStore creates a new FactStore with a custom file path
-func NewFactStore(filePath string) *FactStore {
+func NewFactStore(filePath string, slackClient *slack.Client) *FactStore {
 	store := &FactStore{
 		fileLock:     flock.New(filePath + ".lock"),
 		Facts:        []model.Fact{},
 		saveFilePath: filePath,
+		slackClient:  slackClient,
 	}
 
 	if err := store.load(); err != nil {

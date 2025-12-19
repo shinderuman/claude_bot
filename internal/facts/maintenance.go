@@ -297,7 +297,7 @@ func (s *FactService) SanitizeFacts(ctx context.Context, facts []model.Fact) ([]
 	// Execute removal in store
 	// All profile facts should have the same target (the bot)
 	target := facts[0].Target
-	deleted, err := s.factStore.RemoveFacts(target, func(f model.Fact) bool {
+	deleted, err := s.factStore.RemoveFacts(ctx, target, func(f model.Fact) bool {
 		return toRemove[f.ComputeUniqueKey()]
 	})
 

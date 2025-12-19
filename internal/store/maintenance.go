@@ -226,7 +226,7 @@ func (s *FactStore) ReplaceFacts(target string, factsToRemove, factsToAdd []mode
 }
 
 // RemoveFacts removes facts matching the condition and persists changes immediately via SaveOverwrite
-func (s *FactStore) RemoveFacts(target string, shouldRemove func(model.Fact) bool) (int, error) {
+func (s *FactStore) RemoveFacts(ctx context.Context, target string, shouldRemove func(model.Fact) bool) (int, error) {
 	s.mu.Lock()
 
 	initialCount := len(s.Facts)
@@ -238,6 +238,11 @@ func (s *FactStore) RemoveFacts(target string, shouldRemove func(model.Fact) boo
 		if fact.Target == target && shouldRemove(fact) {
 			jsonBytes, _ := json.Marshal(fact)
 			log.Printf("🗑️ ファクト削除: %s", string(jsonBytes))
+
+			jsonIndentBytes, _ := json.MarshalIndent(fact, "", "    ")
+			msg := fmt.Sprintf("🗑️ ファクトを削除しました (Target: %s)\n```\n%s\n```", target, string(jsonIndentBytes))
+			s.slackClient.PostMessageAsync(ctx, msg)
+
 			deletedCount++
 			continue
 		}

@@ -2,6 +2,8 @@ package store
 
 import (
 	"claude_bot/internal/model"
+	"claude_bot/internal/slack"
+	"context"
 	"os"
 	"testing"
 	"time"
@@ -17,7 +19,7 @@ func TestFactStore_SearchFuzzy_TargetUserName(t *testing.T) {
 		_ = os.Remove(tmpFile.Name())
 	})
 
-	store := NewFactStore(tmpFile.Name())
+	store := NewFactStore(tmpFile.Name(), slack.NewClient("", "", ""))
 
 	// Add test facts
 	facts := []model.Fact{
@@ -106,7 +108,7 @@ func TestFactStore_RemoveFacts(t *testing.T) {
 		_ = os.Remove(tmpFile.Name())
 	})
 
-	store := NewFactStore(tmpFile.Name())
+	store := NewFactStore(tmpFile.Name(), slack.NewClient("", "", ""))
 
 	target := "target@example.com"
 	// Add test facts
@@ -130,7 +132,7 @@ func TestFactStore_RemoveFacts(t *testing.T) {
 	store.Facts = facts
 
 	// Remove logic: delete if Value is "delete"
-	deleted, err := store.RemoveFacts(target, func(f model.Fact) bool {
+	deleted, err := store.RemoveFacts(context.Background(), target, func(f model.Fact) bool {
 		return f.Value == "delete"
 	})
 
@@ -159,7 +161,7 @@ func TestFactStore_IO_SaveAndLoad(t *testing.T) {
 	// Remove file so NewFactStore treats it as new
 	_ = os.Remove(tmpFile.Name())
 
-	store := NewFactStore(tmpFile.Name())
+	store := NewFactStore(tmpFile.Name(), slack.NewClient("", "", ""))
 
 	// Add facts
 	fact := model.Fact{
@@ -175,7 +177,7 @@ func TestFactStore_IO_SaveAndLoad(t *testing.T) {
 	}
 
 	// Create new store instance pointing to same file
-	store2 := NewFactStore(tmpFile.Name())
+	store2 := NewFactStore(tmpFile.Name(), slack.NewClient("", "", ""))
 	// Should auto-load or be empty? NewFactStore calls load().
 	// Wait, NewFactStore implementation:
 	/*
@@ -210,7 +212,7 @@ func TestFactStore_Cleanup(t *testing.T) {
 		_ = os.Remove(tmpFile.Name())
 	})
 
-	store := NewFactStore(tmpFile.Name())
+	store := NewFactStore(tmpFile.Name(), slack.NewClient("", "", ""))
 
 	now := time.Now()
 	oldTime := now.AddDate(0, 0, -31) // 31 days old

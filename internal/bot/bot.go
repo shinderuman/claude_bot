@@ -90,9 +90,9 @@ func NewBot(cfg *config.Config) *Bot {
 	mastodonClient := mastodon.NewClient(mastodonConfig)
 
 	// Slack Client
-	slackClient := slack.NewClient(cfg.SlackBotToken, cfg.SlackChannelID)
+	slackClient := slack.NewClient(cfg.SlackBotToken, cfg.SlackChannelID, cfg.SlackErrorChannelID)
 
-	factStore := store.InitializeFactStore(cfg)
+	factStore := store.InitializeFactStore(cfg, slackClient)
 
 	factService := facts.NewFactService(cfg, factStore, llmClient, mastodonClient, slackClient)
 
@@ -132,7 +132,7 @@ func (b *Bot) Run(ctx context.Context) error {
 	// JSON修復エラー時のSlack通知設定
 	if b.config.SlackErrorChannelID != "" {
 		llm.SetErrorNotifier(func(msg, details string) {
-			b.slackClient.PostMessageToChannel(ctx, b.config.SlackErrorChannelID, fmt.Sprintf("⚠️ %s\n```\n%s\n```", msg, details))
+			_ = b.slackClient.PostErrorMessage(ctx, fmt.Sprintf("⚠️ %s\n```\n%s\n```", msg, details))
 		})
 	}
 

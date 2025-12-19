@@ -8,13 +8,14 @@ import (
 )
 
 type Client struct {
-	client    *slack.Client
-	channelID string
-	enabled   bool
+	client         *slack.Client
+	channelID      string
+	errorChannelID string
+	enabled        bool
 }
 
 // NewClient creates a new Slack client
-func NewClient(token, channelID string) *Client {
+func NewClient(token, channelID, errorChannelID string) *Client {
 	if token == "" {
 		return &Client{
 			enabled: false,
@@ -22,15 +23,21 @@ func NewClient(token, channelID string) *Client {
 	}
 
 	return &Client{
-		client:    slack.New(token),
-		channelID: channelID,
-		enabled:   true,
+		client:         slack.New(token),
+		channelID:      channelID,
+		errorChannelID: errorChannelID,
+		enabled:        true,
 	}
 }
 
 // PostMessage sends a message to the configured Slack channel
 func (c *Client) PostMessage(ctx context.Context, message string) error {
 	return c.PostMessageToChannel(ctx, c.channelID, message)
+}
+
+// PostErrorMessage sends a message to the configured Error Slack channel
+func (c *Client) PostErrorMessage(ctx context.Context, message string) error {
+	return c.PostMessageToChannel(ctx, c.errorChannelID, message)
 }
 
 // PostMessageToChannel sends a message to a specific Slack channel
@@ -53,4 +60,16 @@ func (c *Client) PostMessageToChannel(ctx context.Context, channelID, message st
 	}
 
 	return nil
+}
+
+// PostMessageAsync sends a message asynchronously to the configured Slack channel
+func (c *Client) PostMessageAsync(ctx context.Context, message string) {
+	if !c.enabled {
+		return
+	}
+	go func() {
+		if err := c.PostMessage(ctx, message); err != nil {
+			log.Printf("SlackAsyncPostError: %v", err)
+		}
+	}()
 }

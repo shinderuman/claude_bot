@@ -17,6 +17,7 @@ import (
 	"claude_bot/internal/image"
 	"claude_bot/internal/llm"
 	"claude_bot/internal/model"
+	"claude_bot/internal/slack"
 	"claude_bot/internal/store"
 	"claude_bot/internal/util"
 
@@ -66,7 +67,7 @@ func main() {
 		factsFile = "data/facts_test.json"
 		log.Printf("テストモード: %s を使用します", factsFile)
 	}
-	factStore := store.NewFactStore(factsFile)
+	factStore := store.NewFactStore(factsFile, slack.NewClient("", "", ""))
 	factService := facts.NewFactService(cfg, factStore, llmClient, nil, nil)
 
 	switch *mode {
@@ -331,7 +332,7 @@ func testAutoPost(cfg *config.Config, client *llm.Client) {
 
 	// Storeの初期化
 	_ = store.InitializeHistory(cfg)
-	factStore := store.InitializeFactStore(cfg)
+	factStore := store.InitializeFactStore(cfg, slack.NewClient(cfg.SlackBotToken, cfg.SlackChannelID, cfg.SlackErrorChannelID))
 
 	// ファクトバンドル取得
 	facts, err := factStore.GetRandomGeneralFactBundle(5)
