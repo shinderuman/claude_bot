@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/mattn/go-mastodon"
-	gomastodon "github.com/mattn/go-mastodon"
 )
 
 // Messages holds all static message strings used by the bot
@@ -222,7 +221,7 @@ func BuildBotProfilePrompt(factsList string) string {
 }
 
 // BuildCardPrompt creates a prompt context from a Mastodon card
-func BuildCardPrompt(card *gomastodon.Card) string {
+func BuildCardPrompt(card *mastodon.Card) string {
 	if card == nil {
 		return ""
 	}
