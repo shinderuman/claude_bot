@@ -22,6 +22,10 @@ func SetErrorNotifier(notifier ErrorNotifierFunc) {
 // It uses a hybrid strategy:
 // 1. For unclosed top-level arrays, it truncates to the last valid object.
 // 2. For others (objects, nested issues), it uses a stack-based structural repair.
+// RepairJSON attempts to repair a truncated or malformed JSON string.
+// It uses a hybrid strategy:
+// 1. For unclosed top-level arrays, it truncates to the last valid object.
+// 2. For others (objects, nested issues), it uses a stack-based structural repair.
 func RepairJSON(s string) string {
 	s = preprocessJSON(s)
 	s = strings.TrimSpace(s)
@@ -77,21 +81,34 @@ func RepairJSON(s string) string {
 			sb.WriteRune(r)
 			continue
 		}
+
 		if inString {
-			// Escape control characters if specific cases need it (reusing logic from previous impl if needed)
-			// But for simplicity in this rewrite, we assume input string content is mostly valid or we fix minimal escapes.
-			// Let's reuse the newline escape logic from previous impl to be safe.
-			switch r {
-			case '\n':
-				sb.WriteString("\\n")
-			case '\r':
-				sb.WriteString("\\r")
-			case '\t':
-				sb.WriteString("\\t")
-			default:
-				sb.WriteRune(r)
+			// Heuristic: If we are inside a string but see a structural closer that matches the stack,
+			// it's likely the string wasn't closed properly. We prioritize determining structure.
+			// This often happens if preprocessJSON opened a quote that wasn't closed.
+			closing := false
+			if (r == '}' && peek() == '{') || (r == ']' && peek() == '[') {
+				closing = true
 			}
-			continue
+
+			if closing {
+				inString = false
+				sb.WriteRune('"')
+				// Fallthrough to handle the closer 'r' as structure
+			} else {
+				// Regular string content
+				switch r {
+				case '\n':
+					sb.WriteString("\\n")
+				case '\r':
+					sb.WriteString("\\r")
+				case '\t':
+					sb.WriteString("\\t")
+				default:
+					sb.WriteRune(r)
+				}
+				continue
+			}
 		}
 
 		// Structure handling
@@ -105,8 +122,6 @@ func RepairJSON(s string) string {
 				// Insert missing ']' before '}'
 				sb.WriteRune(']')
 				stack = stack[:len(stack)-1] // Pop '['
-				// Now handle the '}' again (recurse logic technically, or just proceed)
-				// Check if stack is now empty or has '{'
 				if peek() == '{' {
 					stack = stack[:len(stack)-1] // Pop '{'
 				}
@@ -115,13 +130,11 @@ func RepairJSON(s string) string {
 				stack = stack[:len(stack)-1] // Pop '{'
 				sb.WriteRune('}')
 			} else {
-				// Stack empty or mismatch, ignore extra '}' or treat as error?
-				// Treating as valid closing of potential implicit root?
-				// For robustness, if stack is empty, we might ignore, or just append.
+				// Stack mismatch or empty, conservatively write it
 				sb.WriteRune('}')
 			}
 		case ']':
-			// If stack top is '{', we are missing a '}' -> Invalid JSON mostly, but let's try to fix
+			// If stack top is '{', we are missing a '}'
 			if peek() == '{' {
 				// Insert missing '}' before ']'
 				sb.WriteRune('}')
@@ -142,6 +155,11 @@ func RepairJSON(s string) string {
 		}
 	}
 
+	// If we are still in a string at the end, close it
+	if inString {
+		sb.WriteRune('"')
+	}
+
 	// Post-processing: Close any remaining open brackets/braces
 	for i := len(stack) - 1; i >= 0; i-- {
 		switch stack[i] {
@@ -158,11 +176,15 @@ func RepairJSON(s string) string {
 // preprocessJSON handles common LLM formatting issues like full-width characters
 func preprocessJSON(s string) string {
 	// 1. Replace all full-width colons with half-width
-	// Note: This might replace colons inside strings, but for "Repair" purposes
-	// it's a necessary compromise if the structure is broken.
 	s = strings.ReplaceAll(s, "：", ":")
 
-	// 2. Handle Japanese quotes 「...」 used as value delimiters
+	// 2. Handle missing quotes for keys (e.g., "key: value" -> "key": "value")
+	// This happens when LLM outputs "key: val" or "key：val" (after replacement)
+	// We guard with [,{] to avoid replacing http: in values.
+	reKeyFix := regexp.MustCompile(`([,{]\s*)"([a-zA-Z0-9_]+):`)
+	s = reKeyFix.ReplaceAllString(s, `$1"$2":`)
+
+	// 3. Handle Japanese quotes 「...」 used as value delimiters
 	// Pattern: : "..." is standard. : 「...」 is observed.
 	// We want to replace start `：「` with `: "`
 	// And end `」` with `"` if it's likely a closing quote (followed by comma, brace, or bracket)

@@ -132,3 +132,18 @@ func TestRepairJSON_JapaneseChars(t *testing.T) {
 		})
 	}
 }
+
+func TestRepairJSON_SpecificFailure(t *testing.T) { // This function was correctly placed outside
+	// Reproduce the specific error: invalid character 'ã' after object key
+	input := `[{"target":"user_id","target_username":"unknown","key":"possession","value":"極太"},{"target":"assistant","target_username":"月詠アリア","key":"preference","value：「ピチュー」を可愛がっており、自身の宝物として大切にしている。}]`
+
+	// Expected behavior: The PreprocessJSON should handle the full-width colon and quotes correctly,
+	// and RepairJSON should ensure valid JSON structure.
+
+	got := RepairJSON(input)
+
+	var v interface{}
+	if err := json.Unmarshal([]byte(got), &v); err != nil {
+		t.Errorf("Repaired JSON is invalid: %v\nInput: %s\nGot: %s", err, input, got)
+	}
+}
