@@ -34,28 +34,8 @@ const (
 	MaxMastodonProfileChars = 500
 )
 
-// UpdateProfileWithFields constructs and updates both the profile note and custom fields
-func (c *Client) UpdateProfileWithFields(ctx context.Context, cfg *config.Config, note string, authKey string) error {
-	// 1. Noteの更新
-	formattedNote := c.FormatProfileText(note)
-	if err := c.UpdateProfile(ctx, formattedNote); err != nil {
-		return err
-	}
-
-	// 2. Fieldsの更新
-	currentUser, err := c.GetAccountCurrentUser(ctx)
-	if err != nil {
-		return err
-	}
-
-	newFields := c.BuildProfileFields(cfg, currentUser.Fields, authKey)
-	return c.UpdateProfileFields(ctx, newFields)
-}
-
-// FormatProfileText formats the profile text for Mastodon (compaction, truncation, disclaimer)
-// NOTE: This logic is moved from facts/service.go verbatim.
-func (c *Client) FormatProfileText(text string) string {
-	// 1. 過剰な改行の削除（空行を詰める）
+// FormatProfileBody formats the profile text for Mastodon (compaction only)
+func (c *Client) FormatProfileBody(text string) string {
 	lines := strings.Split(text, "\n")
 	var compacted []string
 	for _, line := range lines {
@@ -64,34 +44,51 @@ func (c *Client) FormatProfileText(text string) string {
 			compacted = append(compacted, trimmed)
 		}
 	}
-	text = strings.Join(compacted, "\n")
+	return strings.Join(compacted, "\n")
+}
 
-	// 2. 文字数制限（500文字）への適合
-	// 免責文を含めて500文字以内にする必要があるため、本文の上限を計算
-	maxBodyLen := MaxMastodonProfileChars - len([]rune(DisclaimerText))
+// TruncateToSafeProfileBody truncates text to fit within the profile limit allowing for the disclaimer.
+func (c *Client) TruncateToSafeProfileBody(text string) string {
+	limit := MaxMastodonProfileChars - len([]rune(DisclaimerText))
+	return c.truncateText(text, limit)
+}
 
+// truncateText truncates text to the specified limit, trying to break at sentences.
+func (c *Client) truncateText(text string, limit int) string {
 	runes := []rune(text)
-	if len(runes) > maxBodyLen {
-		// 上限を超えている場合、切り詰める
-		truncated := runes[:maxBodyLen]
-
-		// 文の途中で切れるのを避けるため、最後の句点か改行を探す
-		lastPeriod := -1
-		for i := len(truncated) - 1; i >= 0; i-- {
-			if truncated[i] == '。' || truncated[i] == '\n' {
-				lastPeriod = i
-				break
-			}
-		}
-
-		if lastPeriod != -1 {
-			truncated = truncated[:lastPeriod+1]
-		}
-		text = string(truncated)
+	if len(runes) <= limit {
+		return text
 	}
 
-	// 3. 免責文の結合
-	return text + DisclaimerText
+	truncated := runes[:limit]
+	lastPeriod := -1
+	for i := len(truncated) - 1; i >= 0; i-- {
+		if truncated[i] == '。' || truncated[i] == '\n' {
+			lastPeriod = i
+			break
+		}
+	}
+
+	if lastPeriod != -1 {
+		truncated = truncated[:lastPeriod+1]
+	}
+	return string(truncated)
+}
+
+// UpdateProfileWithFields constructs and updates both the profile note and custom fields
+func (c *Client) UpdateProfileWithFields(ctx context.Context, cfg *config.Config, body string, authKey string) error {
+	finalNote := body + DisclaimerText
+	if err := c.UpdateProfile(ctx, finalNote); err != nil {
+		return err
+	}
+
+	currentUser, err := c.GetAccountCurrentUser(ctx)
+	if err != nil {
+		return err
+	}
+
+	newFields := c.BuildProfileFields(cfg, currentUser.Fields, authKey)
+	return c.UpdateProfileFields(ctx, newFields)
 }
 
 // BuildProfileFields constructs the profile fields, including SystemID, Mention Status, and Last Updated

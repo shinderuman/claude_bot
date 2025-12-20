@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"reflect"
 	"strings"
 	"time"
 
@@ -545,6 +544,25 @@ func testProfileUpdate(cfg *config.Config, factService *facts.FactService) {
 			return
 		}
 
+		// ユーザー情報確認（verify_credentials）のモック
+		if r.Method == "GET" && r.URL.Path == "/api/v1/accounts/verify_credentials" {
+			log.Println("[MockServer] ユーザー情報確認リクエスト受信成功")
+			w.Header().Set("Content-Type", "application/json")
+			// Fieldsは空配列または適当な値を返す
+			fmt.Fprintln(w, `{"id": "123456", "username": "bot", "display_name": "Test Bot", "fields": []}`)
+			return
+		}
+
+		// ステータス投稿（トゥート）のモック
+		if r.Method == "POST" && r.URL.Path == "/api/v1/statuses" {
+			log.Println("[MockServer] ステータス投稿リクエスト受信成功")
+			body, _ := io.ReadAll(r.Body)
+			log.Printf("[MockServer] Body: %s", string(body))
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintln(w, `{"id": "789012", "content": "status posted"}`)
+			return
+		}
+
 		// その他のリクエストは404
 		http.NotFound(w, r)
 	}))
@@ -560,30 +578,23 @@ func testProfileUpdate(cfg *config.Config, factService *facts.FactService) {
 	}
 	mockClient := mastodon.NewClient(mockConfig)
 
-	// 3. リフレクションを使ってFactServiceのprivateフィールドに注入
-	// 注意: internalパッケージのprivateフィールドへのアクセスは通常推奨されませんが、
-	// テスト目的かつプロダクションコードを変更しないための特例措置です。
-	fsVal := reflect.ValueOf(factService).Elem()
-	clientField := fsVal.FieldByName("mastodonClient")
-	if !clientField.IsValid() {
-		log.Fatal("エラー: mastodonClientフィールドが見つかりません。構造体定義が変更された可能性があります。")
+	// 生成されたRawテキストを想定
+	dummyNoteRaw := "これはテスト用のプロフィール本文です。\n\n整形前です。"
+	dummyAuthKey := "dummy_auth_key"
+
+	ctx := context.Background()
+
+	formattedBody := mockClient.FormatProfileBody(dummyNoteRaw)
+	safeBody := mockClient.TruncateToSafeProfileBody(formattedBody)
+
+	log.Println("UpdateProfileWithFields呼び出し（シミュレーション）...")
+	if err := mockClient.UpdateProfileWithFields(ctx, cfg, safeBody, dummyAuthKey); err != nil {
+		log.Fatalf("UpdateProfileWithFieldsエラー: %v", err)
 	}
 
-	// reflect.Valueは通常privateフィールドにSetできないが、
-	// unsafe.Pointerを使わずにアクセシビリティをバイパスする方法はないため、
-	// Goのreflect仕様上、exportedされていないフィールドへのSetはpanicする。
-	// しかし、reflect.NewAtなどの黒魔術を使えば可能です。
-	// ここでは安全のため、reflect.NewAtを使用します。
-	clientFieldptr := reflect.NewAt(clientField.Type(), clientField.Addr().UnsafePointer()).Elem()
-	clientFieldptr.Set(reflect.ValueOf(mockClient))
-
-	log.Println("成功: モックMastodonクライアントを注入しました")
-
-	// 4. プロファイル生成実行
-	ctx := context.Background()
-	log.Println("LoadBotProfileを実行します...")
-	if err := factService.LoadBotProfile(ctx); err != nil {
-		log.Fatalf("プロフィール生成エラー: %v", err)
+	log.Println("PostStatus呼び出し（シミュレーション）...")
+	if _, err := mockClient.PostStatus(ctx, safeBody, cfg.AutoPostVisibility); err != nil {
+		log.Fatalf("PostStatusエラー: %v", err)
 	}
 
 	log.Println()

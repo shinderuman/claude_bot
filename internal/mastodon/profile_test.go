@@ -1,7 +1,6 @@
 package mastodon
 
 import (
-	"strings"
 	"testing"
 
 	"claude_bot/internal/config"
@@ -12,44 +11,73 @@ import (
 // NOTE: これらのテストは、facts/service.go にある既存ロジックと100%一致することを確認するためのものです。
 // 集約（移動）した際、これらのテストをそのまま通るように実装します。
 
-func TestFormatProfileText(t *testing.T) {
-	const DisclaimerText = "\n\n※このアカウントの投稿には事実に基づく内容が含まれることもありますが、すべての正確性は保証できません。"
-	const MaxMastodonProfileChars = 500
-
+func TestFormatProfileBody(t *testing.T) {
 	c := &Client{}
 
 	tests := []struct {
-		name    string
-		input   string
-		wantEnd string
-		wantLen int
+		name  string
+		input string
+		want  string
 	}{
 		{
-			name:    "Short text",
-			input:   "Short profile.",
-			wantEnd: DisclaimerText,
-		},
-		{
-			name:    "Text with excessive newlines",
-			input:   "Line 1\n\n\nLine 2",
-			wantEnd: DisclaimerText,
-		},
-		{
-			name:    "Long text truncation",
-			input:   strings.Repeat("あ", 600),
-			wantEnd: DisclaimerText,
+			name:  "Short text",
+			input: "Line 1\n\n\nLine 2",
+			want:  "Line 1\nLine 2",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := c.FormatProfileText(tt.input)
-
-			if len([]rune(got)) > MaxMastodonProfileChars {
-				t.Errorf("Length %d > %d", len([]rune(got)), MaxMastodonProfileChars)
+			got := c.FormatProfileBody(tt.input)
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
 			}
-			if !strings.HasSuffix(got, tt.wantEnd) {
-				t.Errorf("Disclaimer missing. Got suffix: %s", got)
+		})
+	}
+}
+
+func TestTruncateText(t *testing.T) {
+	c := &Client{}
+
+	tests := []struct {
+		name  string
+		input string
+		limit int
+		want  string
+	}{
+		{
+			name:  "Within limit",
+			input: "abc",
+			limit: 5,
+			want:  "abc",
+		},
+		{
+			name:  "Exceed limit (simple)",
+			input: "abcde",
+			limit: 3,
+			want:  "abc", // "abc" (3 chars)
+		},
+		{
+			name:  "Exceed limit (cut at period)",
+			input: "あいうえお。かきくけこ。",
+			limit: 8,
+			want:  "あいうえお。", // 6 chars (including period)
+		},
+		// 注意: TruncateTextは単純なカットを行うため、文脈考慮は呼び出し元依存だが、
+		// 既存ロジック通り「句点か改行」で切ることを確認
+		{
+			name:  "Cut at newline",
+			input: "Line1\nLine2",
+			limit: 8,
+			want:  "Line1\n", // "Line1\nLi" -> cut at \n
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := c.truncateText(tt.input, tt.limit)
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
 			}
 		})
 	}

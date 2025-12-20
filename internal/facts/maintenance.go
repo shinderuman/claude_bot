@@ -389,8 +389,15 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 		log.Printf("Peer認証キー生成失敗: %v", err)
 	}
 
-	if err := s.mastodonClient.UpdateProfileWithFields(ctx, s.config, profileText, authKey); err != nil {
+	formattedBody := s.mastodonClient.FormatProfileBody(profileText)
+	safeBody := s.mastodonClient.TruncateToSafeProfileBody(formattedBody)
+
+	if err := s.mastodonClient.UpdateProfileWithFields(ctx, s.config, safeBody, authKey); err != nil {
 		log.Printf("Mastodonプロフィール更新エラー: %v", err)
+	}
+
+	if _, err := s.mastodonClient.PostStatus(ctx, safeBody, s.config.AutoPostVisibility); err != nil {
+		log.Printf("プロフィール更新のトゥートに失敗しました: %v", err)
 	}
 
 	log.Printf("自己プロファイルを更新しました: %s (%d文字)", s.config.BotProfileFile, len([]rune(profileText)))
