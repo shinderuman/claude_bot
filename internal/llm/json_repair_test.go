@@ -2,6 +2,7 @@ package llm
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -145,5 +146,80 @@ func TestRepairJSON_SpecificFailure(t *testing.T) { // This function was correct
 	var v interface{}
 	if err := json.Unmarshal([]byte(got), &v); err != nil {
 		t.Errorf("Repaired JSON is invalid: %v\nInput: %s\nGot: %s", err, input, got)
+	}
+}
+
+func TestRepairJSON_QuoteEdgeCases(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string // approximate or specific check
+	}{
+		{
+			name:  "Double quotes garbage",
+			input: `{"key":"value""}`,
+			want:  `{"key":"value"}`,
+		},
+		{
+			name:  "Empty string (Regression check)",
+			input: `{"key":""}`,
+			want:  `{"key":""}`,
+		},
+		{
+			name:  "Missing closing quote before comma",
+			input: `{"key":"value,"next":1}`,
+			want:  `{"key":"value","next":1}`,
+		},
+		{
+			name:  "Nested object empty string",
+			input: `{"obj":{"subkey":""}}`,
+			want:  `{"obj":{"subkey":""}}`,
+		},
+		{
+			name:  "Array empty string",
+			input: `[""]`,
+			want:  `[""]`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RepairJSON(tt.input)
+			// Normalize for comparison or just parse
+			var v interface{}
+			if err := json.Unmarshal([]byte(got), &v); err != nil {
+				t.Errorf("RepairJSON(%q) -> %q (Invalid JSON: %v)", tt.input, got, err)
+			}
+			// String comparison for simple cases
+			// Note: RepairJSON might change whitespace or encoding, so simple string check implies exact behavior
+			// Since our logic is regex, it should be exact for these simple cases.
+			// But RepairJSON loop mimics string building.
+			// Let's check structure equality via Unmarshal unless we want exact string.
+			// Actually, RepairJSON output should be valid.
+			// Let's verify specifically that empty string wasn't broken into "}"
+			if strings.Contains(got, `:"}`) {
+				t.Errorf("RepairJSON(%q) broke empty string: %q", tt.input, got)
+			}
+		})
+	}
+}
+
+func TestRepairJSON_UnescapedQuotes(t *testing.T) {
+	// Reconstructed from user report
+	// Case: Unescaped quotes inside a string value
+	input := `[
+  {"target":"__general__","target_username":"PlayStation Blog","key":"release","value":"「DualSense® ワイヤレスコントローラー "原神" リミテッドエディション」が2026年1月21日に発売。白、金、緑の配色で、ファンタジー世界のデザインが特徴。"},
+  {"target":"__general__","target_username":"PlayStation Blog","key":"product","value":"「原神」新バージョン「Luna III」で新キャラクタードゥリンとナド・クライのストーリーアップデートが実装。"},
+  {"target":"__general__","target_username":"PlayStation Blog","key":"news","value":"PlayStation®5での「原神」新バージョン「Luna III」がリリース。"}
+]`
+
+	got := RepairJSON(input)
+
+	var v interface{}
+	if err := json.Unmarshal([]byte(got), &v); err != nil {
+		t.Errorf("Repaired JSON is invalid: %v\n", err)
+		t.Logf("Got: %s", got)
+	} else {
+		t.Logf("Repaired JSON is valid.")
 	}
 }

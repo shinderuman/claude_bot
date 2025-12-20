@@ -13,49 +13,43 @@ type ErrorNotifierFunc func(message, details string)
 
 var errorNotifier ErrorNotifierFunc
 
-// SetErrorNotifier sets the callback function for error notifications
+// SetErrorNotifier sets the callback function for error notifications.
 func SetErrorNotifier(notifier ErrorNotifierFunc) {
 	errorNotifier = notifier
 }
 
 // RepairJSON attempts to repair a truncated or malformed JSON string.
-// It uses a hybrid strategy:
-// 1. For unclosed top-level arrays, it truncates to the last valid object.
-// 2. For others (objects, nested issues), it uses a stack-based structural repair.
-// RepairJSON attempts to repair a truncated or malformed JSON string.
-// It uses a hybrid strategy:
-// 1. For unclosed top-level arrays, it truncates to the last valid object.
-// 2. For others (objects, nested issues), it uses a stack-based structural repair.
+// Repairs unclosed arrays and stack-based structural issues.
 func RepairJSON(s string) string {
 	s = preprocessJSON(s)
 	s = strings.TrimSpace(s)
 
-	// Strategy 0: Double Array check (Legacy support)
-	// If it starts with [[ and ends with ]], remove the outer brackets
+	// Strategy 0: Double Array check
 	if strings.HasPrefix(s, "[[") && strings.HasSuffix(s, "]]") {
 		s = s[1 : len(s)-1]
 	}
 
 	// Strategy 1: Truncated Top-Level Array Repair
-	// Apply ONLY if it looks like a standard array that got cut off.
-	// Condition: Starts with '[' AND does NOT end with ']'
+	// Apply if string starts with '[' but doesn't end with ']'.
 	if strings.HasPrefix(s, "[") && !strings.HasSuffix(s, "]") {
 		lastObjEnd := strings.LastIndex(s, "}")
 		if lastObjEnd != -1 {
 			return s[:lastObjEnd+1] + "]"
 		}
-		// If no '}' found, risk returning empty array
+		// Fallback to empty array if no object end found.
 		return "[]"
 	}
 
 	// Strategy 2: Structural Repair (Stack-based)
-	// Handles objects, closed arrays with internal issues, etc.
 	var sb strings.Builder
-	var stack []rune // Stack of open brackets/braces: '{' or '['
+	var stack []rune // Stack: '{' or '['
 	inString := false
 	escaped := false
 
-	// Helper to get stack top
+	// Convert to rune slice for lookahead.
+	runes := []rune(s)
+
+	// Helper to get stack top.
 	peek := func() rune {
 		if len(stack) == 0 {
 			return 0
@@ -63,9 +57,10 @@ func RepairJSON(s string) string {
 		return stack[len(stack)-1]
 	}
 
-	// First pass: scanning and repairing inline mismatches
-	for _, r := range s {
-		// Handle string literals
+	// Scan and repair inline mismatches.
+	for i, r := range runes {
+
+		// Handle string literals.
 		if escaped {
 			sb.WriteRune(r)
 			escaped = false
@@ -77,15 +72,39 @@ func RepairJSON(s string) string {
 			continue
 		}
 		if r == '"' {
-			inString = !inString
-			sb.WriteRune(r)
+			if inString {
+				// Check for closing quote via lookahead to structural delimiters.
+				// Next char must be delimiter (EOF counts as closing).
+				isClosing := true
+				for j := i + 1; j < len(runes); j++ {
+					next := runes[j]
+					if next == ' ' || next == '\t' || next == '\r' || next == '\n' {
+						continue
+					}
+					// If next char is NOT delimiter, quote is internal.
+					if next != ',' && next != '}' && next != ']' && next != ':' {
+						isClosing = false
+					}
+					break
+				}
+
+				if isClosing {
+					inString = !inString
+					sb.WriteRune(r)
+				} else {
+					// Internal quote: escape it.
+					sb.WriteString(`\"`)
+				}
+			} else {
+				// Start of string.
+				inString = true
+				sb.WriteRune(r)
+			}
 			continue
 		}
 
 		if inString {
-			// Heuristic: If we are inside a string but see a structural closer that matches the stack,
-			// it's likely the string wasn't closed properly. We prioritize determining structure.
-			// This often happens if preprocessJSON opened a quote that wasn't closed.
+			// Infer unclosed string if structural closer matches stack.
 			closing := false
 			if (r == '}' && peek() == '{') || (r == ']' && peek() == '[') {
 				closing = true
@@ -94,9 +113,9 @@ func RepairJSON(s string) string {
 			if closing {
 				inString = false
 				sb.WriteRune('"')
-				// Fallthrough to handle the closer 'r' as structure
+				// Handle closer as structure.
 			} else {
-				// Regular string content
+				// Regular string content.
 				switch r {
 				case '\n':
 					sb.WriteString("\\n")
@@ -117,9 +136,8 @@ func RepairJSON(s string) string {
 			stack = append(stack, r)
 			sb.WriteRune(r)
 		case '}':
-			// If stack top is '[', we are missing a ']'
+			// If stack top is '[', insert missing ']' -> '}'
 			if peek() == '[' {
-				// Insert missing ']' before '}'
 				sb.WriteRune(']')
 				stack = stack[:len(stack)-1] // Pop '['
 				if peek() == '{' {
@@ -130,13 +148,12 @@ func RepairJSON(s string) string {
 				stack = stack[:len(stack)-1] // Pop '{'
 				sb.WriteRune('}')
 			} else {
-				// Stack mismatch or empty, conservatively write it
+				// Validation mismatch: write conservatively
 				sb.WriteRune('}')
 			}
 		case ']':
-			// If stack top is '{', we are missing a '}'
+			// If stack top is '{', insert missing '}' -> ']'
 			if peek() == '{' {
-				// Insert missing '}' before ']'
 				sb.WriteRune('}')
 				stack = stack[:len(stack)-1] // Pop '{'
 
@@ -155,12 +172,12 @@ func RepairJSON(s string) string {
 		}
 	}
 
-	// If we are still in a string at the end, close it
+	// Close open string if necessary
 	if inString {
 		sb.WriteRune('"')
 	}
 
-	// Post-processing: Close any remaining open brackets/braces
+	// Close remaining open brackets/braces
 	for i := len(stack) - 1; i >= 0; i-- {
 		switch stack[i] {
 		case '{':
@@ -173,33 +190,33 @@ func RepairJSON(s string) string {
 	return sb.String()
 }
 
-// preprocessJSON handles common LLM formatting issues like full-width characters
+// preprocessJSON normalizes formatting issues like full-width characters.
 func preprocessJSON(s string) string {
-	// 1. Replace all full-width colons with half-width
+	// 1. Replace full-width colons
 	s = strings.ReplaceAll(s, "：", ":")
 
-	// 2. Handle missing quotes for keys (e.g., "key: value" -> "key": "value")
-	// This happens when LLM outputs "key: val" or "key：val" (after replacement)
-	// We guard with [,{] to avoid replacing http: in values.
+	// 2. Add quotes to keys: "key: value" -> "key": "value"
+	// Guard against replacing protocols (e.g., http:).
 	reKeyFix := regexp.MustCompile(`([,{]\s*)"([a-zA-Z0-9_]+):`)
 	s = reKeyFix.ReplaceAllString(s, `$1"$2":`)
 
-	// 3. Handle Japanese quotes 「...」 used as value delimiters
-	// Pattern: : "..." is standard. : 「...」 is observed.
-	// We want to replace start `：「` with `: "`
-	// And end `」` with `"` if it's likely a closing quote (followed by comma, brace, or bracket)
-
-	// Replace start tag
+	// 3. Normalize Japanese quotes 「...」 to "..."
+	// Replace opening quote
 	reStart := regexp.MustCompile(`:\s*「`)
 	s = reStart.ReplaceAllString(s, `: "`)
 
-	// Replace end tag
-	// Logic: replace `」` that is followed by `} `, `] `, `, ` or end of line (ignoring whitespace)
+	// Replace closing quote if followed by delimiter
 	reEnd := regexp.MustCompile(`」(\s*[\}\],])`)
 	s = reEnd.ReplaceAllString(s, `"$1`)
 
-	// Also handle trailing `」` at end of string if it looks like end of json?
-	// But `RepairJSON` main logic handles structure. Let's just focus on delimiters.
+	// 4. Fix missing closing quote before comma: "value,"key"
+	reMissingQuote := regexp.MustCompile(`:"([a-zA-Z0-9_]+),"([a-zA-Z0-9_]+)":`)
+	s = reMissingQuote.ReplaceAllString(s, `:"$1","$2":`)
+
+	// 5. Fix garbage quotes at end of value: "value""}
+	// Exclude valid empty strings.
+	reDoubleQuote := regexp.MustCompile(`([^:,\s\[\{])""(\s*[\}\],])`)
+	s = reDoubleQuote.ReplaceAllString(s, `$1"$2`)
 
 	return s
 }
@@ -208,11 +225,11 @@ func IsDoubleArray(s string) bool {
 	return strings.HasPrefix(s, "[[") && strings.HasSuffix(s, "]]")
 }
 
-// UnmarshalWithRepair tries to unmarshal JSON. If it fails, it attempts to repair the JSON and tries again.
-// It logs a simple error on the first failure, and a detailed error (with JSON) only if the repair also fails.
+// UnmarshalWithRepair attempts unmarshal; retries with repair on failure.
+// Logs detailed error only if repair also fails.
 func UnmarshalWithRepair(jsonStr string, v interface{}, logPrefix string) error {
 	if err := json.Unmarshal([]byte(jsonStr), v); err != nil {
-		// リトライ: JSON修復を試みる
+		// Retry with repair
 		repairedJSON := RepairJSON(jsonStr)
 		if err := json.Unmarshal([]byte(repairedJSON), v); err != nil {
 			msg := fmt.Sprintf("%sJSONパースエラー(修復後): %v", logPrefix, err)
