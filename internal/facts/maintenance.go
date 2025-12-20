@@ -398,9 +398,8 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 	// Slackにも通知
 	if s.slackClient != nil {
 		message := fmt.Sprintf(`🤖 プロフィールを更新しました
-アカウント: %s 
 
-`+"```\n%s\n```", s.config.BotUsername, profileText)
+`+"```\n%s\n```", profileText)
 		if err := s.slackClient.PostMessage(ctx, message); err != nil {
 			log.Printf("Slack通知エラー: %v", err)
 		}

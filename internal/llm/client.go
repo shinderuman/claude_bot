@@ -74,11 +74,7 @@ func ExtractJSON(s string) string {
 
 	start := -1
 	if startObj != -1 && startArr != -1 {
-		if startObj < startArr {
-			start = startObj
-		} else {
-			start = startArr
-		}
+		start = min(startObj, startArr)
 	} else if startObj != -1 {
 		start = startObj
 	} else if startArr != -1 {
@@ -94,11 +90,7 @@ func ExtractJSON(s string) string {
 
 	end := -1
 	if endObj != -1 && endArr != -1 {
-		if endObj > endArr {
-			end = endObj
-		} else {
-			end = endArr
-		}
+		end = max(endObj, endArr)
 	} else if endObj != -1 {
 		end = endObj
 	} else if endArr != -1 {

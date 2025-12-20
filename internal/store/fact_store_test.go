@@ -19,7 +19,7 @@ func TestFactStore_SearchFuzzy_TargetUserName(t *testing.T) {
 		_ = os.Remove(tmpFile.Name())
 	})
 
-	store := NewFactStore(tmpFile.Name(), slack.NewClient("", "", ""))
+	store := NewFactStore(tmpFile.Name(), slack.NewClient("", "", "", ""))
 
 	// Add test facts
 	facts := []model.Fact{
@@ -94,7 +94,7 @@ func TestFactStore_RemoveFacts(t *testing.T) {
 		_ = os.Remove(tmpFile.Name())
 	})
 
-	store := NewFactStore(tmpFile.Name(), slack.NewClient("", "", ""))
+	store := NewFactStore(tmpFile.Name(), slack.NewClient("", "", "", ""))
 
 	target := "target@example.com"
 	facts := []model.Fact{
@@ -135,7 +135,7 @@ func TestFactStore_RemoveFacts(t *testing.T) {
 		t.Errorf("Store facts count = %d, want 2", len(store.Facts))
 	}
 
-	store2 := NewFactStore(tmpFile.Name(), slack.NewClient("", "", ""))
+	store2 := NewFactStore(tmpFile.Name(), slack.NewClient("", "", "", ""))
 	if len(store2.Facts) != 2 {
 		t.Errorf("Disk facts count = %d, want 2 (persistence verification)", len(store2.Facts))
 	}
@@ -159,7 +159,7 @@ func TestFactStore_IO_SaveAndLoad(t *testing.T) {
 	// Remove file so NewFactStore treats it as new
 	_ = os.Remove(tmpFile.Name())
 
-	store := NewFactStore(tmpFile.Name(), slack.NewClient("", "", ""))
+	store := NewFactStore(tmpFile.Name(), slack.NewClient("", "", "", ""))
 
 	fact := model.Fact{
 		Target: "io_test",
@@ -173,7 +173,7 @@ func TestFactStore_IO_SaveAndLoad(t *testing.T) {
 	}
 
 	// Create new store instance pointing to same file
-	store2 := NewFactStore(tmpFile.Name(), slack.NewClient("", "", ""))
+	store2 := NewFactStore(tmpFile.Name(), slack.NewClient("", "", "", ""))
 
 	if len(store2.Facts) != 1 {
 		t.Errorf("Loaded facts count = %d, want 1", len(store2.Facts))
@@ -194,7 +194,7 @@ func TestFactStore_Cleanup(t *testing.T) {
 		_ = os.Remove(tmpFile.Name())
 	})
 
-	store := NewFactStore(tmpFile.Name(), slack.NewClient("", "", ""))
+	store := NewFactStore(tmpFile.Name(), slack.NewClient("", "", "", ""))
 
 	now := time.Now()
 	oldTime := now.AddDate(0, 0, -31) // 31 days old
@@ -252,7 +252,7 @@ func TestFactStore_ZombieProtection(t *testing.T) {
 	tmpPath := tmpFile.Name()
 	defer os.Remove(tmpPath) //nolint:errcheck
 
-	store := NewFactStore(tmpPath, slack.NewClient("", "", ""))
+	store := NewFactStore(tmpPath, slack.NewClient("", "", "", ""))
 
 	factA := model.Fact{Target: "t1", Key: "A", Value: "valA", Timestamp: time.Now().Add(-1 * time.Hour)}
 	store.Facts = []model.Fact{factA}
@@ -271,7 +271,7 @@ func TestFactStore_ZombieProtection(t *testing.T) {
 		t.Fatalf("Save failed: %v", err)
 	}
 
-	finalStore := NewFactStore(tmpPath, slack.NewClient("", "", ""))
+	finalStore := NewFactStore(tmpPath, slack.NewClient("", "", "", ""))
 
 	hasA := false
 	hasB := false
@@ -302,7 +302,7 @@ func TestFactStore_RemoveFactsByKey(t *testing.T) {
 		_ = os.Remove(tmpFile.Name())
 	})
 
-	store := NewFactStore(tmpFile.Name(), slack.NewClient("", "", ""))
+	store := NewFactStore(tmpFile.Name(), slack.NewClient("", "", "", ""))
 
 	target := "target@example.com"
 	key := "target_key"

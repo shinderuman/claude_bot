@@ -94,7 +94,7 @@ func NewBot(cfg *config.Config) *Bot {
 	mastodonClient := mastodon.NewClient(mastodonConfig)
 
 	// Slack Client
-	slackClient := slack.NewClient(cfg.SlackBotToken, cfg.SlackChannelID, cfg.SlackErrorChannelID)
+	slackClient := slack.NewClient(cfg.SlackBotToken, cfg.SlackChannelID, cfg.SlackErrorChannelID, cfg.BotUsername)
 
 	factStore := store.InitializeFactStore(cfg, slackClient)
 

@@ -61,7 +61,7 @@ func main() {
 		factsFile = "data/facts_test.json"
 		log.Printf("テストモード: %s を使用します", factsFile)
 	}
-	factStore := store.NewFactStore(factsFile, slack.NewClient("", "", ""))
+	factStore := store.NewFactStore(factsFile, slack.NewClient("", "", "", ""))
 	factService := facts.NewFactService(cfg, factStore, llmClient, nil, nil)
 
 	switch *mode {
@@ -328,7 +328,7 @@ func testAutoPost(cfg *config.Config, client *llm.Client) {
 
 	// Storeの初期化
 	_ = store.InitializeHistory(cfg)
-	factStore := store.InitializeFactStore(cfg, slack.NewClient(cfg.SlackBotToken, cfg.SlackChannelID, cfg.SlackErrorChannelID))
+	factStore := store.InitializeFactStore(cfg, slack.NewClient(cfg.SlackBotToken, cfg.SlackChannelID, cfg.SlackErrorChannelID, cfg.BotUsername))
 
 	// ファクトバンドル取得
 	facts, err := factStore.GetRandomGeneralFactBundle(5)

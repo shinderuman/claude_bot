@@ -2,6 +2,7 @@ package slack
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -20,11 +21,12 @@ type Client struct {
 	client         *slack.Client
 	channelID      string
 	errorChannelID string
+	botUsername    string
 	enabled        bool
 }
 
 // NewClient creates a new Slack client
-func NewClient(token, channelID, errorChannelID string) *Client {
+func NewClient(token, channelID, errorChannelID, botUsername string) *Client {
 	if token == "" {
 		return &Client{
 			enabled: false,
@@ -35,6 +37,7 @@ func NewClient(token, channelID, errorChannelID string) *Client {
 		client:         slack.New(token),
 		channelID:      channelID,
 		errorChannelID: errorChannelID,
+		botUsername:    botUsername,
 		enabled:        true,
 	}
 }
@@ -59,6 +62,11 @@ func (c *Client) PostMessageToChannel(ctx context.Context, channelID, message st
 	// メッセージが空の場合は送信しない
 	if message == "" {
 		return nil
+	}
+
+	// BotUsernameを付与
+	if c.botUsername != "" {
+		message = fmt.Sprintf("[%s] %s", c.botUsername, message)
 	}
 
 	return c.postMessageWithRetry(ctx, channelID, message)
