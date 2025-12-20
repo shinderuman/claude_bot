@@ -7,7 +7,7 @@ data/facts.json.lock
 data/url_blacklist.txt
 data/cluster_registry.json
 data/bot_profile_*.txt
-data/metrics.log
+data/metrics.log*
 
 # ビルド成果物
 /claude_bot
