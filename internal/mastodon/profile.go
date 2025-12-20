@@ -28,7 +28,7 @@ const (
 	MentionStatusStopped = "停止中"
 
 	// DisclaimerText is the disclaimer appended to the Mastodon profile
-	DisclaimerText = "\n\n※このアカウントの投稿には事実に基づく内容が含まれることもありますが、すべての正確性は保証できません。"
+	DisclaimerText = "\n\n\n※このアカウントの投稿には事実に基づく内容が含まれることもありますが、すべての正確性は保証できません。"
 
 	// MaxMastodonProfileChars is the maximum length of a Mastodon profile (including disclaimer)
 	MaxMastodonProfileChars = 500
