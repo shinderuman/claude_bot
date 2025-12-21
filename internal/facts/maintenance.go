@@ -266,15 +266,16 @@ func (s *FactService) archiveTargetFactsRecursion(ctx context.Context, target st
 
 // SanitizeFacts identifies and removes conflicting facts via LLM
 func (s *FactService) SanitizeFacts(ctx context.Context, facts []model.Fact) ([]model.Fact, int, error) {
-	if len(facts) == 0 {
-		return facts, 0, nil
-	}
-
-	// Format facts for prompt
 	var factList strings.Builder
 	for _, f := range facts {
-		// Include ID (UniqueKey) to allow LLM to specify which one to delete
-		factList.WriteString(fmt.Sprintf("- [ID:%s] %s: %v\n", f.ComputeUniqueKey(), f.Key, f.Value))
+		if strings.HasPrefix(f.Key, "system:") {
+			continue
+		}
+		fmt.Fprintf(&factList, "- [ID:%s] %s: %v\n", f.ComputeUniqueKey(), f.Key, f.Value)
+	}
+
+	if factList.Len() == 0 {
+		return facts, 0, nil
 	}
 
 	prompt := llm.BuildFactSanitizationPrompt(s.config.CharacterPrompt, factList.String())
