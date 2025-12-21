@@ -135,50 +135,13 @@ func (s *FactService) shouldArchiveFacts(facts []model.Fact, totalInstances int)
 func (s *FactService) archiveTargetFacts(ctx context.Context, target string, facts []model.Fact) error {
 	log.Printf("ターゲット %s の事実をアーカイブ中 (対象: %d件)...", target, len(facts))
 
-	var allArchives []model.Fact
-
-	for i := 0; i < len(facts); i += FactArchiveBatchSize {
-		end := min(i+FactArchiveBatchSize, len(facts))
-
-		batch := facts[i:end]
-		log.Printf("バッチ処理中: %d - %d / %d", i+1, end, len(facts))
-
-		prompt := llm.BuildFactArchivingPrompt(batch)
-		messages := []model.Message{{Role: "user", Content: prompt}}
-
-		response := s.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, s.config.MaxSummaryTokens, nil)
-		if response == "" {
-			log.Printf("警告: バッチ %d-%d のLLM応答が空でした", i+1, end)
-			continue
-		}
-
-		var chunkArchives []model.Fact
-		jsonStr := llm.ExtractJSON(response)
-		if err := llm.UnmarshalWithRepair(jsonStr, &chunkArchives, fmt.Sprintf("アーカイブバッチ %d-%d", i+1, end)); err != nil {
-			log.Printf("警告: バッチ %d-%d のJSONパースエラー(修復失敗): %v", i+1, end, err)
-			continue
-		}
-
-		allArchives = append(allArchives, chunkArchives...)
-		time.Sleep(1 * time.Second)
+	allArchives, err := s.generateArchiveFacts(ctx, target, facts)
+	if err != nil {
+		return err
 	}
 
 	if len(allArchives) == 0 {
 		return fmt.Errorf("有効なアーカイブが生成されませんでした")
-	}
-
-	for i := range allArchives {
-		allArchives[i].Target = target
-		if allArchives[i].TargetUserName == "" || allArchives[i].TargetUserName == model.UnknownTarget {
-			if len(facts) > 0 {
-				allArchives[i].TargetUserName = facts[0].TargetUserName
-			}
-		}
-		allArchives[i].Author = SystemAuthor
-		allArchives[i].AuthorUserName = SystemAuthor
-		allArchives[i].Timestamp = time.Now()
-		allArchives[i].SourceType = model.SourceTypeArchive
-		allArchives[i].SourceURL = ""
 	}
 
 	// 再帰的圧縮: アーカイブ数が多い場合はさらに圧縮
@@ -207,9 +170,21 @@ func (s *FactService) archiveTargetFacts(ctx context.Context, target string, fac
 }
 
 func (s *FactService) archiveTargetFactsRecursion(ctx context.Context, target string, facts []model.Fact) ([]model.Fact, error) {
-	// Re-use logical blocks from archiveTargetFacts, but only the generation part.
+	allArchives, err := s.generateArchiveFacts(ctx, target, facts)
+	if err != nil {
+		return nil, err
+	}
 
-	// Batch processing
+	// Recursive step (Deep recursion)
+	if len(allArchives) >= ArchiveFactThreshold*2 && len(allArchives) < len(facts) {
+		return s.archiveTargetFactsRecursion(ctx, target, allArchives)
+	}
+
+	return allArchives, nil
+}
+
+// generateArchiveFacts handles the common logic of batching facts, calling LLM, and parsing responses
+func (s *FactService) generateArchiveFacts(ctx context.Context, target string, facts []model.Fact) ([]model.Fact, error) {
 	var allArchives []model.Fact
 	totalFacts := len(facts)
 
@@ -220,25 +195,38 @@ func (s *FactService) archiveTargetFactsRecursion(ctx context.Context, target st
 		}
 
 		batch := facts[i:end]
+		log.Printf("バッチ処理中: %d - %d / %d", i+1, end, totalFacts)
+
 		prompt := llm.BuildFactArchivingPrompt(batch)
+		messages := []model.Message{{Role: "user", Content: prompt}}
 
-		systemPrompt := llm.BuildSystemPrompt(s.config, "", "", "", false)
+		// Use extraction system prompt for JSON output structure
+		systemPrompt := llm.Messages.System.FactExtraction
 
-		// Call LLM
-		response := s.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, s.config.MaxSummaryTokens, nil)
+		response := s.llmClient.GenerateText(ctx, messages, systemPrompt, s.config.MaxSummaryTokens, nil)
 		if response == "" {
+			log.Printf("警告: バッチ %d-%d のLLM応答が空でした", i+1, end)
 			continue
 		}
 
-		// Parse
-		var archives []model.Fact
+		var chunkArchives []model.Fact
 		jsonStr := llm.ExtractJSON(response)
-		if err := llm.UnmarshalWithRepair(jsonStr, &archives, "再帰圧縮"); err != nil {
-			log.Printf("再帰圧縮: JSONパースエラー: %v (skip batch)", err)
+		if err := llm.UnmarshalWithRepair(jsonStr, &chunkArchives, fmt.Sprintf("アーカイブバッチ %d-%d", i+1, end)); err != nil {
+			log.Printf("警告: バッチ %d-%d のJSONパースエラー(修復失敗): %v", i+1, end, err)
 			continue
 		}
 
-		allArchives = append(allArchives, archives...)
+		allArchives = append(allArchives, chunkArchives...)
+
+		// Sleep only if we are doing multiple batches to avoid rate limits, though original code slept unconditionally
+		if totalFacts > FactArchiveBatchSize {
+			time.Sleep(1 * time.Second)
+		}
+	}
+
+	if len(allArchives) == 0 {
+		// Calling function handles empty list as error or empty result
+		return nil, nil
 	}
 
 	// Post-process metadata
@@ -249,16 +237,11 @@ func (s *FactService) archiveTargetFactsRecursion(ctx context.Context, target st
 				allArchives[i].TargetUserName = facts[0].TargetUserName
 			}
 		}
-		allArchives[i].Author = SystemAuthor
-		allArchives[i].AuthorUserName = SystemAuthor
+		allArchives[i].Author = s.config.BotUsername
+		allArchives[i].AuthorUserName = s.config.BotUsername
 		allArchives[i].Timestamp = time.Now()
 		allArchives[i].SourceType = model.SourceTypeArchive
 		allArchives[i].SourceURL = ""
-	}
-
-	// Recursive step (Deep recursion)
-	if len(allArchives) >= ArchiveFactThreshold*2 && len(allArchives) < len(facts) {
-		return s.archiveTargetFactsRecursion(ctx, target, allArchives)
 	}
 
 	return allArchives, nil
