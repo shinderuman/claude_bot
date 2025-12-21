@@ -49,14 +49,6 @@ func (b *Bot) executeStartupTasks(ctx context.Context) {
 				log.Printf("起動時クリーンアップ完了: %d件削除", deleted)
 			}
 		},
-		func(ctx context.Context) {
-			if b.factService != nil {
-				log.Println("起動時自己プロファイル読み込みを開始します...")
-				if err := b.factService.LoadBotProfile(ctx); err != nil {
-					log.Printf("起動時自己プロファイル読み込みエラー: %v", err)
-				}
-			}
-		},
 	}
 
 	// 2. Heavy Tasks
