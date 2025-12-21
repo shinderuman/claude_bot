@@ -33,11 +33,13 @@ func RepairJSON(s string) string {
 	// Apply if string starts with '[' but doesn't end with ']'.
 	if strings.HasPrefix(s, "[") && !strings.HasSuffix(s, "]") {
 		lastObjEnd := strings.LastIndex(s, "}")
-		if lastObjEnd != -1 {
+		if lastObjEnd != -1 && lastObjEnd < len(s)-1 {
 			return s[:lastObjEnd+1] + "]"
 		}
 		// Fallback to empty array if no object end found.
-		return "[]"
+		if lastObjEnd == -1 {
+			return "[]"
+		}
 	}
 
 	// Strategy 2: Structural Repair (Stack-based)
@@ -142,8 +144,8 @@ func RepairJSON(s string) string {
 				stack = stack[:len(stack)-1] // Pop '['
 				if peek() == '{' {
 					stack = stack[:len(stack)-1] // Pop '{'
+					sb.WriteRune('}')
 				}
-				sb.WriteRune('}')
 			} else if peek() == '{' {
 				stack = stack[:len(stack)-1] // Pop '{'
 				sb.WriteRune('}')

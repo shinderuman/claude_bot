@@ -249,3 +249,26 @@ func TestRepairJSON_MultipleTopLevel(t *testing.T) {
 		t.Errorf("RepairJSON() with newline = %q, want %q", got3, want3)
 	}
 }
+
+func TestRepairJSON_ExtraClosingBraceInArray(t *testing.T) {
+	// Reproduction of reported bug: invalid character '}' after array element
+	// Input ends with "}}" but opened with only "[{"
+	input := `[{"target":"A","val":1}, {"target":"B","val":2}}`
+	
+	// Current buggy behavior produces: `[{"target":"A","val":1}, {"target":"B","val":2}]}`
+	// Expected behavior: `[{"target":"A","val":1}, {"target":"B","val":2}]`
+	
+	got := RepairJSON(input)
+	
+	// Check validity
+	var v interface{}
+	if err := json.Unmarshal([]byte(got), &v); err != nil {
+		t.Errorf("Repaired JSON is invalid: %v\nInput: %s\nGot: %s", err, input, got)
+	}
+	
+	// Check strictly expected string if valid
+	want := `[{"target":"A","val":1}, {"target":"B","val":2}]`
+	if got != want {
+		t.Errorf("RepairJSON() = %q, want %q", got, want)
+	}
+}
