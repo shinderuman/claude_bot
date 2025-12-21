@@ -29,6 +29,9 @@ const (
 
 	// SplitPostDelay は分割投稿時の待機時間
 	SplitPostDelay = 200 * time.Millisecond
+
+	// BotTag is the hashtag appended to bot posts
+	BotTag = "\n\n#bot"
 )
 
 type Client struct {

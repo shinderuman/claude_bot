@@ -198,6 +198,7 @@ func (c *Client) postReply(ctx context.Context, inReplyToID, content, visibility
 
 // PostStatus posts a new status (not a reply)
 func (c *Client) PostStatus(ctx context.Context, content, visibility string) (*gomastodon.Status, error) {
+	content += BotTag
 	toot := &gomastodon.Toot{
 		Status:     content,
 		Visibility: visibility,

@@ -131,9 +131,6 @@ func (b *Bot) executeAutoPost(ctx context.Context) {
 	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, int64(b.config.MaxPostChars), nil)
 
 	if response != "" {
-		// #botタグを追加（AI生成コンテンツであることを明示）
-		response = response + AutoPostHashTag
-
 		// 公開投稿として送信
 		log.Printf("自動投稿を実行します: %s...", string([]rune(response))[:min(LogContentMaxChars, len([]rune(response)))])
 		status, err := b.mastodonClient.PostStatus(ctx, response, b.config.AutoPostVisibility)

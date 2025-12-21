@@ -39,7 +39,6 @@ const (
 
 	// Auto Post
 	AutoPostFactCount = 5
-	AutoPostHashTag   = "\n\n#bot"
 
 	// Logging
 	LogContentMaxChars = 20
