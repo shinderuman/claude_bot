@@ -223,3 +223,29 @@ func TestRepairJSON_UnescapedQuotes(t *testing.T) {
 		t.Logf("Repaired JSON is valid.")
 	}
 }
+
+func TestRepairJSON_MultipleTopLevel(t *testing.T) {
+	input := `[{"key":"value1"}][{"key":"value2"}]`
+	want := `[{"key":"value1"}]`
+	got := RepairJSON(input)
+	if got != want {
+		t.Errorf("RepairJSON() = %q, want %q", got, want)
+	}
+
+	// Test with spaces between arrays
+	input2 := `[{"key":"value1"}]  [{"key":"value2"}]`
+	want2 := `[{"key":"value1"}]`
+	got2 := RepairJSON(input2)
+	if got2 != want2 {
+		t.Errorf("RepairJSON() with spaces = %q, want %q", got2, want2)
+	}
+
+	// Test with newline between arrays
+	input3 := `[{"key":"value1"}]
+[{"key":"value2"}]`
+	want3 := `[{"key":"value1"}]`
+	got3 := RepairJSON(input3)
+	if got3 != want3 {
+		t.Errorf("RepairJSON() with newline = %q, want %q", got3, want3)
+	}
+}

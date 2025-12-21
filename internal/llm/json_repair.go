@@ -151,6 +151,10 @@ func RepairJSON(s string) string {
 				// Validation mismatch: write conservatively
 				sb.WriteRune('}')
 			}
+			// If we closed the root element, we're done.
+			if len(stack) == 0 {
+				return sb.String()
+			}
 		case ']':
 			// If stack top is '{', insert missing '}' -> ']'
 			if peek() == '{' {
@@ -166,6 +170,10 @@ func RepairJSON(s string) string {
 				sb.WriteRune(']')
 			} else {
 				sb.WriteRune(']')
+			}
+			// If we closed the root element, we're done.
+			if len(stack) == 0 {
+				return sb.String()
 			}
 		default:
 			sb.WriteRune(r)
