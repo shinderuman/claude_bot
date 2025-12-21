@@ -145,12 +145,12 @@ func (s *FactStore) enforceMaxFactsUnsafe(maxFacts int) {
 	}
 }
 
-// ReplaceFacts atomically replaces all facts for the given target.
+// ReplaceFacts atomically replaces specified facts for the given target.
+// It removes facts listed in factsToRemove and adds facts from factsToAdd.
 func (s *FactStore) ReplaceFacts(target string, factsToRemove, factsToAdd []model.Fact) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 1000*time.Millisecond)
 	defer cancel()
 
-	// ファイルロック（書き込み用）
 	locked, err := s.fileLock.TryLockContext(ctx, 50*time.Millisecond)
 	if err != nil || !locked {
 		return fmt.Errorf("failed to acquire file lock for replace: %v", err)
@@ -160,7 +160,6 @@ func (s *FactStore) ReplaceFacts(target string, factsToRemove, factsToAdd []mode
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// 1. ディスクから最新を読み込み
 	var diskFacts []model.Fact
 	data, err := os.ReadFile(s.saveFilePath)
 	if err == nil && len(data) > 0 {
@@ -171,44 +170,38 @@ func (s *FactStore) ReplaceFacts(target string, factsToRemove, factsToAdd []mode
 		return fmt.Errorf("failed to load facts from disk: %v", err)
 	}
 
-	keptAuthMap := make(map[string]model.Fact) // 重複排除用マップ (UniqueKey -> Fact)
+	// Use map to unique-ify and manage facts
+	factMap := make(map[string]model.Fact)
 
-	// 2. ディスクデータのフィルタリング
+	// 1. Load all existing facts (Disk first, then Memory to ensure latest state)
 	for _, f := range diskFacts {
-		if f.Target == target {
-			continue
-		}
-		key := f.ComputeUniqueKey()
-		keptAuthMap[key] = f
+		factMap[f.ComputeUniqueKey()] = f
 	}
-
-	// 3. メモリデータの統合
 	for _, f := range s.Facts {
+		factMap[f.ComputeUniqueKey()] = f
+	}
+
+	// 2. Remove specified facts
+	for _, f := range factsToRemove {
 		if f.Target == target {
-			continue
-		}
-		key := f.ComputeUniqueKey()
-		if _, exists := keptAuthMap[key]; !exists {
-			keptAuthMap[key] = f
+			delete(factMap, f.ComputeUniqueKey())
 		}
 	}
 
-	// 4. 新規追加分（アーカイブ結果）を追加
+	// 3. Add new facts
 	for _, f := range factsToAdd {
-		key := f.ComputeUniqueKey()
 		if f.Timestamp.IsZero() {
 			f.Timestamp = time.Now()
 		}
-		keptAuthMap[key] = f
+		factMap[f.ComputeUniqueKey()] = f
 	}
 
-	// リスト化
-	var finalFacts []model.Fact
-	for _, f := range keptAuthMap {
+	// 4. Convert back to slice
+	finalFacts := make([]model.Fact, 0, len(factMap))
+	for _, f := range factMap {
 		finalFacts = append(finalFacts, f)
 	}
 
-	// 5. 保存 (Atomic Write)
 	encoded, err := json.MarshalIndent(finalFacts, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal facts: %v", err)
@@ -218,7 +211,6 @@ func (s *FactStore) ReplaceFacts(target string, factsToRemove, factsToAdd []mode
 		return fmt.Errorf("failed to write facts to disk (atomic): %v", err)
 	}
 
-	// 6. メモリ更新
 	s.Facts = finalFacts
 	s.lastModTime = time.Now()
 
