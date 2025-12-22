@@ -6,6 +6,148 @@ import (
 	"testing"
 )
 
+// Tests for repairDoubleArray
+func TestRepairDoubleArray(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "Double array",
+			input: `[[{"key":"value"}]]`,
+			want:  `[{"key":"value"}]`,
+		},
+		{
+			name:  "Single array (no change)",
+			input: `[{"key":"value"}]`,
+			want:  `[{"key":"value"}]`,
+		},
+		{
+			name:  "Not an array (no change)",
+			input: `{"key":"value"}`,
+			want:  `{"key":"value"}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := repairDoubleArray(tt.input); got != tt.want {
+				t.Errorf("repairDoubleArray() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// Tests for repairTruncatedArray
+func TestRepairTruncatedArray(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "Simple truncation",
+			input: `[{"a":1},{"b":2},{"c":`,
+			want:  `[{"a":1},{"b":2}]`,
+		},
+		{
+			name:  "Truncated after comma",
+			input: `[{"a":1},`,
+			want:  `[{"a":1}]`,
+		},
+		{
+			name:  "No valid objects",
+			input: `[{"a":`,
+			want:  `[]`,
+		},
+		{
+			name:  "Not truncated (no change)",
+			input: `[{"a":1}]`,
+			want:  `[{"a":1}]`,
+		},
+		{
+			name:  "Not an array (no change)",
+			input: `{"a":1}`,
+			want:  `{"a":1}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := repairTruncatedArray(tt.input); got != tt.want {
+				t.Errorf("repairTruncatedArray() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// Tests for repairStructural
+func TestRepairStructural(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "Missing closing brace",
+			input: `{"key":"value"`,
+			want:  `{"key":"value"}`,
+		},
+		{
+			name:  "Missing closing bracket",
+			input: `["a","b"`,
+			want:  `["a","b"]`,
+		},
+		{
+			name:  "Nested missing closers",
+			input: `{"a":[{"b":1`,
+			want:  `{"a":[{"b":1}]}`,
+		},
+		{
+			name:  "Unescaped quote in string",
+			input: `{"key":"val"ue"}`,
+			want:  `{"key":"val\"ue"}`,
+		},
+		{
+			name:  "Backslash outside string (ignored)",
+			input: `{\"key\":\"value\"}`,
+			want:  `{"key":"value"}`,
+		},
+		{
+			name:  "Escaped structural quote",
+			input: `{\"key\":\"value\"}`, // Treated same as above
+			want:  `{"key":"value"}`,
+		},
+		{
+			name:  "Wrapped escaped quotes (the bug case)",
+			input: `{"key":"value\"}`, // "value\"}" -> "value"
+			want:  `{"key":"value"}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := repairStructural(tt.input)
+			// For structural repair, check validity or exact string if simple
+			// The tests above are simple enough for exact matching except potentially whitespace logic if any
+			// repairStructural logic might write \n for newlines etc.
+			// Let's check exact match first.
+			// For buggy case `{"key":"value\"}`, repair should output `{"key":"value"}` (assuming `}` follows in real parsing or stack close)
+			// Wait, `repairStructural` closes the stack.
+			// Input `{"key":"value\"}` ->
+			// '{' -> stack={'}'}
+			// "key" -> key
+			// :
+			// "value\"... wait, if input ends there, `\"` followed by EOF -> isClosing=true
+			// so it closes "value"
+			// then loop ends.
+			// Stack has '{', so appends '}'
+			// Result: `{"key":"value"}`
+			if got != tt.want {
+				t.Errorf("repairStructural() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRepairJSON(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -386,5 +528,285 @@ func TestPreprocessRules(t *testing.T) {
 		if got := fixMissingOpeningQuotes(input); got != want {
 			t.Errorf("got %q, want %q", got, want)
 		}
+	})
+}
+
+// --- Detailed Structural Tests ---
+
+func TestStructuralRepairer_HandleBackslash(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		pos      int
+		inString bool
+		wantBuf  string
+		wantPos  int
+		wantEsc  bool
+		wantIn   bool
+	}{
+		{
+			name:     "Ignore backslash outside string",
+			input:    `\t`,
+			pos:      0,
+			inString: false,
+			wantBuf:  "",
+			wantPos:  1,
+			wantEsc:  false,
+			wantIn:   false,
+		},
+		{
+			name:     "Standard escape inside string",
+			input:    `\t`,
+			pos:      0,
+			inString: true,
+			wantBuf:  `\`,
+			wantPos:  1,
+			wantEsc:  true,
+			wantIn:   true,
+		},
+		{
+			name:     "Escaped delimiter inside string (closing quote)",
+			input:    `\"}`,
+			pos:      0,
+			inString: true,
+			wantBuf:  `"`,
+			wantPos:  2, // skipped \ and "
+			wantEsc:  false,
+			wantIn:   false,
+		},
+		{
+			name:     "Escaped quote NOT followed by delimiter (internal quote)",
+			input:    `\"a`,
+			pos:      0,
+			inString: true,
+			wantBuf:  `\`,
+			wantPos:  1,
+			wantEsc:  true,
+			wantIn:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &structuralRepairer{
+				runes:    []rune(tt.input),
+				pos:      tt.pos,
+				inString: tt.inString,
+			}
+			r.handleBackslash()
+
+			if r.sb.String() != tt.wantBuf {
+				t.Errorf("buf = %q, want %q", r.sb.String(), tt.wantBuf)
+			}
+			if r.pos != tt.wantPos {
+				t.Errorf("pos = %d, want %d", r.pos, tt.wantPos)
+			}
+			if r.escaped != tt.wantEsc {
+				t.Errorf("escaped = %v, want %v", r.escaped, tt.wantEsc)
+			}
+			if r.inString != tt.wantIn {
+				t.Errorf("inString = %v, want %v", r.inString, tt.wantIn)
+			}
+		})
+	}
+}
+
+func TestStructuralRepairer_HandleQuote(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string // string starting from current pos
+		pos      int
+		inString bool
+		wantBuf  string
+		wantIn   bool
+	}{
+		{
+			name:     "Start string",
+			input:    `"foo"`,
+			pos:      0,
+			inString: false,
+			wantBuf:  `"`,
+			wantIn:   true,
+		},
+		{
+			name:     "End string (followed by delimiter)",
+			input:    `",`,
+			pos:      0,
+			inString: true,
+			wantBuf:  `"`,
+			wantIn:   false,
+		},
+		{
+			name:     "Internal quote (not followed by delimiter)",
+			input:    `"foo`, // " followed by f
+			pos:      0,
+			inString: true,
+			wantBuf:  `\"`,
+			wantIn:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &structuralRepairer{
+				runes:    []rune(tt.input),
+				pos:      tt.pos,
+				inString: tt.inString,
+			}
+			r.handleQuote()
+
+			if r.sb.String() != tt.wantBuf {
+				t.Errorf("buf = %q, want %q", r.sb.String(), tt.wantBuf)
+			}
+			if r.inString != tt.wantIn {
+				t.Errorf("inString = %v, want %v", r.inString, tt.wantIn)
+			}
+		})
+	}
+}
+
+func TestStructuralRepairer_HandleStructure(t *testing.T) {
+	tests := []struct {
+		name      string
+		inputRune rune
+		stack     []rune
+		wantStack []rune
+		wantBuf   string
+		wantDone  bool
+	}{
+		{
+			name:      "Push {",
+			inputRune: '{',
+			stack:     nil,
+			wantStack: []rune{'{'},
+			wantBuf:   "{",
+			wantDone:  false,
+		},
+		{
+			name:      "Pop } from {",
+			inputRune: '}',
+			stack:     []rune{'{'},
+			wantStack: []rune{},
+			wantBuf:   "}",
+			wantDone:  true,
+		},
+		{
+			name:      "Pop } from {[ (insert ])",
+			inputRune: '}',
+			stack:     []rune{'{', '['},
+			wantStack: []rune{}, // pops [ then {
+			wantBuf:   "]}",
+			wantDone:  true,
+		},
+		{
+			name:      "Pop ] from { (insert })",
+			inputRune: ']',
+			stack:     []rune{'{'},
+			wantStack: []rune{},
+			wantBuf:   "}]",
+			wantDone:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &structuralRepairer{
+				stack: tt.stack,
+			}
+			_, done := r.handleStructure(tt.inputRune)
+
+			if done != tt.wantDone {
+				t.Errorf("done = %v, want %v", done, tt.wantDone)
+			}
+			if r.sb.String() != tt.wantBuf {
+				t.Errorf("buf = %q, want %q", r.sb.String(), tt.wantBuf)
+			}
+			// Comparison of slices requires loop or helpers
+			if len(r.stack) != len(tt.wantStack) {
+				t.Errorf("stack len = %d, want %d", len(r.stack), len(tt.wantStack))
+			} else {
+				for i := range r.stack {
+					if r.stack[i] != tt.wantStack[i] {
+						t.Errorf("stack[%d] = %c, want %c", i, r.stack[i], tt.wantStack[i])
+					}
+				}
+			}
+		})
+	}
+}
+
+// --- Fuzz Tests ---
+
+// FuzzRepairJSON tests that RepairJSON never panics and preserves valid JSON (mostly).
+func FuzzRepairJSON(f *testing.F) {
+	// Seed corpus with known edge cases
+	seeds := []string{
+		`{"key": "value"}`,
+		`[{"key": "value"}]`,
+		`{"key": "val\"ue"}`,
+		`{"key": "val\\ue"}`,
+		`[{"key": "value",}]`,
+		`{"key": "value"`,
+		`[{"key": "value"`,
+		`[[{"key": "value"}]]`,
+		`{"key": "value""}`,
+		`{"key": "value」}`,
+		`{"key"："value"}`,
+		`{"key": "value\"}`,
+		`\`,
+		`"`,
+		`{`,
+		`[`,
+		`}`,
+		`]`,
+	}
+	for _, seed := range seeds {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, input string) {
+		// 1. Property: Should never panic
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("RepairJSON panicked on input %q: %v", input, r)
+			}
+		}()
+
+		repaired := RepairJSON(input)
+
+		// 2. Property: If input was already valid JSON (and standard format),
+		// RepairJSON should ideally keep it valid and structurally similar.
+		if json.Valid([]byte(input)) {
+			if !json.Valid([]byte(repaired)) {
+				t.Errorf("RepairJSON broke valid JSON.\nInput: %q\nOutput: %q", input, repaired)
+			}
+		}
+	})
+}
+
+// FuzzStructuralRepair tests specifically the structural repairer logic
+func FuzzStructuralRepair(f *testing.F) {
+	seeds := []string{
+		`{"key":"value"}`,
+		`{"key":"val\"ue"}`,
+		`{"key":"value\"}`,
+		`{{{`,
+		`}}}`,
+		`"`,
+		`\"`,
+	}
+	for _, seed := range seeds {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, input string) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("repairStructural panicked on input %q: %v", input, r)
+			}
+		}()
+
+		// Just run it to ensure no panics and termination
+		_ = repairStructural(input)
 	})
 }
