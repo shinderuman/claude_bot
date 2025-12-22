@@ -254,18 +254,18 @@ func TestRepairJSON_ExtraClosingBraceInArray(t *testing.T) {
 	// Reproduction of reported bug: invalid character '}' after array element
 	// Input ends with "}}" but opened with only "[{"
 	input := `[{"target":"A","val":1}, {"target":"B","val":2}}`
-	
+
 	// Current buggy behavior produces: `[{"target":"A","val":1}, {"target":"B","val":2}]}`
 	// Expected behavior: `[{"target":"A","val":1}, {"target":"B","val":2}]`
-	
+
 	got := RepairJSON(input)
-	
+
 	// Check validity
 	var v interface{}
 	if err := json.Unmarshal([]byte(got), &v); err != nil {
 		t.Errorf("Repaired JSON is invalid: %v\nInput: %s\nGot: %s", err, input, got)
 	}
-	
+
 	// Check strictly expected string if valid
 	want := `[{"target":"A","val":1}, {"target":"B","val":2}]`
 	if got != want {
@@ -291,5 +291,34 @@ func TestRepairJSON_MergedKey_Value(t *testing.T) {
 	// RepairJSON normalization might yield: "value":"自称メイドキャラクター" or similar
 	if !strings.Contains(got, `"value":"自称メイドキャラクター"`) {
 		t.Errorf("RepairJSON() failed to separate merged key-value. Got: %s", got)
+	}
+}
+
+func TestRepairJSON_MissingOpeningQuote(t *testing.T) {
+	// The problematic JSON string provided by the user.
+	// Original: [{"target":"__general__","target_username":"GameSpark","key":"release","value":"Ghostcaseが手掛ける新作の一人称視点ホラーゲーム『悪意』が発表され、Steamストアページが公開された。"},{"target":"__general__","target_username":"GameSpark","key":"knowledge","value":『悪意』は、都会で一人暮らしする女性が引っ越し先の古いアパートに潜む"悪意"と向き合うホラーゲーム。"},{"target":"__general__","target_username":"GameSpark","key":"knowledge","value":『悪意』は日本語に対応する予定で、リリース日は未定。"}]
+	input := `[{"target":"__general__","target_username":"GameSpark","key":"release","value":"Ghostcaseが手掛ける新作の一人称視点ホラーゲーム『悪意』が発表され、Steamストアページが公開された。"},{"target":"__general__","target_username":"GameSpark","key":"knowledge","value":『悪意』は、都会で一人暮らしする女性が引っ越し先の古いアパートに潜む"悪意"と向き合うホラーゲーム。"},{"target":"__general__","target_username":"GameSpark","key":"knowledge","value":『悪意』は日本語に対応する予定で、リリース日は未定。"}]`
+
+	// Attempt to repair
+	repaired := RepairJSON(input)
+
+	// Attempt to unmarshal
+	var result []map[string]string
+	err := json.Unmarshal([]byte(repaired), &result)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal repaired JSON: %v\nRepaired: %s", err, repaired)
+	}
+
+	// Verify content of the second item to ensure it was parsed correctly
+	if len(result) < 2 {
+		t.Fatalf("Expected at least 2 items, got %d", len(result))
+	}
+
+	expectedValueStart := "『悪意』は"
+	actualValue := result[1]["value"]
+	// Note: Use runes for correct slicing if checking prefix length precisely, but string slicing works for simple byte prefix check if encoded same
+	// Let's use strings.HasPrefix which is safer
+	if !strings.HasPrefix(actualValue, expectedValueStart) {
+		t.Errorf("Expected value to start with %q, got %q", expectedValueStart, actualValue)
 	}
 }

@@ -234,6 +234,11 @@ func preprocessJSON(s string) string {
 	reMergedValue := regexp.MustCompile(`([,{]\s*)"(value)([^":,]+)"`)
 	s = reMergedValue.ReplaceAllString(s, `$1"$2":"$3"`)
 
+	// 7. Fix missing opening quote for values starting with non-standard characters (e.g., Japanese brackets)
+	// Matches: "key": <char> where <char> is not a valid JSON value starter
+	reMissingOpenQuote := regexp.MustCompile(`(:\s*)([^"\[\{\]\}\s0-9\-tfn])`)
+	s = reMissingOpenQuote.ReplaceAllString(s, `$1"$2`)
+
 	return s
 }
 
