@@ -3,6 +3,7 @@ package mastodon
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -159,14 +160,7 @@ func (c *Client) PostResponseWithMedia(ctx context.Context, inReplyToID, mention
 
 	status, err := c.client.PostStatus(ctx, toot)
 	if err != nil {
-		log.Printf("投稿エラー (Media): %v", err)
-		if strings.Contains(err.Error(), "422") {
-			log.Printf("⚠️ 422 Error detected. Content length: %d", len([]rune(fullResponse)))
-			log.Printf("Rejected Content: %s", fullResponse)
-		}
-		if errorNotifier != nil {
-			go errorNotifier("投稿エラー (Media)", err.Error())
-		}
+		c.handlePostError(err, "Media", fullResponse)
 		return "", err
 	}
 
@@ -182,14 +176,7 @@ func (c *Client) postReply(ctx context.Context, inReplyToID, content, visibility
 
 	status, err := c.client.PostStatus(ctx, toot)
 	if err != nil {
-		log.Printf("投稿エラー: %v", err)
-		if strings.Contains(err.Error(), "422") {
-			log.Printf("⚠️ 422 Error detected (Reply). Content length: %d", len([]rune(content)))
-			log.Printf("Rejected Content: %s", content)
-		}
-		if errorNotifier != nil {
-			go errorNotifier("投稿エラー (Reply)", err.Error())
-		}
+		c.handlePostError(err, "Reply", content)
 		return nil, err
 	}
 
@@ -206,17 +193,27 @@ func (c *Client) PostStatus(ctx context.Context, content, visibility string) (*g
 
 	status, err := c.client.PostStatus(ctx, toot)
 	if err != nil {
-		log.Printf("投稿エラー (Status): %v", err)
-		if strings.Contains(err.Error(), "422") {
-			log.Printf("⚠️ 422 Error detected (Status). Content length: %d", len([]rune(content)))
-			log.Printf("Rejected Content: %s", content)
-		}
-		if errorNotifier != nil {
-			go errorNotifier("投稿エラー (Status)", err.Error())
-		}
+		c.handlePostError(err, "Status", content)
 		return nil, err
 	}
 	return status, nil
+}
+
+func (c *Client) handlePostError(err error, contextType, content string) {
+	log.Printf("投稿エラー (%s): %v", contextType, err)
+
+	var apiErr *gomastodon.APIError
+	if errors.As(err, &apiErr) && apiErr.StatusCode == 422 {
+		log.Printf("⚠️ 422 Error detected (%s). Content length: %d", contextType, len([]rune(content)))
+		if errorNotifier != nil {
+			go errorNotifier(fmt.Sprintf("投稿エラー (%s/422)", contextType), fmt.Sprintf("Error: %v\nContent: %s", err, content))
+		}
+		return
+	}
+
+	if errorNotifier != nil {
+		go errorNotifier(fmt.Sprintf("投稿エラー (%s)", contextType), err.Error())
+	}
 }
 
 func splitResponse(response, mention string, maxChars int) []string {
