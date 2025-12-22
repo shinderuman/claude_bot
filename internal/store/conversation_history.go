@@ -85,7 +85,20 @@ func (h *ConversationHistory) Save() error {
 
 	// 0644: User(RW), Group(R), Other(R)
 	return os.WriteFile(h.saveFilePath, data, 0644)
+}
 
+// GetStats returns the number of sessions and the size of the history file
+func (h *ConversationHistory) GetStats() (int, int64) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	count := len(h.Sessions)
+	var size int64
+	if stat, err := os.Stat(h.saveFilePath); err == nil {
+		size = stat.Size()
+	}
+
+	return count, size
 }
 
 func (h *ConversationHistory) GetOrCreateConversation(session *model.Session, rootStatusID string) *model.Conversation {

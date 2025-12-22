@@ -114,6 +114,16 @@ func (s *FactStore) GetFactsByTarget(target string) []model.Fact {
 	return results
 }
 
+// GetAllFacts returns a copy of all facts in the store (thread-safe)
+func (s *FactStore) GetAllFacts() []model.Fact {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	results := make([]model.Fact, len(s.Facts))
+	copy(results, s.Facts)
+	return results
+}
+
 // RemoveFactsByKey removes all facts matching the target and key
 func (s *FactStore) RemoveFactsByKey(target, key string) int {
 	s.mu.Lock()
