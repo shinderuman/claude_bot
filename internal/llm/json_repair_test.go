@@ -272,3 +272,24 @@ func TestRepairJSON_ExtraClosingBraceInArray(t *testing.T) {
 		t.Errorf("RepairJSON() = %q, want %q", got, want)
 	}
 }
+
+func TestRepairJSON_MergedKey_Value(t *testing.T) {
+	// Reproduction of reported bug: invalid character '}' after object key
+	// Input has "value..." instead of "value":"..."
+	input := `[{"target":"user","target_username":"unknown","key":"attribute","value自称メイドキャラクター"}]`
+
+	// Expected behavior: insert missing colon and quotes
+	got := RepairJSON(input)
+
+	// Check validity
+	var v interface{}
+	if err := json.Unmarshal([]byte(got), &v); err != nil {
+		t.Errorf("Repaired JSON is invalid: %v\nInput: %s\nGot: %s", err, input, got)
+	}
+
+	// We expect the key "value" to be separated from the value "自称メイドキャラクター"
+	// RepairJSON normalization might yield: "value":"自称メイドキャラクター" or similar
+	if !strings.Contains(got, `"value":"自称メイドキャラクター"`) {
+		t.Errorf("RepairJSON() failed to separate merged key-value. Got: %s", got)
+	}
+}

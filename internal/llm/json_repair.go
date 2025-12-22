@@ -228,6 +228,12 @@ func preprocessJSON(s string) string {
 	reDoubleQuote := regexp.MustCompile(`([^:,\s\[\{])""(\s*[\}\],])`)
 	s = reDoubleQuote.ReplaceAllString(s, `$1"$2`)
 
+	// 6. Fix merged key-value: "valueContent" -> "value":"Content"
+	// Ensure it is preceded by ',' or '{' (indicating it's a key position),
+	// to avoid incorrectly splitting valid values like "key":"value1".
+	reMergedValue := regexp.MustCompile(`([,{]\s*)"(value)([^":,]+)"`)
+	s = reMergedValue.ReplaceAllString(s, `$1"$2":"$3"`)
+
 	return s
 }
 
