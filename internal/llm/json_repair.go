@@ -202,44 +202,67 @@ func RepairJSON(s string) string {
 
 // preprocessJSON normalizes formatting issues like full-width characters.
 func preprocessJSON(s string) string {
-	// 1. Replace full-width colons
-	s = strings.ReplaceAll(s, "：", ":")
+	s = replaceFullWidthColons(s)
+	s = addQuotesToKeys(s)
+	s = replaceOpeningJapaneseQuote(s)
+	s = replaceClosingJapaneseQuote(s)
+	s = fixMissingCommaQuotes(s)
+	s = fixGarbageQuotes(s)
+	s = fixMergedKeyValue(s)
+	s = fixMissingOpeningQuotes(s)
+	return s
+}
 
+func replaceFullWidthColons(s string) string {
+	return strings.ReplaceAll(s, "：", ":")
+}
+
+func addQuotesToKeys(s string) string {
 	// 2. Add quotes to keys: "key: value" -> "key": "value"
 	// Guard against replacing protocols (e.g., http:).
-	reKeyFix := regexp.MustCompile(`([,{]\s*)"([a-zA-Z0-9_]+):`)
-	s = reKeyFix.ReplaceAllString(s, `$1"$2":`)
+	re := regexp.MustCompile(`([,{]\s*)"([a-zA-Z0-9_]+):`)
+	return re.ReplaceAllString(s, `$1"$2":`)
+}
 
-	// 3. Normalize Japanese quotes 「...」 to "..."
-	// Replace opening quote
-	reStart := regexp.MustCompile(`:\s*「`)
-	s = reStart.ReplaceAllString(s, `: "`)
+func replaceOpeningJapaneseQuote(s string) string {
+	// 3a. Normalize Japanese opening quote "key": 「value
+	re := regexp.MustCompile(`:\s*「`)
+	return re.ReplaceAllString(s, `: "`)
+}
 
+func replaceClosingJapaneseQuote(s string) string {
+	// 3b. Normalize Japanese closing quote value」 -> value"
 	// Replace closing quote if followed by delimiter
-	reEnd := regexp.MustCompile(`」(\s*[\}\],])`)
-	s = reEnd.ReplaceAllString(s, `"$1`)
+	re := regexp.MustCompile(`」(\s*[\}\],])`)
+	return re.ReplaceAllString(s, `"$1`)
+}
 
+func fixMissingCommaQuotes(s string) string {
 	// 4. Fix missing closing quote before comma: "value,"key"
-	reMissingQuote := regexp.MustCompile(`:"([a-zA-Z0-9_]+),"([a-zA-Z0-9_]+)":`)
-	s = reMissingQuote.ReplaceAllString(s, `:"$1","$2":`)
+	re := regexp.MustCompile(`:"([a-zA-Z0-9_]+),"([a-zA-Z0-9_]+)":`)
+	return re.ReplaceAllString(s, `:"$1","$2":`)
+}
 
+func fixGarbageQuotes(s string) string {
 	// 5. Fix garbage quotes at end of value: "value""}
 	// Exclude valid empty strings.
-	reDoubleQuote := regexp.MustCompile(`([^:,\s\[\{])""(\s*[\}\],])`)
-	s = reDoubleQuote.ReplaceAllString(s, `$1"$2`)
+	re := regexp.MustCompile(`([^:,\s\[\{])""(\s*[\}\],])`)
+	return re.ReplaceAllString(s, `$1"$2`)
+}
 
+func fixMergedKeyValue(s string) string {
 	// 6. Fix merged key-value: "valueContent" -> "value":"Content"
 	// Ensure it is preceded by ',' or '{' (indicating it's a key position),
 	// to avoid incorrectly splitting valid values like "key":"value1".
-	reMergedValue := regexp.MustCompile(`([,{]\s*)"(value)([^":,]+)"`)
-	s = reMergedValue.ReplaceAllString(s, `$1"$2":"$3"`)
+	re := regexp.MustCompile(`([,{]\s*)"(value)([^":,]+)"`)
+	return re.ReplaceAllString(s, `$1"$2":"$3"`)
+}
 
+func fixMissingOpeningQuotes(s string) string {
 	// 7. Fix missing opening quote for values starting with non-standard characters (e.g., Japanese brackets)
 	// Matches: "key": <char> where <char> is not a valid JSON value starter
-	reMissingOpenQuote := regexp.MustCompile(`(:\s*)([^"\[\{\]\}\s0-9\-tfn])`)
-	s = reMissingOpenQuote.ReplaceAllString(s, `$1"$2`)
-
-	return s
+	re := regexp.MustCompile(`(:\s*)([^"\[\{\]\}\s0-9\-tfn])`)
+	return re.ReplaceAllString(s, `$1"$2`)
 }
 
 func IsDoubleArray(s string) bool {

@@ -322,3 +322,69 @@ func TestRepairJSON_MissingOpeningQuote(t *testing.T) {
 		t.Errorf("Expected value to start with %q, got %q", expectedValueStart, actualValue)
 	}
 }
+
+func TestPreprocessRules(t *testing.T) {
+	t.Run("addQuotesToKeys", func(t *testing.T) {
+		input := `{"key: "value", "foo": "bar"}`
+		want := `{"key": "value", "foo": "bar"}`
+		if got := addQuotesToKeys(input); got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+		// Check protocol guard
+		inputUrl := `{"url": "http://example.com"}`
+		if got := addQuotesToKeys(inputUrl); got != inputUrl {
+			t.Errorf("Should not touch protocols. got %q, want %q", got, inputUrl)
+		}
+	})
+
+	t.Run("replaceOpeningJapaneseQuote", func(t *testing.T) {
+		input := `{"key": 「value"}`
+		want := `{"key": "value"}`
+		if got := replaceOpeningJapaneseQuote(input); got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("replaceClosingJapaneseQuote", func(t *testing.T) {
+		input := `{"key": "value」}`
+		want := `{"key": "value"}`
+		if got := replaceClosingJapaneseQuote(input); got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("fixMissingCommaQuotes", func(t *testing.T) {
+		// Note: The regex matches `:"...","...":` context
+		input := `{"k":"value,"next":1}`
+		want := `{"k":"value","next":1}`
+		if got := fixMissingCommaQuotes(input); got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("fixGarbageQuotes", func(t *testing.T) {
+		input := `{"key":"value""}`
+		want := `{"key":"value"}`
+		if got := fixGarbageQuotes(input); got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("fixMergedKeyValue", func(t *testing.T) {
+		// Matches ([,{]\s*)"(value)([^":,]+)"
+		input := `{"key":"value1", "valueContent"}`
+		want := `{"key":"value1", "value":"Content"}`
+		if got := fixMergedKeyValue(input); got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("fixMissingOpeningQuotes", func(t *testing.T) {
+		// Matches (:\s*)([^"\[\{\]\}\s0-9\-tfn])
+		input := `{"key": 『value』}`
+		want := `{"key": "『value』}`
+		if got := fixMissingOpeningQuotes(input); got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+}
