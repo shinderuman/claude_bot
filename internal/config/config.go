@@ -14,9 +14,10 @@ type Config struct {
 	MastodonAccessToken string
 
 	// LLM Provider Settings
-	LLMProvider  string // "claude" or "gemini"
-	GeminiAPIKey string
-	GeminiModel  string
+	LLMProvider    string // "claude" or "gemini"
+	LLMTemperature float64
+	GeminiAPIKey   string
+	GeminiModel    string
 
 	// Claude Settings
 	AnthropicAuthToken string
@@ -130,9 +131,10 @@ func LoadEnvironment(envPath string) {
 
 func LoadConfig() *Config {
 	cfg := &Config{
-		LLMProvider:  parseString(os.Getenv("LLM_PROVIDER")),
-		GeminiAPIKey: os.Getenv("GEMINI_API_KEY"),
-		GeminiModel:  parseString(os.Getenv("GEMINI_MODEL")),
+		LLMProvider:    parseString(os.Getenv("LLM_PROVIDER")),
+		LLMTemperature: parseFloat(os.Getenv("LLM_TEMPERATURE")),
+		GeminiAPIKey:   os.Getenv("GEMINI_API_KEY"),
+		GeminiModel:    parseString(os.Getenv("GEMINI_MODEL")),
 
 		AnthropicAuthToken: os.Getenv("ANTHROPIC_AUTH_TOKEN"),
 		AnthropicBaseURL:   os.Getenv("ANTHROPIC_BASE_URL"),
@@ -228,6 +230,14 @@ func parseString(value string) string {
 
 func parseInt(value string) int {
 	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		log.Fatal("エラー: 環境変数の値が無効です。数値を指定してください: ", value)
+	}
+	return parsed
+}
+
+func parseFloat(value string) float64 {
+	parsed, err := strconv.ParseFloat(value, 64)
 	if err != nil {
 		log.Fatal("エラー: 環境変数の値が無効です。数値を指定してください: ", value)
 	}

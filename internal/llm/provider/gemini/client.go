@@ -55,6 +55,8 @@ func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, 
 	if maxTokens > 0 {
 		c.model.SetMaxOutputTokens(int32(maxTokens))
 	}
+	// Temperatureの設定
+	c.model.SetTemperature(float32(c.config.LLMTemperature))
 
 	// チャットセッションの開始
 	cs := c.model.StartChat()

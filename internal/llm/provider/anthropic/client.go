@@ -30,9 +30,10 @@ func NewClient(cfg *config.Config) provider.Provider {
 
 func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image) (string, error) {
 	params := anthropic.MessageNewParams{
-		Model:     anthropic.Model(c.config.AnthropicModel),
-		MaxTokens: maxTokens,
-		Messages:  convertMessages(messages, images),
+		Model:       anthropic.Model(c.config.AnthropicModel),
+		MaxTokens:   maxTokens,
+		Messages:    convertMessages(messages, images),
+		Temperature: anthropic.Float(c.config.LLMTemperature),
 	}
 
 	if systemPrompt != "" {
