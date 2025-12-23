@@ -20,7 +20,7 @@ var (
 	reMergedKeyValue         = regexp.MustCompile(`([,{]\s*)"(value)([^":,]+)"`)
 	reHexEscapes             = regexp.MustCompile(`\\x([0-9a-fA-F]{2})`)
 	reStringLiterals         = regexp.MustCompile(`"[^"\\]*(?:\\.[^"\\]*)*"`)
-	reUnquotedKeys           = regexp.MustCompile(`([,{]\s*)"([a-zA-Z0-9_]+):`)
+	reUnquotedKeys           = regexp.MustCompile(`([,{]\s*)([a-zA-Z0-9_]+)\s*:`)
 	reJapaneseOpeningQuote   = regexp.MustCompile(`:\s*「`)
 	reJapaneseClosingQuote   = regexp.MustCompile(`」(\s*[\}\],])`)
 	reMissingCommaValueKey   = regexp.MustCompile(`("[^"]*")(\s*)("[a-zA-Z0-9_]+"\s*:)`)
@@ -46,35 +46,109 @@ func SetErrorNotifier(notifier ErrorNotifierFunc) {
 // UnmarshalWithRepair attempts unmarshal; retries with repair on failure.
 // Logs detailed error only if repair also fails.
 func UnmarshalWithRepair(jsonStr string, v interface{}, logPrefix string) error {
-	if err := json.Unmarshal([]byte(jsonStr), v); err != nil {
-		repairedJSON := RepairJSON(jsonStr)
-		if err := json.Unmarshal([]byte(repairedJSON), v); err != nil {
-			if typeErr, ok := err.(*json.UnmarshalTypeError); ok {
-				if typeErr.Type.Kind() == reflect.Slice && typeErr.Value == "object" {
-					arrayWrapped := "[" + repairedJSON + "]"
-					if err := json.Unmarshal([]byte(arrayWrapped), v); err == nil {
-						return nil
-					}
-				}
-			}
+	// Phase 1: Standard Unmarshal
+	if err := json.Unmarshal([]byte(jsonStr), v); err == nil {
+		return nil
+	}
 
-			msg := fmt.Sprintf("%sJSONパースエラー(修復後): %v", logPrefix, err)
-			detail := fmt.Sprintf("Original: %s\nRepaired: %s", jsonStr, repairedJSON)
-			log.Printf("%s\n%s", msg, detail)
+	// Phase 2: Tier 1 - Structural Repair
+	t1 := repairTier1(jsonStr)
+	if err := json.Unmarshal([]byte(t1), v); err == nil {
+		return nil
+	}
 
-			if errorNotifier != nil {
-				go errorNotifier(msg, detail)
+	// Phase 3: Tier 2 - Character Repair
+	t2 := repairTier2(jsonStr)
+	if err := json.Unmarshal([]byte(t2), v); err == nil {
+		return nil
+	}
+
+	// Phase 4: Tier 3 - Quote Repair
+	t3 := repairTier3(jsonStr)
+	if err := json.Unmarshal([]byte(t3), v); err == nil {
+		return nil
+	}
+
+	// Phase 5: Tier 4 - Aggressive Repair
+	t4 := repairTier4(jsonStr)
+	if err := json.Unmarshal([]byte(t4), v); err == nil {
+		// Handle specific array-of-objects wrapped in [] case if needed, though RepairJSON covers some
+		return nil
+	}
+
+	// Special case: Try wrapping in array if it looks like a slice of objects
+	if typeErr, ok := json.Unmarshal([]byte(t4), &v).(*json.UnmarshalTypeError); ok {
+		if typeErr.Type.Kind() == reflect.Slice && typeErr.Value == "object" {
+			arrayWrapped := "[" + t4 + "]"
+			if err := json.Unmarshal([]byte(arrayWrapped), v); err == nil {
+				return nil
 			}
-			return err
 		}
 	}
-	return nil
+
+	err := fmt.Errorf("failed to parse JSON after 4-tier repair")
+	msg := fmt.Sprintf("%sJSONパースエラー(修復後): %v", logPrefix, err)
+	detail := fmt.Sprintf("Original: %s\nLastRepaired: %s", jsonStr, t4)
+	log.Printf("%s\n%s", msg, detail)
+
+	if errorNotifier != nil {
+		go errorNotifier(msg, detail)
+	}
+	return err
 }
 
-// RepairJSON attempts to repair a truncated or malformed JSON string.
-// Repairs unclosed arrays and stack-based structural issues.
-func RepairJSON(s string) string {
-	s, originals := preprocessJSON(s)
+// repairTier1 applies minimal structural repairs.
+func repairTier1(s string) string {
+	s = fixTrailingCommas(s)
+	s = repairDoubleArray(s)
+	s = repairTruncatedArray(s)
+	s = repairStructural(s)
+	s = fixInvalidObjectToArray(s)
+	s = fixMissingCommaBetweenObjects(s)
+	s = repairDoubleArray(s)
+	return strings.TrimSpace(s)
+}
+
+// repairTier2 applies character level fixes
+func repairTier2(s string) string {
+	s = fixFullWidthColons(s)
+	s = fixEscapedSingleQuotes(s)
+	s = fixHexEscapes(s)
+	s = fixSemicolonSeparator(s)
+	s = fixMergedKeyValue(s)
+	s = fixJapaneseOpeningQuote(s)
+	s = fixJapaneseClosingQuote(s)
+	return repairTier1(s)
+}
+
+// repairTier3 applies quote and key fixes.
+func repairTier3(s string) string {
+	s = fixFullWidthColons(s)
+	s = fixEscapedSingleQuotes(s)
+	s = fixHexEscapes(s)
+	s = fixSemicolonSeparator(s)
+	s = fixMergedKeyValue(s)
+	s = fixUnquotedKeys(s)
+	s = fixMissingCommaQuotes(s)
+	s = fixMissingCommaBetweenValueAndKey(s)
+	s = fixMissingCommaAfterValue(s)
+	s = fixUnexpectedColon(s)
+	s = fixInvalidKeyFormat(s)
+	s = fixGarbageQuotes(s)
+	s = fixGarbageKeyAfterObject(s)
+	s = fixMissingOpeningQuotes(s)
+	s = fixUnquotedValuesInArray(s)
+	s = fixDanglingKey(s)
+
+	s = fixJapaneseOpeningQuote(s)
+	s = fixJapaneseClosingQuote(s)
+	return repairTier1(s)
+}
+
+// repairTier4 attempts to repair a truncated or malformed JSON string.
+// repairs unclosed arrays and stack-based structural issues.
+func repairTier4(s string) string {
+	s, originals := applyComplexRegexRepairs(s)
 	s = strings.TrimSpace(s)
 
 	s = repairDoubleArray(s)
@@ -86,10 +160,11 @@ func RepairJSON(s string) string {
 	return s
 }
 
-// preprocessJSON normalizes formatting.
-func preprocessJSON(s string) (string, []string) {
-	s = replaceFullWidthColons(s)
-	s = unescapeSingleQuotes(s)
+// applyComplexRegexRepairs applies aggressive regex-based fixes with masking.
+// Formerly known as preprocessJSON.
+func applyComplexRegexRepairs(s string) (string, []string) {
+	s = fixFullWidthColons(s)
+	s = fixEscapedSingleQuotes(s)
 	s = fixMissingCommaQuotes(s)
 	s = fixMergedKeyValue(s)
 	s = fixHexEscapes(s)
@@ -105,9 +180,9 @@ func preprocessJSON(s string) (string, []string) {
 	}
 	s = masked
 
-	s = addQuotesToKeys(s)
-	s = replaceOpeningJapaneseQuote(s)
-	s = replaceClosingJapaneseQuote(s)
+	s = fixUnquotedKeys(s)
+	s = fixJapaneseOpeningQuote(s)
+	s = fixJapaneseClosingQuote(s)
 	s = fixMissingCommaBetweenValueAndKey(s)
 	s = fixMissingCommaAfterValue(s)
 	s = fixUnexpectedColon(s)
@@ -118,151 +193,14 @@ func preprocessJSON(s string) (string, []string) {
 	s = fixMissingOpeningQuotes(s)
 	s = fixGarbageKeyAfterObject(s)
 	s = fixInvalidObjectToArray(s)
-	s = removeTrailingCommas(s)
+	s = fixTrailingCommas(s)
 
 	return s, originals
 }
 
-func replaceFullWidthColons(s string) string {
-	s = regexp.MustCompile(`([^"])\s*：`).ReplaceAllString(s, `$1": `)
-	s = regexp.MustCompile(`"\s*：`).ReplaceAllString(s, `": `)
-	return strings.ReplaceAll(s, "：", ":")
-}
+// --- Tier 1 Helpers ---
 
-func unescapeSingleQuotes(s string) string {
-	return strings.ReplaceAll(s, `\'`, `'`)
-}
-
-func fixMissingCommaQuotes(s string) string {
-	return reMissingCommaQuotes.ReplaceAllString(s, `:"$1","$2":`)
-}
-
-func fixMergedKeyValue(s string) string {
-	return reMergedKeyValue.ReplaceAllString(s, `$1"$2":"$3"`)
-}
-
-func fixHexEscapes(s string) string {
-	return reHexEscapes.ReplaceAllString(s, `\u00$1`)
-}
-
-func maskStrings(s string) (string, []string) {
-	var originals []string
-	masked := reStringLiterals.ReplaceAllStringFunc(s, func(match string) string {
-		placeholder := fmt.Sprintf(`"__STR_%d__"`, len(originals))
-		originals = append(originals, match)
-		return placeholder
-	})
-	return masked, originals
-}
-
-func addQuotesToKeys(s string) string {
-	return reUnquotedKeys.ReplaceAllString(s, `$1"$2":`)
-}
-
-func replaceOpeningJapaneseQuote(s string) string {
-	return reJapaneseOpeningQuote.ReplaceAllString(s, `: "`)
-}
-
-func replaceClosingJapaneseQuote(s string) string {
-	return reJapaneseClosingQuote.ReplaceAllString(s, `"$1`)
-}
-
-func fixMissingCommaBetweenValueAndKey(s string) string {
-	return reMissingCommaValueKey.ReplaceAllString(s, `$1,$2$3`)
-}
-
-func fixMissingCommaAfterValue(s string) string {
-	return reMissingCommaAfterValue.ReplaceAllString(s, `$1, $2`)
-}
-
-func fixUnexpectedColon(s string) string {
-	return reUnexpectedColon.ReplaceAllString(s, `$1, "repaired_key":`)
-}
-
-func fixInvalidKeyFormat(s string) string {
-	return reInvalidKeyFormat.ReplaceAllString(s, `"$1":`)
-}
-
-func fixSemicolonSeparator(s string) string {
-	return reSemicolonSeparator.ReplaceAllString(s, `$1,$2`)
-}
-
-func fixMissingCommaBetweenObjects(s string) string {
-	return reMissingCommaObjects.ReplaceAllString(s, `$1,$2`)
-}
-
-func fixUnquotedValuesInArray(s string) string {
-	return reUnquotedValues.ReplaceAllStringFunc(s, func(match string) string {
-		groups := reUnquotedValues.FindStringSubmatch(match)
-		if len(groups) < 5 {
-			return match
-		}
-		prefix := groups[1]
-		val := strings.TrimSpace(groups[2])
-		suffix := groups[4]
-
-		if val == "true" || val == "false" || val == "null" {
-			return match
-		}
-		if _, err := fmt.Sscanf(val, "%f", new(float64)); err == nil {
-			isNumber := true
-			for _, r := range val {
-				if (r < '0' || r > '9') && r != '.' && r != '-' && r != 'e' && r != 'E' && r != '+' {
-					isNumber = false
-					break
-				}
-			}
-			if isNumber {
-				return match
-			}
-		}
-
-		return fmt.Sprintf(`%s"%s"%s`, prefix, val, suffix)
-	})
-}
-
-func fixGarbageQuotes(s string) string {
-	return reGarbageQuotes.ReplaceAllString(s, `$1"$2`)
-}
-
-func fixMissingOpeningQuotes(s string) string {
-	return reMissingOpeningQuotes.ReplaceAllStringFunc(s, func(match string) string {
-		groups := reMissingOpeningQuotes.FindStringSubmatch(match)
-		if len(groups) < 3 {
-			return match
-		}
-		prefix := groups[1]
-		val := strings.TrimSpace(groups[2])
-
-		if val == "true" || val == "false" || val == "null" {
-			return match
-		}
-		isNumber := true
-		for _, r := range val {
-			if (r < '0' || r > '9') && r != '.' && r != '-' {
-				isNumber = false
-				break
-			}
-		}
-		if isNumber && len(val) > 0 {
-			return match
-		}
-
-		return fmt.Sprintf(`%s"%s"`, prefix, val)
-	})
-}
-
-func fixGarbageKeyAfterObject(s string) string {
-	return reGarbageKeyAfterObject.ReplaceAllString(s, `, "$1":`)
-}
-
-func fixInvalidObjectToArray(s string) string {
-	return reInvalidObjectToArray.ReplaceAllStringFunc(s, func(match string) string {
-		return "[" + match[1:len(match)-1] + "]"
-	})
-}
-
-func removeTrailingCommas(s string) string {
+func fixTrailingCommas(s string) string {
 	return reTrailingCommas.ReplaceAllString(s, `$1$2`)
 }
 
@@ -303,6 +241,7 @@ type structuralRepairer struct {
 	sb       strings.Builder
 	inString bool
 	escaped  bool
+	done     bool // Stops after first valid top-level object
 }
 
 func (r *structuralRepairer) repair() string {
@@ -331,8 +270,9 @@ func (r *structuralRepairer) repair() string {
 			continue
 		}
 
-		if result, done := r.handleStructure(ch); done {
-			return result
+		r.handleStructure(ch)
+		if r.done {
+			return r.sb.String()
 		}
 		r.pos++
 	}
@@ -381,6 +321,14 @@ func (r *structuralRepairer) isFollowedByDelimiter(startIdx int) bool {
 
 func (r *structuralRepairer) handleQuote() {
 	if r.inString {
+		if r.pos+1 < len(r.runes) && r.runes[r.pos+1] == '"' && r.isFollowedByDelimiter(r.pos+2) {
+			// Double quote at end of term: "..."". Treat as garbage quote.
+			// Close string, skip the extra quote.
+			r.inString = false
+			r.sb.WriteRune('"')
+			r.pos += 2
+			return
+		}
 		if r.isFollowedByDelimiter(r.pos + 1) {
 			r.inString = false
 			r.sb.WriteRune('"')
@@ -416,7 +364,7 @@ func (r *structuralRepairer) handleStringContent(ch rune) {
 	r.pos++
 }
 
-func (r *structuralRepairer) handleStructure(ch rune) (string, bool) {
+func (r *structuralRepairer) handleStructure(ch rune) {
 	switch ch {
 	case '{', '[':
 		r.stack = append(r.stack, ch)
@@ -436,7 +384,8 @@ func (r *structuralRepairer) handleStructure(ch rune) (string, bool) {
 			r.sb.WriteRune('}')
 		}
 		if len(r.stack) == 0 {
-			return r.sb.String(), true
+			r.done = true
+			return
 		}
 	case ']':
 		if r.peek() == '{' {
@@ -453,12 +402,12 @@ func (r *structuralRepairer) handleStructure(ch rune) (string, bool) {
 			r.sb.WriteRune(']')
 		}
 		if len(r.stack) == 0 {
-			return r.sb.String(), true
+			r.done = true
+			return
 		}
 	default:
 		r.sb.WriteRune(ch)
 	}
-	return "", false
 }
 
 func (r *structuralRepairer) closeOpenContexts() {
@@ -488,8 +437,162 @@ func (r *structuralRepairer) pop() {
 	}
 }
 
+func fixInvalidObjectToArray(s string) string {
+	return reInvalidObjectToArray.ReplaceAllStringFunc(s, func(match string) string {
+		return "[" + match[1:len(match)-1] + "]"
+	})
+}
+
+func fixMissingCommaBetweenObjects(s string) string {
+	return reMissingCommaObjects.ReplaceAllString(s, `$1,$2`)
+}
+
+// --- Tier 2 Helpers ---
+
+func fixFullWidthColons(s string) string {
+	s = regexp.MustCompile(`([^"])\s*：`).ReplaceAllString(s, `$1": `)
+	s = regexp.MustCompile(`"\s*：`).ReplaceAllString(s, `": `)
+	return strings.ReplaceAll(s, "：", ":")
+}
+
+func fixEscapedSingleQuotes(s string) string {
+	return strings.ReplaceAll(s, `\'`, `'`)
+}
+
+func fixHexEscapes(s string) string {
+	return reHexEscapes.ReplaceAllStringFunc(s, func(match string) string {
+		return "\\u00" + match[2:]
+	})
+}
+
+func fixSemicolonSeparator(s string) string {
+	return reSemicolonSeparator.ReplaceAllString(s, `$1,$2`)
+}
+
+func fixMergedKeyValue(s string) string {
+	return reMergedKeyValue.ReplaceAllString(s, `$1"$2":"$3"`)
+}
+
+func fixJapaneseOpeningQuote(s string) string {
+	return reJapaneseOpeningQuote.ReplaceAllString(s, `: "`)
+}
+
+func fixJapaneseClosingQuote(s string) string {
+	return reJapaneseClosingQuote.ReplaceAllString(s, `"$1`)
+}
+
+// --- Tier 3 Helpers ---
+
+func fixUnquotedKeys(s string) string {
+	return reUnquotedKeys.ReplaceAllString(s, `$1"$2":`)
+}
+
+func fixMissingCommaQuotes(s string) string {
+	return reMissingCommaQuotes.ReplaceAllString(s, `:"$1","$2":`)
+}
+
+func fixMissingCommaBetweenValueAndKey(s string) string {
+	return reMissingCommaValueKey.ReplaceAllString(s, `$1,$2$3`)
+}
+
+func fixMissingCommaAfterValue(s string) string {
+	return reMissingCommaAfterValue.ReplaceAllString(s, `$1, $2`)
+}
+
+func fixUnexpectedColon(s string) string {
+	return reUnexpectedColon.ReplaceAllString(s, `$1, "repaired_key":`)
+}
+
+func fixInvalidKeyFormat(s string) string {
+	return reInvalidKeyFormat.ReplaceAllString(s, `"$1":`)
+}
+
+func fixGarbageQuotes(s string) string {
+	return reGarbageQuotes.ReplaceAllString(s, `$1"$2`)
+}
+
+func fixGarbageKeyAfterObject(s string) string {
+	return reGarbageKeyAfterObject.ReplaceAllString(s, `, "$1":`)
+}
+
+func fixMissingOpeningQuotes(s string) string {
+	return reMissingOpeningQuotes.ReplaceAllStringFunc(s, func(match string) string {
+		groups := reMissingOpeningQuotes.FindStringSubmatch(match)
+		if len(groups) < 3 {
+			return match
+		}
+		prefix := groups[1]
+		val := strings.TrimSpace(groups[2])
+
+		if val == "true" || val == "false" || val == "null" {
+			return match
+		}
+		isNumber := true
+		for _, r := range val {
+			if (r < '0' || r > '9') && r != '.' && r != '-' {
+				isNumber = false
+				break
+			}
+		}
+		if isNumber && len(val) > 0 {
+			return match
+		}
+
+		return fmt.Sprintf(`%s"%s"`, prefix, val)
+	})
+}
+
+func fixUnquotedValuesInArray(s string) string {
+	for {
+		newS := reUnquotedValues.ReplaceAllStringFunc(s, func(match string) string {
+			groups := reUnquotedValues.FindStringSubmatch(match)
+			if len(groups) < 5 {
+				return match
+			}
+			prefix := groups[1]
+			val := strings.TrimSpace(groups[2])
+			suffix := groups[4]
+
+			if val == "true" || val == "false" || val == "null" {
+				return match
+			}
+			if _, err := fmt.Sscanf(val, "%f", new(float64)); err == nil {
+				isNumber := true
+				for _, r := range val {
+					if (r < '0' || r > '9') && r != '.' && r != '-' && r != 'e' && r != 'E' && r != '+' {
+						isNumber = false
+						break
+					}
+				}
+				if isNumber {
+					return match
+				}
+			}
+
+			return fmt.Sprintf(`%s"%s"%s`, prefix, val, suffix)
+		})
+		if newS == s {
+			break
+		}
+		s = newS
+	}
+	return s
+}
+
 func fixDanglingKey(s string) string {
 	return reDanglingKey.ReplaceAllString(s, `}`)
+}
+
+// --- Tier 4 Helpers ---
+
+func maskStrings(s string) (string, []string) {
+	var originals []string
+	masked := reStringLiterals.ReplaceAllStringFunc(s, func(match string) string {
+		placeholder := fmt.Sprintf(`"__STR_%d__"`, len(originals))
+		originals = append(originals, match)
+		return placeholder
+	})
+	return masked, originals
 }
 
 func unmaskStrings(s string, originals []string) string {
