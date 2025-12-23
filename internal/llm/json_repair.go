@@ -14,6 +14,29 @@ type ErrorNotifierFunc func(message, details string)
 
 var errorNotifier ErrorNotifierFunc
 
+// Pre-compiled regexes for performance optimization
+var (
+	reMissingCommaQuotes    = regexp.MustCompile(`:"([a-zA-Z0-9_]+),"([a-zA-Z0-9_]+)":`)
+	reMergedKeyValue        = regexp.MustCompile(`([,{]\s*)"(value)([^":,]+)"`)
+	reHexEscapes            = regexp.MustCompile(`\\x([0-9a-fA-F]{2})`)
+	reStringLiterals        = regexp.MustCompile(`"[^"\\]*(?:\\.[^"\\]*)*"`)
+	reUnquotedKeys          = regexp.MustCompile(`([,{]\s*)"([a-zA-Z0-9_]+):`)
+	reJapaneseOpeningQuote  = regexp.MustCompile(`:\s*「`)
+	reJapaneseClosingQuote  = regexp.MustCompile(`」(\s*[\}\],])`)
+	reMissingCommaValueKey  = regexp.MustCompile(`("[^"]*")(\s+)("[a-zA-Z0-9_]+":)`)
+	reUnexpectedColon       = regexp.MustCompile(`(:\s*"(\\.|[^"\\])*")\s*:\s*`)
+	reInvalidKeyFormat      = regexp.MustCompile(`"?([a-zA-Z0-9_]+)"?\s*=\s*`)
+	reSemicolonSeparator    = regexp.MustCompile(`([}\]])\s*;\s*([{\[])`)
+	reMissingCommaObjects   = regexp.MustCompile(`([}\]])\s+([{\[])`)
+	reUnquotedValues        = regexp.MustCompile(`([\[,])\s*([^"\[\{\]\}\s,0-9\-tfn.][^"\[\{\]\}\s,]*)\s*([,\]])`)
+	reGarbageQuotes         = regexp.MustCompile(`([^:,\s\[\{])""(\s*[\}\],])`)
+	reMissingOpeningQuotes  = regexp.MustCompile(`(:\s*)([^"\[\{\]\}\s0-9\-tfn\\])`)
+	reGarbageKeyAfterObject = regexp.MustCompile(`}\s*([a-zA-Z0-9_]+)\s*:`)
+	reInvalidObjectToArray  = regexp.MustCompile(`\{\s*"[^"]+"(?:\s*,\s*"[^"]+")*\s*\}`)
+	reTrailingCommas        = regexp.MustCompile(`(["}\]el0-9])\s*,\s*([}\]])`)
+	reDanglingKey           = regexp.MustCompile(`,\s*"[^"]*"\s*}`)
+)
+
 // SetErrorNotifier sets the callback function for error notifications.
 func SetErrorNotifier(notifier ErrorNotifierFunc) {
 	errorNotifier = notifier
@@ -107,24 +130,20 @@ func unescapeSingleQuotes(s string) string {
 }
 
 func fixMissingCommaQuotes(s string) string {
-	re := regexp.MustCompile(`:"([a-zA-Z0-9_]+),"([a-zA-Z0-9_]+)":`)
-	return re.ReplaceAllString(s, `:"$1","$2":`)
+	return reMissingCommaQuotes.ReplaceAllString(s, `:"$1","$2":`)
 }
 
 func fixMergedKeyValue(s string) string {
-	re := regexp.MustCompile(`([,{]\s*)"(value)([^":,]+)"`)
-	return re.ReplaceAllString(s, `$1"$2":"$3"`)
+	return reMergedKeyValue.ReplaceAllString(s, `$1"$2":"$3"`)
 }
 
 func fixHexEscapes(s string) string {
-	re := regexp.MustCompile(`\\x([0-9a-fA-F]{2})`)
-	return re.ReplaceAllString(s, `\u00$1`)
+	return reHexEscapes.ReplaceAllString(s, `\u00$1`)
 }
 
 func maskStrings(s string) (string, []string) {
 	var originals []string
-	re := regexp.MustCompile(`"[^"\\]*(?:\\.[^"\\]*)*"`)
-	masked := re.ReplaceAllStringFunc(s, func(match string) string {
+	masked := reStringLiterals.ReplaceAllStringFunc(s, func(match string) string {
 		placeholder := fmt.Sprintf(`"__STR_%d__"`, len(originals))
 		originals = append(originals, match)
 		return placeholder
@@ -133,75 +152,61 @@ func maskStrings(s string) (string, []string) {
 }
 
 func addQuotesToKeys(s string) string {
-	re := regexp.MustCompile(`([,{]\s*)"([a-zA-Z0-9_]+):`)
-	return re.ReplaceAllString(s, `$1"$2":`)
+	return reUnquotedKeys.ReplaceAllString(s, `$1"$2":`)
 }
 
 func replaceOpeningJapaneseQuote(s string) string {
-	re := regexp.MustCompile(`:\s*「`)
-	return re.ReplaceAllString(s, `: "`)
+	return reJapaneseOpeningQuote.ReplaceAllString(s, `: "`)
 }
 
 func replaceClosingJapaneseQuote(s string) string {
-	re := regexp.MustCompile(`」(\s*[\}\],])`)
-	return re.ReplaceAllString(s, `"$1`)
+	return reJapaneseClosingQuote.ReplaceAllString(s, `"$1`)
 }
 
 func fixMissingCommaBetweenValueAndKey(s string) string {
-	re := regexp.MustCompile(`("[^"]*")(\s+)("[a-zA-Z0-9_]+":)`)
-	return re.ReplaceAllString(s, `$1,$2$3`)
+	return reMissingCommaValueKey.ReplaceAllString(s, `$1,$2$3`)
 }
 
 func fixUnexpectedColon(s string) string {
-	re := regexp.MustCompile(`(:\s*"(\\.|[^"\\])*")\s*:\s*`)
-	return re.ReplaceAllString(s, `$1, "repaired_key":`)
+	return reUnexpectedColon.ReplaceAllString(s, `$1, "repaired_key":`)
 }
 
 func fixInvalidKeyFormat(s string) string {
-	re := regexp.MustCompile(`"?([a-zA-Z0-9_]+)"?\s*=\s*`)
-	return re.ReplaceAllString(s, `"$1":`)
+	return reInvalidKeyFormat.ReplaceAllString(s, `"$1":`)
 }
 
 func fixSemicolonSeparator(s string) string {
-	re := regexp.MustCompile(`([}\]])\s*;\s*([{\[])`)
-	return re.ReplaceAllString(s, `$1,$2`)
+	return reSemicolonSeparator.ReplaceAllString(s, `$1,$2`)
 }
 
 func fixMissingCommaBetweenObjects(s string) string {
-	re := regexp.MustCompile(`([}\]])\s+([{\[])`)
-	return re.ReplaceAllString(s, `$1,$2`)
+	return reMissingCommaObjects.ReplaceAllString(s, `$1,$2`)
 }
 
 func fixUnquotedValuesInArray(s string) string {
-	re := regexp.MustCompile(`([\[,])\s*([^"\[\{\]\}\s,0-9\-tfn.][^"\[\{\]\}\s,]*)\s*([,\]])`)
-	return re.ReplaceAllString(s, `$1"$2"$3`)
+	return reUnquotedValues.ReplaceAllString(s, `$1"$2"$3`)
 }
 
 func fixGarbageQuotes(s string) string {
-	re := regexp.MustCompile(`([^:,\s\[\{])""(\s*[\}\],])`)
-	return re.ReplaceAllString(s, `$1"$2`)
+	return reGarbageQuotes.ReplaceAllString(s, `$1"$2`)
 }
 
 func fixMissingOpeningQuotes(s string) string {
-	re := regexp.MustCompile(`(:\s*)([^"\[\{\]\}\s0-9\-tfn\\])`)
-	return re.ReplaceAllString(s, `$1"$2`)
+	return reMissingOpeningQuotes.ReplaceAllString(s, `$1"$2`)
 }
 
 func fixGarbageKeyAfterObject(s string) string {
-	re := regexp.MustCompile(`}\s*([a-zA-Z0-9_]+)\s*:`)
-	return re.ReplaceAllString(s, `, "$1":`)
+	return reGarbageKeyAfterObject.ReplaceAllString(s, `, "$1":`)
 }
 
 func fixInvalidObjectToArray(s string) string {
-	re := regexp.MustCompile(`\{\s*"[^"]+"(?:\s*,\s*"[^"]+")*\s*\}`)
-	return re.ReplaceAllStringFunc(s, func(match string) string {
+	return reInvalidObjectToArray.ReplaceAllStringFunc(s, func(match string) string {
 		return "[" + match[1:len(match)-1] + "]"
 	})
 }
 
 func removeTrailingCommas(s string) string {
-	re := regexp.MustCompile(`(["}\]el0-9])\s*,\s*([}\]])`)
-	return re.ReplaceAllString(s, `$1$2`)
+	return reTrailingCommas.ReplaceAllString(s, `$1$2`)
 }
 
 func repairDoubleArray(s string) string {
@@ -429,8 +434,7 @@ func (r *structuralRepairer) pop() {
 }
 
 func fixDanglingKey(s string) string {
-	re := regexp.MustCompile(`,\s*"[^"]*"\s*}`)
-	return re.ReplaceAllString(s, `}`)
+	return reDanglingKey.ReplaceAllString(s, `}`)
 }
 
 func unmaskStrings(s string, originals []string) string {
