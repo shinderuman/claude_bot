@@ -280,6 +280,20 @@ var repairTestCases = []struct {
 		want:  `[{"target":"general","key":"plan","value":"Standard plan"},{"target":"general","key":"news","value":"Update available"}]`,
 		exact: false,
 	},
+	{
+		name:  "Error 13: Missing closing brace before next object",
+		input: `[
+{"target": "t1", "value": "v1"},
+{"target": "t2", "value": "v2",
+{"target": "t3", "value": "v3"}
+]`,
+		want: `[
+{"target": "t1", "value": "v1"},
+{"target": "t2", "value": "v2"},
+{"target": "t3", "value": "v3"}
+]`,
+		exact: false,
+	},
 }
 
 // TestIntegration tests the full UnmarshalWithRepair piepline using the test cases above.

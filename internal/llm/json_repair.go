@@ -41,6 +41,7 @@ var (
 	reFullWidthColonQuoted   = regexp.MustCompile(`"\s*\x{ff1a}`)
 	reFullWidthColonKey      = regexp.MustCompile(`([{\[,]\s*"[^"]*?)\s*\x{ff1a}`)
 	rePlaceholder            = regexp.MustCompile(`"?__STR_(\d+)__"?`)
+	reMissingClosingBrace    = regexp.MustCompile(`(:\s*(?:"[^"]*"|true|false|null|[0-9\.-]+)\s*),\s*\{`)
 )
 
 // SetErrorNotifier sets the callback function for error notifications.
@@ -151,7 +152,16 @@ func repairTier3(s string) string {
 // repairTier4 attempts to repair a truncated or malformed JSON string.
 // repairs unclosed arrays and stack-based structural issues.
 func repairTier4(s string) string {
-	s, originals := applyComplexRegexRepairs(s)
+	s = fixFullWidthColons(s)
+	s = fixEscapedSingleQuotes(s)
+	s = fixMissingCommaQuotes(s)
+	s = fixMergedKeyValue(s)
+	s = fixHexEscapes(s)
+	s = fixUnquotedValuesInArray(s)
+
+	s, originals := maskStrings(s)
+
+	s = applyComplexRegexRepairs(s)
 	s = strings.TrimSpace(s)
 
 	s = repairDoubleArray(s)
@@ -163,26 +173,9 @@ func repairTier4(s string) string {
 	return s
 }
 
-// applyComplexRegexRepairs applies aggressive regex-based fixes with masking.
+// applyComplexRegexRepairs applies aggressive regex-based fixes on a MASKED string.
 // Formerly known as preprocessJSON.
-func applyComplexRegexRepairs(s string) (string, []string) {
-	s = fixFullWidthColons(s)
-	s = fixEscapedSingleQuotes(s)
-	s = fixMissingCommaQuotes(s)
-	s = fixMergedKeyValue(s)
-	s = fixHexEscapes(s)
-	s = fixUnquotedValuesInArray(s)
-
-	masked, originals := maskStrings(s)
-	// Escape control characters
-	for i, orig := range originals {
-		orig = strings.ReplaceAll(orig, "\n", "\\n")
-		orig = strings.ReplaceAll(orig, "\r", "\\r")
-		orig = strings.ReplaceAll(orig, "\t", "\\t")
-		originals[i] = orig
-	}
-	s = masked
-
+func applyComplexRegexRepairs(s string) string {
 	s = fixDoubleCommas(s)
 
 	s = fixUnquotedKeys(s)
@@ -200,8 +193,9 @@ func applyComplexRegexRepairs(s string) (string, []string) {
 	s = fixInvalidObjectToArray(s)
 	s = fixTrailingCommas(s)
 	s = fixBareKeyValueInArray(s)
+	s = fixMissingClosingBrace(s)
 
-	return s, originals
+	return s
 }
 
 // --- Tier 1 Helpers ---
@@ -597,6 +591,11 @@ func maskStrings(s string) (string, []string) {
 	var originals []string
 	masked := reStringLiterals.ReplaceAllStringFunc(s, func(match string) string {
 		placeholder := fmt.Sprintf(`"__STR_%d__"`, len(originals))
+
+		match = strings.ReplaceAll(match, "\n", "\\n")
+		match = strings.ReplaceAll(match, "\r", "\\r")
+		match = strings.ReplaceAll(match, "\t", "\\t")
+
 		originals = append(originals, match)
 		return placeholder
 	})
@@ -657,4 +656,8 @@ func fixBareKeyValueInArray(s string) string {
 	}
 	sb.WriteString(s[lastPos:])
 	return sb.String()
+}
+
+func fixMissingClosingBrace(s string) string {
+	return reMissingClosingBrace.ReplaceAllString(s, `$1}, {`)
 }
