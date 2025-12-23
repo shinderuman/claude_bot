@@ -120,7 +120,7 @@ ue"}]`,
 		{
 			name:  "Full-width colon and brackets for value",
 			input: `[{"key"："「value」"}]`,
-			want:  `[{"key":"value"}]`,
+			want:  `[{"key":"「value」"}]`,
 			exact: false,
 		},
 		{
@@ -225,6 +225,32 @@ ue"}]`,
 			want:  `{"key": "truncate"}`, // Should close the string and the object
 			exact: true,
 		},
+
+		// Production Error Cases
+		{
+			name:  "Error 1: Garbage key after object in array",
+			input: `[{"key":"value"}col:es]`,
+			want:  "", // Validity check only
+			exact: false,
+		},
+		{
+			name:  "Error 2: Hex Escape",
+			input: `{"text": "Val\x27ue"}`,
+			want:  `{"text": "Val'ue"}`,
+			exact: false,
+		},
+		{
+			name:  "Error 3: Unquoted value in array",
+			input: `[xyzzy]`,
+			want:  `["xyzzy"]`,
+			exact: true,
+		},
+		{
+			name:  "Error 4: Object with values but no keys",
+			input: `[{"__general__","topic","news","content"}]`,
+			want:  `["__general__","topic","news","content"]`,
+			exact: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -239,6 +265,9 @@ ue"}]`,
 				}
 				if err := json.Unmarshal([]byte(tt.want), &v2); err != nil {
 					t.Fatalf("Test setup error: 'want' JSON is invalid: %v", err)
+				}
+				if !reflect.DeepEqual(v1, v2) {
+					t.Errorf("RepairJSON produced semantically different JSON.\nInput: %s\nGot: %s\nWant: %s", tt.input, got, tt.want)
 				}
 			} else if tt.want == "" {
 				var v interface{}
