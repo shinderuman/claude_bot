@@ -16,25 +16,26 @@ var errorNotifier ErrorNotifierFunc
 
 // Pre-compiled regexes for performance optimization
 var (
-	reMissingCommaQuotes    = regexp.MustCompile(`:"([a-zA-Z0-9_]+),"([a-zA-Z0-9_]+)":`)
-	reMergedKeyValue        = regexp.MustCompile(`([,{]\s*)"(value)([^":,]+)"`)
-	reHexEscapes            = regexp.MustCompile(`\\x([0-9a-fA-F]{2})`)
-	reStringLiterals        = regexp.MustCompile(`"[^"\\]*(?:\\.[^"\\]*)*"`)
-	reUnquotedKeys          = regexp.MustCompile(`([,{]\s*)"([a-zA-Z0-9_]+):`)
-	reJapaneseOpeningQuote  = regexp.MustCompile(`:\s*「`)
-	reJapaneseClosingQuote  = regexp.MustCompile(`」(\s*[\}\],])`)
-	reMissingCommaValueKey  = regexp.MustCompile(`("[^"]*")(\s+)("[a-zA-Z0-9_]+":)`)
-	reUnexpectedColon       = regexp.MustCompile(`(:\s*"(\\.|[^"\\])*")\s*:\s*`)
-	reInvalidKeyFormat      = regexp.MustCompile(`"?([a-zA-Z0-9_]+)"?\s*=\s*`)
-	reSemicolonSeparator    = regexp.MustCompile(`([}\]])\s*;\s*([{\[])`)
-	reMissingCommaObjects   = regexp.MustCompile(`([}\]])\s+([{\[])`)
-	reUnquotedValues        = regexp.MustCompile(`([\[,])\s*([^"\[\{\]\}\s,0-9\-tfn.][^"\[\{\]\}\s,]*)\s*([,\]])`)
-	reGarbageQuotes         = regexp.MustCompile(`([^:,\s\[\{])""(\s*[\}\],])`)
-	reMissingOpeningQuotes  = regexp.MustCompile(`(:\s*)([^"\[\{\]\}\s0-9\-tfn\\])`)
-	reGarbageKeyAfterObject = regexp.MustCompile(`}\s*([a-zA-Z0-9_]+)\s*:`)
-	reInvalidObjectToArray  = regexp.MustCompile(`\{\s*"[^"]+"(?:\s*,\s*"[^"]+")*\s*\}`)
-	reTrailingCommas        = regexp.MustCompile(`(["}\]el0-9])\s*,\s*([}\]])`)
-	reDanglingKey           = regexp.MustCompile(`,\s*"[^"]*"\s*}`)
+	reMissingCommaQuotes     = regexp.MustCompile(`:"([a-zA-Z0-9_]+),"([a-zA-Z0-9_]+)":`)
+	reMergedKeyValue         = regexp.MustCompile(`([,{]\s*)"(value)([^":,]+)"`)
+	reHexEscapes             = regexp.MustCompile(`\\x([0-9a-fA-F]{2})`)
+	reStringLiterals         = regexp.MustCompile(`"[^"\\]*(?:\\.[^"\\]*)*"`)
+	reUnquotedKeys           = regexp.MustCompile(`([,{]\s*)"([a-zA-Z0-9_]+):`)
+	reJapaneseOpeningQuote   = regexp.MustCompile(`:\s*「`)
+	reJapaneseClosingQuote   = regexp.MustCompile(`」(\s*[\}\],])`)
+	reMissingCommaValueKey   = regexp.MustCompile(`("[^"]*")(\s*)("[a-zA-Z0-9_]+"\s*:)`)
+	reMissingCommaAfterValue = regexp.MustCompile(`("[^"]*"|true|false|null|[0-9]+)\s*([{\[])`)
+	reUnexpectedColon        = regexp.MustCompile(`(:\s*"(\\.|[^"\\])*")\s*:\s*`)
+	reInvalidKeyFormat       = regexp.MustCompile(`"?([a-zA-Z0-9_]+)"?\s*=\s*`)
+	reSemicolonSeparator     = regexp.MustCompile(`([}\]])\s*;\s*([{\[])`)
+	reMissingCommaObjects    = regexp.MustCompile(`([}\]])\s+([{\[])`)
+	reUnquotedValues         = regexp.MustCompile(`([\[,])\s*([^"\[\{\]\}\s,][^"\[\{\]\}\s,]*?)("?)\s*([,\]])`)
+	reGarbageQuotes          = regexp.MustCompile(`([^:,\s\[\{])""(\s*[\}\],])`)
+	reMissingOpeningQuotes   = regexp.MustCompile(`(:\s*)([^"\[\{\]\}\s\\][^,}\]]*)`) // Capture content until delimiter
+	reGarbageKeyAfterObject  = regexp.MustCompile(`}\s*([a-zA-Z0-9_]+)\s*:`)
+	reInvalidObjectToArray   = regexp.MustCompile(`\{\s*"[^"]+"(?:\s*,\s*"[^"]+")*\s*\}`)
+	reTrailingCommas         = regexp.MustCompile(`(["}\]el0-9])\s*,\s*([}\]])`)
+	reDanglingKey            = regexp.MustCompile(`,\s*"[^"]*"\s*}`)
 )
 
 // SetErrorNotifier sets the callback function for error notifications.
@@ -92,6 +93,7 @@ func preprocessJSON(s string) (string, []string) {
 	s = fixMissingCommaQuotes(s)
 	s = fixMergedKeyValue(s)
 	s = fixHexEscapes(s)
+	s = fixUnquotedValuesInArray(s)
 
 	masked, originals := maskStrings(s)
 	// Escape control characters
@@ -107,11 +109,11 @@ func preprocessJSON(s string) (string, []string) {
 	s = replaceOpeningJapaneseQuote(s)
 	s = replaceClosingJapaneseQuote(s)
 	s = fixMissingCommaBetweenValueAndKey(s)
+	s = fixMissingCommaAfterValue(s)
 	s = fixUnexpectedColon(s)
 	s = fixInvalidKeyFormat(s)
 	s = fixSemicolonSeparator(s)
 	s = fixMissingCommaBetweenObjects(s)
-	s = fixUnquotedValuesInArray(s)
 	s = fixGarbageQuotes(s)
 	s = fixMissingOpeningQuotes(s)
 	s = fixGarbageKeyAfterObject(s)
@@ -122,6 +124,8 @@ func preprocessJSON(s string) (string, []string) {
 }
 
 func replaceFullWidthColons(s string) string {
+	s = regexp.MustCompile(`([^"])\s*：`).ReplaceAllString(s, `$1": `)
+	s = regexp.MustCompile(`"\s*：`).ReplaceAllString(s, `": `)
 	return strings.ReplaceAll(s, "：", ":")
 }
 
@@ -167,6 +171,10 @@ func fixMissingCommaBetweenValueAndKey(s string) string {
 	return reMissingCommaValueKey.ReplaceAllString(s, `$1,$2$3`)
 }
 
+func fixMissingCommaAfterValue(s string) string {
+	return reMissingCommaAfterValue.ReplaceAllString(s, `$1, $2`)
+}
+
 func fixUnexpectedColon(s string) string {
 	return reUnexpectedColon.ReplaceAllString(s, `$1, "repaired_key":`)
 }
@@ -184,7 +192,33 @@ func fixMissingCommaBetweenObjects(s string) string {
 }
 
 func fixUnquotedValuesInArray(s string) string {
-	return reUnquotedValues.ReplaceAllString(s, `$1"$2"$3`)
+	return reUnquotedValues.ReplaceAllStringFunc(s, func(match string) string {
+		groups := reUnquotedValues.FindStringSubmatch(match)
+		if len(groups) < 5 {
+			return match
+		}
+		prefix := groups[1]
+		val := strings.TrimSpace(groups[2])
+		suffix := groups[4]
+
+		if val == "true" || val == "false" || val == "null" {
+			return match
+		}
+		if _, err := fmt.Sscanf(val, "%f", new(float64)); err == nil {
+			isNumber := true
+			for _, r := range val {
+				if (r < '0' || r > '9') && r != '.' && r != '-' && r != 'e' && r != 'E' && r != '+' {
+					isNumber = false
+					break
+				}
+			}
+			if isNumber {
+				return match
+			}
+		}
+
+		return fmt.Sprintf(`%s"%s"%s`, prefix, val, suffix)
+	})
 }
 
 func fixGarbageQuotes(s string) string {
@@ -192,7 +226,30 @@ func fixGarbageQuotes(s string) string {
 }
 
 func fixMissingOpeningQuotes(s string) string {
-	return reMissingOpeningQuotes.ReplaceAllString(s, `$1"$2`)
+	return reMissingOpeningQuotes.ReplaceAllStringFunc(s, func(match string) string {
+		groups := reMissingOpeningQuotes.FindStringSubmatch(match)
+		if len(groups) < 3 {
+			return match
+		}
+		prefix := groups[1]
+		val := strings.TrimSpace(groups[2])
+
+		if val == "true" || val == "false" || val == "null" {
+			return match
+		}
+		isNumber := true
+		for _, r := range val {
+			if (r < '0' || r > '9') && r != '.' && r != '-' {
+				isNumber = false
+				break
+			}
+		}
+		if isNumber && len(val) > 0 {
+			return match
+		}
+
+		return fmt.Sprintf(`%s"%s"`, prefix, val)
+	})
 }
 
 func fixGarbageKeyAfterObject(s string) string {
@@ -217,13 +274,11 @@ func repairDoubleArray(s string) string {
 }
 
 func repairTruncatedArray(s string) string {
-	// Apply if string starts with '[' but doesn't end with ']'.
 	if strings.HasPrefix(s, "[") && !strings.HasSuffix(s, "]") {
 		lastObjEnd := strings.LastIndex(s, "}")
 		if lastObjEnd != -1 && lastObjEnd < len(s)-1 {
 			return s[:lastObjEnd+1] + "]"
 		}
-		// Fallback to empty array if no object end found, but only if it looks like an array of objects.
 		if lastObjEnd == -1 {
 			if strings.Contains(s, "{") {
 				return "[]"

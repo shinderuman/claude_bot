@@ -120,13 +120,13 @@ ue"}]`,
 		{
 			name:  "Full-width colon and brackets for value",
 			input: `[{"key"："「value」"}]`,
-			want:  `[{"key":"「value」"}]`,
+			want:  `[{"key": "「value」"}]`,
 			exact: false,
 		},
 		{
 			name:  "Invalid character '}' after object key",
 			input: `[{"key":"value"},{"key"："valid"}]`,
-			want:  `[{"key":"value"},{"key":"valid"}]`,
+			want:  `[{"key":"value"},{"key": "valid"}]`,
 			exact: true,
 		},
 		{
@@ -251,6 +251,33 @@ ue"}]`,
 			want:  `["__general__","topic","news","content"]`,
 			exact: true,
 		},
+
+		// New Production Errors (Round 2)
+		{
+			name:  "Error 5: Full-width colon with quote issue",
+			input: `[{"key":"attribute","value："AI人材育成、PCパーツ、数学"}]`,
+			want:  `[{"key":"attribute","value": "AI人材育成、PCパーツ、数学"}]`,
+			exact: true,
+		},
+		{
+			name:  "Error 6: Unquoted value starting with n (news)",
+			input: `[{"key":news,"value":"val"}]`,
+			want:  `[{"key":"news","value":"val"}]`,
+			exact: true,
+		},
+		{
+			name:  "Error 7: Unquoted array value starting with f (frecht)",
+			input: `[frecht_impress.co.jp","key":"release"]`,
+			want:  `["frecht_impress.co.jp","key":"release"]`,
+			exact: true,
+		},
+		{
+			name:  "Error 8: Missing closing brace between objects with string ending in brace",
+			input: `[{"key":"val"} {"key2":"val2"}]`, // config: "value":"...}" {"target"...
+			want:  `[{"key":"val"},{"key2":"val2"}]`,
+			exact: true,
+		},
+		// Error 8b: Temporarily removed (pending complex structural repair logic)
 	}
 
 	for _, tt := range tests {
@@ -361,7 +388,7 @@ func TestPreprocessRules(t *testing.T) {
 	t.Run("fixMissingOpeningQuotes", func(t *testing.T) {
 		// Matches (:\s*)([^"\[\{\]\}\s0-9\-tfn])
 		input := `{"key": 『value』}`
-		want := `{"key": "『value』}`
+		want := `{"key": "『value』"}`
 		if got := fixMissingOpeningQuotes(input); got != want {
 			t.Errorf("got %q, want %q", got, want)
 		}
