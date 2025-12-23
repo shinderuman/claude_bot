@@ -212,7 +212,7 @@ Webページの内容:
 
 2. キーの推測:
 - 「好きな食べ物は？」→ "好きな食べ物", "食事", "好物" など
-- 「誕生日は？」→ "誕生日", "生年月日" など
+- 「同僚は誰？」「〇〇さんは？」→ "colleague_profile", "system:colleague_profile", その人の名前
 - 文脈から広めに推測してください
 
 ` + Messages.Instruction.CompactJSONObject + `

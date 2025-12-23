@@ -330,3 +330,59 @@ func TestFactStore_RemoveFactsByKey(t *testing.T) {
 		}
 	}
 }
+
+func TestFactStore_SearchFuzzy_ColleagueProfile(t *testing.T) {
+	// Setup temporary fact store
+	tmpFile, err := os.CreateTemp("", "fact_store_test_colleague_*.json")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Remove(tmpFile.Name())
+	})
+
+	store := NewFactStore(tmpFile.Name(), slack.NewClient("", "", "", ""))
+
+	// Add test facts
+	facts := []model.Fact{
+		{
+			// Target is self (bot)
+			Target:         "bot_user",
+			TargetUserName: "MyBot",
+			// Key starts with system:colleague_profile
+			Key: "system:colleague_profile:12345",
+			// Value contains the name we want to search for
+			Value: "Name: Tanaka Taro\nBio: A very nice colleague.",
+		},
+		{
+			Target:         "bot_user",
+			TargetUserName: "MyBot",
+			Key:            "preference",
+			Value:          "Sushi",
+		},
+	}
+	store.Facts = facts
+
+	// 1. Search by "Tanaka" (contained in Value)
+	results1 := store.SearchFuzzy([]string{"bot_user"}, []string{"Tanaka"})
+
+	if len(results1) != 1 {
+		t.Errorf("Search for name within Value failed: got %d results, want 1", len(results1))
+	} else {
+		if results1[0].Key != "system:colleague_profile:12345" {
+			t.Errorf("Got wrong fact: %s", results1[0].Key)
+		}
+	}
+
+	// 2. Search by "colleague" (Key prefix search - should still work if key matches)
+	results2 := store.SearchFuzzy([]string{"bot_user"}, []string{"colleague"})
+	if len(results2) != 1 {
+		t.Errorf("Search by Key part failed: got %d results, want 1", len(results2))
+	}
+
+	// 3. Search by "Sushi" (Regular fact, Value search should NOT happen for non-system keys)
+	results3 := store.SearchFuzzy([]string{"bot_user"}, []string{"Sushi"})
+	if len(results3) != 0 {
+		t.Errorf("Regular fact value search should not happen: got %d results, want 0", len(results3))
+	}
+}

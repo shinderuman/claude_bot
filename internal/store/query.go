@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -40,6 +41,14 @@ func (s *FactStore) SearchFuzzy(targets []string, keys []string) []model.Fact {
 			if strings.Contains(fact.Key, key) || strings.Contains(key, fact.Key) {
 				results = append(results, fact)
 				break
+			}
+
+			if strings.HasPrefix(fact.Key, "system:") {
+				valStr := fmt.Sprintf("%v", fact.Value)
+				if strings.Contains(valStr, key) {
+					results = append(results, fact)
+					break
+				}
 			}
 		}
 	}
