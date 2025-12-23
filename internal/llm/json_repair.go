@@ -6,6 +6,7 @@ import (
 	"log"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -31,11 +32,15 @@ var (
 	reMissingCommaObjects    = regexp.MustCompile(`([}\]])\s+([{\[])`)
 	reUnquotedValues         = regexp.MustCompile(`([\[,])\s*([^"\[\{\]\}\s,][^"\[\{\]\}\s,]*?)("?)\s*([,\]])`)
 	reGarbageQuotes          = regexp.MustCompile(`([^:,\s\[\{])""(\s*[\}\],])`)
-	reMissingOpeningQuotes   = regexp.MustCompile(`(:\s*)([^"\[\{\]\}\s\\][^,}\]]*)`) // Capture content until delimiter
+	reMissingOpeningQuotes   = regexp.MustCompile(`(:\s*)([^"\[\{\]\}\s\\][^,}\]]*)`)
 	reGarbageKeyAfterObject  = regexp.MustCompile(`}\s*([a-zA-Z0-9_]+)\s*:`)
 	reInvalidObjectToArray   = regexp.MustCompile(`\{\s*"[^"]+"(?:\s*,\s*"[^"]+")*\s*\}`)
 	reTrailingCommas         = regexp.MustCompile(`(["}\]el0-9])\s*,\s*([}\]])`)
 	reDanglingKey            = regexp.MustCompile(`,\s*"[^"]*"\s*}`)
+	reBareKeyValue           = regexp.MustCompile(`([\[,]\s*)("[^"]+"\s*:\s*"[^"]+")`)
+	reFullWidthColonQuoted   = regexp.MustCompile(`"\s*\x{ff1a}`)
+	reFullWidthColonKey      = regexp.MustCompile(`([{\[,]\s*"[^"]*?)\s*\x{ff1a}`)
+	rePlaceholder            = regexp.MustCompile(`"?__STR_(\d+)__"?`)
 )
 
 // SetErrorNotifier sets the callback function for error notifications.
@@ -111,7 +116,6 @@ func repairTier1(s string) string {
 
 // repairTier2 applies character level fixes
 func repairTier2(s string) string {
-	s = fixFullWidthColons(s)
 	s = fixEscapedSingleQuotes(s)
 	s = fixHexEscapes(s)
 	s = fixSemicolonSeparator(s)
@@ -123,7 +127,6 @@ func repairTier2(s string) string {
 
 // repairTier3 applies quote and key fixes.
 func repairTier3(s string) string {
-	s = fixFullWidthColons(s)
 	s = fixEscapedSingleQuotes(s)
 	s = fixHexEscapes(s)
 	s = fixSemicolonSeparator(s)
@@ -180,6 +183,8 @@ func applyComplexRegexRepairs(s string) (string, []string) {
 	}
 	s = masked
 
+	s = fixDoubleCommas(s)
+
 	s = fixUnquotedKeys(s)
 	s = fixJapaneseOpeningQuote(s)
 	s = fixJapaneseClosingQuote(s)
@@ -194,6 +199,7 @@ func applyComplexRegexRepairs(s string) (string, []string) {
 	s = fixGarbageKeyAfterObject(s)
 	s = fixInvalidObjectToArray(s)
 	s = fixTrailingCommas(s)
+	s = fixBareKeyValueInArray(s)
 
 	return s, originals
 }
@@ -241,7 +247,7 @@ type structuralRepairer struct {
 	sb       strings.Builder
 	inString bool
 	escaped  bool
-	done     bool // Stops after first valid top-level object
+	done     bool
 }
 
 func (r *structuralRepairer) repair() string {
@@ -322,8 +328,6 @@ func (r *structuralRepairer) isFollowedByDelimiter(startIdx int) bool {
 func (r *structuralRepairer) handleQuote() {
 	if r.inString {
 		if r.pos+1 < len(r.runes) && r.runes[r.pos+1] == '"' && r.isFollowedByDelimiter(r.pos+2) {
-			// Double quote at end of term: "..."". Treat as garbage quote.
-			// Close string, skip the extra quote.
 			r.inString = false
 			r.sb.WriteRune('"')
 			r.pos += 2
@@ -450,9 +454,8 @@ func fixMissingCommaBetweenObjects(s string) string {
 // --- Tier 2 Helpers ---
 
 func fixFullWidthColons(s string) string {
-	s = regexp.MustCompile(`([^"])\s*：`).ReplaceAllString(s, `$1": `)
-	s = regexp.MustCompile(`"\s*：`).ReplaceAllString(s, `": `)
-	return strings.ReplaceAll(s, "：", ":")
+	s = reFullWidthColonKey.ReplaceAllString(s, `$1": `)
+	return reFullWidthColonQuoted.ReplaceAllString(s, `": `)
 }
 
 func fixEscapedSingleQuotes(s string) string {
@@ -470,7 +473,12 @@ func fixSemicolonSeparator(s string) string {
 }
 
 func fixMergedKeyValue(s string) string {
-	return reMergedKeyValue.ReplaceAllString(s, `$1"$2":"$3"`)
+	return reMergedKeyValue.ReplaceAllStringFunc(s, func(match string) string {
+		if strings.Contains(match, "：") {
+			return match
+		}
+		return reMergedKeyValue.ReplaceAllString(match, `$1"$2":"$3"`)
+	})
 }
 
 func fixJapaneseOpeningQuote(s string) string {
@@ -596,9 +604,57 @@ func maskStrings(s string) (string, []string) {
 }
 
 func unmaskStrings(s string, originals []string) string {
-	for i, orig := range originals {
-		placeholder := fmt.Sprintf(`"__STR_%d__"`, i)
-		s = strings.Replace(s, placeholder, orig, 1)
+	return rePlaceholder.ReplaceAllStringFunc(s, func(match string) string {
+		nums := regexp.MustCompile(`\d+`).FindString(match)
+		if idx, err := strconv.Atoi(nums); err == nil {
+			if idx >= 0 && idx < len(originals) {
+				return originals[idx]
+			}
+		}
+		return match
+	})
+}
+
+func fixDoubleCommas(s string) string {
+	return regexp.MustCompile(`,,+`).ReplaceAllString(s, ",")
+}
+
+func fixBareKeyValueInArray(s string) string {
+	matches := reBareKeyValue.FindAllStringSubmatchIndex(s, -1)
+	if matches == nil {
+		return s
 	}
-	return s
+
+	var sb strings.Builder
+	lastPos := 0
+	braceDepth := 0
+	matchIdx := 0
+
+	for i := 0; i < len(s); i++ {
+		if matchIdx < len(matches) && i == matches[matchIdx][0] {
+			if braceDepth == 0 {
+				m := matches[matchIdx]
+				sb.WriteString(s[lastPos:i])
+				sb.WriteString(s[m[2]:m[3]])
+				sb.WriteString("{")
+				sb.WriteString(s[m[4]:m[5]])
+				sb.WriteString("}")
+				lastPos = m[1]
+				i = m[1] - 1
+			}
+			matchIdx++
+			continue
+		}
+
+		switch s[i] {
+		case '{':
+			braceDepth++
+		case '}':
+			if braceDepth > 0 {
+				braceDepth--
+			}
+		}
+	}
+	sb.WriteString(s[lastPos:])
+	return sb.String()
 }

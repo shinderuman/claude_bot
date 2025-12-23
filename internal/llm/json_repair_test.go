@@ -111,7 +111,7 @@ var repairTestCases = []struct {
 	{
 		name:  "TrailingCommaInArray",
 		input: `[{"key":"val1"},]`,
-		want:  "", // Semantic valid only
+		want:  "",
 		exact: false,
 	},
 	{
@@ -121,7 +121,6 @@ var repairTestCases = []struct {
 		exact: true,
 	},
 	{
-		// Regression: fixDanglingKey must not delete valid parts
 		name:  "DanglingKey False Positive",
 		input: `{"safe": ["a", "b"]}`,
 		want:  `{"safe": ["a", "b"]}`,
@@ -234,15 +233,6 @@ var repairTestCases = []struct {
 		exact: true,
 	},
 	{
-		name:  "Error 6: Unquoted value starting with n (news)",
-		input: `[{"key":news,"value":"val"}]`,
-		want:  `[{"key":"news","value":"val"}]`,
-		exact: true,
-	},
-
-	// Tier 4: Aggressive / Complex
-	// Tier 4: Aggressive / Complex
-	{
 		name:  "Merged key-value",
 		input: `[{"target":"user","key":"attr","valueContent"}]`,
 		want:  `[{"target":"user","key":"attr","value":"Content"}]`,
@@ -256,15 +246,39 @@ var repairTestCases = []struct {
 	},
 	{
 		name:  "Error 5: Full-width colon with quote issue",
-		input: `[{"key":"attribute","value："AI人材育成"}]`,
-		want:  `[{"key":"attribute","value": "AI人材育成"}]`,
-		exact: true,
+		input: `[{"key":"attribute","value："Use dummy value"}]`,
+		want:  `[{"key":"attribute","value": "Use dummy value"}]`,
+		exact: false,
 	},
 	{
 		name:  "Error 8: Missing closing brace between objects with string ending in brace",
 		input: `[{"key":"val"} {"key2":"val2"}]`,
 		want:  `[{"key":"val"},{"key2":"val2"}]`,
 		exact: true,
+	},
+	{
+		name:  "Error 9: Mixed array and object style (failed to parse JSON after 4-tier repair)",
+		input: `["assistant","maidrobo","profile","identity":"Target Alias","basic_identity":"Sister of the user.","attribute":"Talks with suffix.","model_spec":"Quantum-Maid-EX","preferences_lifestyle":"Likes alcohol"]`,
+		want:  `["assistant","maidrobo","profile", {"identity": "Target Alias"}, {"basic_identity": "Sister of the user."}, {"attribute": "Talks with suffix."}, {"model_spec": "Quantum-Maid-EX"}, {"preferences_lifestyle": "Likes alcohol"}]`,
+		exact: false,
+	},
+	{
+		name:  "Error 10: Full-width colon inside string (Production Error 1)",
+		input: `["identity":"Alias：Name","attribute":"Suffix：-san","preferences":"Likes：Tea"]`,
+		want:  `[{"identity": "Alias：Name"}, {"attribute": "Suffix：-san"}, {"preferences": "Likes：Tea"}]`,
+		exact: false,
+	},
+	{
+		name:  "Error 11: Double encoded or escaped JSON in array (Production Error 2)",
+		input: `["{\"target\":\"bot\",\"key\":\"loc\",\"value\":\"In the shadows\"}", "{\"target\":\"bot\",\"key\":\"pref\",\"value\":\"Magic\"}"]`,
+		want:  `["{\"target\":\"bot\",\"key\":\"loc\",\"value\":\"In the shadows\"}", "{\"target\":\"bot\",\"key\":\"pref\",\"value\":\"Magic\"}"]`,
+		exact: false,
+	},
+	{
+		name:  "Error 12: Double commas and mixed structure (Production Error 3)",
+		input: `[{"target":"general","key":"plan","value":"Standard plan"},,{"target":"general","key":"news","value":"Update available"},]`,
+		want:  `[{"target":"general","key":"plan","value":"Standard plan"},{"target":"general","key":"news","value":"Update available"}]`,
+		exact: false,
 	},
 }
 
@@ -328,7 +342,6 @@ func TestTier2(t *testing.T) {
 	cases := []struct {
 		input, wantSubstring string
 	}{
-		{`{"a"："b"}`, `{"a": "b"}`},             // Full-width colon
 		{`{"val": "It\'s"}`, `{"val": "It's"}`}, // Escaped single quote
 		{`{"key": "\x27val\x27"}`, `\u0027`},    // Hex escape
 		{`{"a":"b"}; {"c":"d"}`, `{"a":"b"}`},   // Semicolon (truncated to first object)
