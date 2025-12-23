@@ -22,7 +22,7 @@ func SetErrorNotifier(notifier ErrorNotifierFunc) {
 // RepairJSON attempts to repair a truncated or malformed JSON string.
 // Repairs unclosed arrays and stack-based structural issues.
 func RepairJSON(s string) string {
-	s = preprocessJSON(s)
+	s, originals := preprocessJSON(s)
 	s = strings.TrimSpace(s)
 
 	s = repairDoubleArray(s)
@@ -30,7 +30,40 @@ func RepairJSON(s string) string {
 	s = repairStructural(s)
 	s = fixDanglingKey(s)
 
+	s = unmaskStrings(s, originals)
 	return s
+}
+
+// preprocessJSON normalizes formatting.
+func preprocessJSON(s string) (string, []string) {
+	s = replaceFullWidthColons(s)
+	s = unescapeSingleQuotes(s)
+	s = fixMissingCommaQuotes(s)
+	s = fixMergedKeyValue(s)
+
+	masked, originals := maskStrings(s)
+	// Escape control characters
+	for i, orig := range originals {
+		orig = strings.ReplaceAll(orig, "\n", "\\n")
+		orig = strings.ReplaceAll(orig, "\r", "\\r")
+		orig = strings.ReplaceAll(orig, "\t", "\\t")
+		originals[i] = orig
+	}
+	s = masked
+
+	s = addQuotesToKeys(s)
+	s = replaceOpeningJapaneseQuote(s)
+	s = replaceClosingJapaneseQuote(s)
+	s = fixMissingCommaBetweenValueAndKey(s)
+	s = fixUnexpectedColon(s)
+	s = fixInvalidKeyFormat(s)
+	s = fixSemicolonSeparator(s)
+	s = fixMissingCommaBetweenObjects(s)
+	s = fixGarbageQuotes(s)
+	s = fixMissingOpeningQuotes(s)
+	s = removeTrailingCommas(s)
+
+	return s, originals
 }
 
 func repairDoubleArray(s string) string {
@@ -257,26 +290,6 @@ func (r *structuralRepairer) pop() {
 	}
 }
 
-// preprocessJSON normalizes formatting issues like full-width characters.
-func preprocessJSON(s string) string {
-	s = replaceFullWidthColons(s)
-	s = unescapeSingleQuotes(s)
-	s = addQuotesToKeys(s)
-	s = replaceOpeningJapaneseQuote(s)
-	s = replaceClosingJapaneseQuote(s)
-	s = fixMissingCommaQuotes(s)
-	s = fixMissingCommaBetweenValueAndKey(s)
-	s = fixUnexpectedColon(s)
-	s = fixInvalidKeyFormat(s)
-	s = fixSemicolonSeparator(s)
-	s = fixMissingCommaBetweenObjects(s)
-	s = fixMergedKeyValue(s)
-	s = fixGarbageQuotes(s)
-	s = fixMissingOpeningQuotes(s)
-	s = removeTrailingCommas(s)
-	return s
-}
-
 func replaceFullWidthColons(s string) string {
 	return strings.ReplaceAll(s, "：", ":")
 }
@@ -355,8 +368,27 @@ func fixDanglingKey(s string) string {
 	return re.ReplaceAllString(s, `}`)
 }
 
-func IsDoubleArray(s string) bool {
-	return strings.HasPrefix(s, "[[") && strings.HasSuffix(s, "]]")
+// maskStrings replaces string literals with placeholders.
+func maskStrings(s string) (string, []string) {
+	var originals []string
+	// Match strings with escaped quotes
+	re := regexp.MustCompile(`"[^"\\]*(?:\\.[^"\\]*)*"`)
+
+	masked := re.ReplaceAllStringFunc(s, func(match string) string {
+		placeholder := fmt.Sprintf(`"__STR_%d__"`, len(originals))
+		originals = append(originals, match)
+		return placeholder
+	})
+	return masked, originals
+}
+
+// unmaskStrings restores original string literals.
+func unmaskStrings(s string, originals []string) string {
+	for i, orig := range originals {
+		placeholder := fmt.Sprintf(`"__STR_%d__"`, i)
+		s = strings.Replace(s, placeholder, orig, 1)
+	}
+	return s
 }
 
 // UnmarshalWithRepair attempts unmarshal; retries with repair on failure.

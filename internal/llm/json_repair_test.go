@@ -2,6 +2,7 @@ package llm
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 )
 
@@ -9,8 +10,8 @@ func TestRepairJSON(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
-		want  string // Empty string implies we only check validity
-		exact bool   // If true, check for exact string match
+		want  string
+		exact bool
 	}{
 		// Basic Structure
 		{
@@ -218,6 +219,12 @@ ue"}]`,
 			want:  `{"safe": ["a", "b"]}`,
 			exact: true,
 		},
+		{
+			name:  "Truncated during string",
+			input: `{"key": "truncate`,
+			want:  `{"key": "truncate"}`, // Should close the string and the object
+			exact: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -226,7 +233,6 @@ ue"}]`,
 
 			// 1. Validity Check
 			if tt.want != "" && !tt.exact {
-				// Normalize whitespaces for rough comparison if needed, or just Unmarshal
 				var v1, v2 interface{}
 				if err := json.Unmarshal([]byte(got), &v1); err != nil {
 					t.Errorf("Repaired JSON is invalid: %v\nInput: %s\nGot: %s", err, tt.input, got)
@@ -234,7 +240,6 @@ ue"}]`,
 				if err := json.Unmarshal([]byte(tt.want), &v2); err != nil {
 					t.Fatalf("Test setup error: 'want' JSON is invalid: %v", err)
 				}
-				// DeepEqual check could be added here if needed
 			} else if tt.want == "" {
 				var v interface{}
 				if err := json.Unmarshal([]byte(got), &v); err != nil {
@@ -242,12 +247,7 @@ ue"}]`,
 				}
 			}
 
-			// 2. Exact Match Check
 			if tt.exact {
-				// Normalize simplified cases (remove newlines from input for simpler 'want' string in test definition?)
-				// Or assume RepairJSON removes newlines/spaces in some paths?
-				// RepairJSON trims space, but structual repairer preserves content.
-				// For simplicity, we use exact match where predictable.
 				if got != tt.want {
 					t.Errorf("RepairJSON() mismatch\nGot:  %s\nWant: %s", got, tt.want)
 				}
@@ -256,7 +256,6 @@ ue"}]`,
 	}
 }
 
-// Tests helper functions in isolation
 func TestRepairHelpers(t *testing.T) {
 	t.Run("repairDoubleArray", func(t *testing.T) {
 		if got := repairDoubleArray(`[[{"a":1}]]`); got != `[{"a":1}]` {
@@ -274,7 +273,6 @@ func TestRepairHelpers(t *testing.T) {
 	})
 }
 
-// Tests preprocessing rules in isolation
 func TestPreprocessRules(t *testing.T) {
 	t.Run("addQuotesToKeys", func(t *testing.T) {
 		input := `{"key: "value", "foo": "bar"}`
@@ -341,7 +339,6 @@ func TestPreprocessRules(t *testing.T) {
 	})
 }
 
-// Tests structural repairer logic in isolation
 func TestStructuralRepairer(t *testing.T) {
 	t.Run("HandleBackslash", func(t *testing.T) {
 		tests := []struct {
@@ -503,6 +500,141 @@ func TestUnmarshalWithRepair(t *testing.T) {
 			}
 			if !tt.wantError && tt.check != nil {
 				tt.check(t, tt.target)
+			}
+		})
+	}
+}
+
+func TestMaskStrings(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		wantMasked    string
+		wantOriginals []string
+	}{
+		{
+			name:          "Basic string",
+			input:         `{"key": "value"}`,
+			wantMasked:    `{"__STR_0__": "__STR_1__"}`,
+			wantOriginals: []string{`"key"`, `"value"`},
+		},
+		{
+			name:          "Escaped quotes",
+			input:         `{"text": "end of list, \"item\"}"}`,
+			wantMasked:    `{"__STR_0__": "__STR_1__"}`,
+			wantOriginals: []string{`"text"`, `"end of list, \"item\"}"`},
+		},
+		{
+			name:          "Empty string",
+			input:         `""`,
+			wantMasked:    `"__STR_0__"`,
+			wantOriginals: []string{`""`},
+		},
+		{
+			name:          "Multiple escaped chars",
+			input:         `"a\"b\\c"`,
+			wantMasked:    `"__STR_0__"`,
+			wantOriginals: []string{`"a\"b\\c"`},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotMasked, gotOriginals := maskStrings(tt.input)
+
+			if gotMasked != tt.wantMasked {
+				t.Errorf("maskStrings() masked mismatch\nGot:  %s\nWant: %s", gotMasked, tt.wantMasked)
+			}
+			if !reflect.DeepEqual(gotOriginals, tt.wantOriginals) {
+				t.Errorf("maskStrings() originals mismatch\nGot:  %v\nWant: %v", gotOriginals, tt.wantOriginals)
+			}
+
+			// Verify unmasking restores original
+			gotRestored := unmaskStrings(gotMasked, gotOriginals)
+			if gotRestored != tt.input {
+				t.Errorf("unmaskStrings() failed to restore input\nGot:  %s\nWant: %s", gotRestored, tt.input)
+			}
+		})
+	}
+}
+
+func TestRepairJSON_Safety(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "Valid string with equals sign",
+			input: `{"content": "formula: a=b"}`,
+		},
+		{
+			name:  "Valid string with colon",
+			input: `{"title": "Project: Omega"}`,
+		},
+		{
+			name:  "Valid string with unquoted keys pattern",
+			input: `{"text": "example: key: value"}`,
+		},
+		{
+			name:  "Valid string with comma and quote",
+			input: `{"quote": "Hello, \"World\""}`,
+		},
+		{
+			name:  "Valid string with Japanese quotes",
+			input: `{"dialogue": "「こんにちは」"}`,
+		},
+		{
+			name:  "Valid string with truncated array pattern",
+			input: `{"text": "This is not an array [ ..."}`,
+		},
+		{
+			name:  "Valid nested array",
+			input: `{"list": ["item1", "item2"]}`,
+		},
+		{
+			name:  "Valid array of objects",
+			input: `[{"a":1}, {"b":2}]`,
+		},
+		{
+			name:  "String looking like dangling key",
+			input: `{"text": "end of list, \"item\"}"}`,
+		},
+		{
+			name:  "URL in string",
+			input: `{"url": "https://example.com/path?query=1"}`,
+		},
+		{
+			name:  "Valid string with unicode escapes",
+			input: `{"char": "\u3042"}`,
+		},
+		{
+			name:  "Valid string with backslashes",
+			input: `{"path": "C:\\Windows\\System32"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RepairJSON(tt.input)
+			if !json.Valid([]byte(got)) {
+				t.Errorf("RepairJSON broke valid JSON.\nInput: %s\nOutput: %s", tt.input, got)
+				return
+			}
+			if !json.Valid([]byte(got)) {
+				t.Errorf("RepairJSON broke valid JSON.\nInput: %s\nOutput: %s", tt.input, got)
+				return
+			}
+
+			var v1, v2 interface{}
+			if err := json.Unmarshal([]byte(tt.input), &v1); err != nil {
+				t.Fatalf("Test setup error: input is not valid JSON: %s", tt.input)
+			}
+			if err := json.Unmarshal([]byte(got), &v2); err != nil {
+				t.Errorf("Output is not valid JSON: %s", got)
+				return
+			}
+			if !reflect.DeepEqual(v1, v2) {
+				t.Errorf("RepairJSON altered content semantically.\nInput: %s\nGot: %s", tt.input, got)
 			}
 		})
 	}
