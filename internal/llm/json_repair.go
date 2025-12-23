@@ -28,6 +28,7 @@ func RepairJSON(s string) string {
 	s = repairDoubleArray(s)
 	s = repairTruncatedArray(s)
 	s = repairStructural(s)
+	s = fixDanglingKey(s)
 
 	return s
 }
@@ -268,8 +269,9 @@ func preprocessJSON(s string) string {
 	s = fixUnexpectedColon(s)
 	s = fixInvalidKeyFormat(s)
 	s = fixSemicolonSeparator(s)
-	s = fixGarbageQuotes(s)
+	s = fixMissingCommaBetweenObjects(s)
 	s = fixMergedKeyValue(s)
+	s = fixGarbageQuotes(s)
 	s = fixMissingOpeningQuotes(s)
 	s = removeTrailingCommas(s)
 	return s
@@ -323,14 +325,19 @@ func fixSemicolonSeparator(s string) string {
 	return re.ReplaceAllString(s, `$1,$2`)
 }
 
-func fixGarbageQuotes(s string) string {
-	re := regexp.MustCompile(`([^:,\s\[\{])""(\s*[\}\],])`)
-	return re.ReplaceAllString(s, `$1"$2`)
+func fixMissingCommaBetweenObjects(s string) string {
+	re := regexp.MustCompile(`([}\]])\s+([{\[])`)
+	return re.ReplaceAllString(s, `$1,$2`)
 }
 
 func fixMergedKeyValue(s string) string {
 	re := regexp.MustCompile(`([,{]\s*)"(value)([^":,]+)"`)
 	return re.ReplaceAllString(s, `$1"$2":"$3"`)
+}
+
+func fixGarbageQuotes(s string) string {
+	re := regexp.MustCompile(`([^:,\s\[\{])""(\s*[\}\],])`)
+	return re.ReplaceAllString(s, `$1"$2`)
 }
 
 func fixMissingOpeningQuotes(s string) string {
@@ -341,6 +348,11 @@ func fixMissingOpeningQuotes(s string) string {
 func removeTrailingCommas(s string) string {
 	re := regexp.MustCompile(`(["}\]el0-9])\s*,\s*([}\]])`)
 	return re.ReplaceAllString(s, `$1$2`)
+}
+
+func fixDanglingKey(s string) string {
+	re := regexp.MustCompile(`,\s*"[^"]*"\s*}`)
+	return re.ReplaceAllString(s, `}`)
 }
 
 func IsDoubleArray(s string) bool {

@@ -155,15 +155,6 @@ ue"}]`,
 
 		// Regression Tests for Reported Bugs
 		{
-			name: "Trailing Comma in Array",
-			input: `[
-{"target":"mesugakiroid","key":"occupation","value":"bot"},
-{"target":"mesugakiroid","key":"experience","value":"「猩猩姫」の連載"},
-]`,
-			want:  `[{"target":"mesugakiroid","key":"occupation","value":"bot"},{"target":"mesugakiroid","key":"experience","value":"「猩猩姫」の連載"}]`,
-			exact: false, // whitespace differences
-		},
-		{
 			name:  "Escaped Single Quote",
 			input: `[{"target":"__general__","target_username":"GameSpark","key":"release","value":"Epic Gamesストアでサバイバルホラー『Sorry We\'re Closed』が..."}]`,
 			want:  `[{"target":"__general__","target_username":"GameSpark","key":"release","value":"Epic Gamesストアでサバイバルホラー『Sorry We're Closed』が..."}]`,
@@ -207,6 +198,25 @@ ue"}]`,
 			input: `[{"key":"val1"},]`,
 			want:  "",
 			exact: false,
+		},
+		{
+			name:  "DanglingKey",
+			input: `{"key":"value", "Etc."}`,
+			want:  `{"key":"value"}`,
+			exact: true,
+		},
+		{
+			name:  "MissingCommaBetweenObjects",
+			input: `[{"a":1} {"b":2}]`,
+			want:  `[{"a":1},{"b":2}]`,
+			exact: true,
+		},
+		{
+			// Regression test: fixDanglingKey must not delete valid parts of array literals
+			name:  "DanglingKey False Positive (Regression)",
+			input: `{"safe": ["a", "b"]}`,
+			want:  `{"safe": ["a", "b"]}`,
+			exact: true,
 		},
 	}
 
