@@ -73,6 +73,9 @@ go run ./cmd/claude_bot
 - **自己紹介の自動生成**: 蓄積されたファクトに基づいて、Bot自身のプロフィール（自己紹介文）を定期的に生成・更新します。
 - **免責事項の付与**: プロフィールには自動的に「※このアカウントの投稿には事実に基づく内容が含まれることもありますが、すべての正確性は保証できません。」という免責事項が付与されます。
 - **文字数制限の考慮**: Mastodonの500文字制限に収まるように、免責事項を優先しつつ内容を適切に調整します。
+- **ステータス表示の自動化**:
+  - **メンション受付状況**: `ALLOW_REMOTE_USERS` の設定に基づき、「外部サーバーからのメンション受付: 許可/停止中」を自動表示。
+  - **最終更新日時**: プロフィール更新時のタイムスタンプを自動的に付与。
 
 ### 🖼️ 画像認識（実験的）
 - **画像の理解**: メンションに添付された画像を認識し、内容を踏まえた応答を生成（Claude / Gemini 両対応）。
@@ -122,6 +125,13 @@ go run ./cmd/claude_bot
 | `MASTODON_ACCESS_TOKEN` | Mastodonのアクセストークン |
 | `BOT_USERNAME` | Botのユーザー名（メンション判定に使用） |
 
+### Slack連携設定
+| 変数名 | 説明 |
+| :--- | :--- |
+| `SLACK_BOT_TOKEN` | Slack Bot User OAuth Token (例: `xoxb-...`) |
+| `SLACK_CHANNEL_ID` | 通知送信用チャンネルID |
+| `SLACK_ERROR_CHANNEL_ID` | エラーログ送信用チャンネルID（JSON修復失敗時などに通知） |
+
 ### Claude/Gemini API設定（必須）
 `LLM_PROVIDER` で `claude` または `gemini` を指定します。
 
@@ -130,7 +140,7 @@ go run ./cmd/claude_bot
 | `LLM_PROVIDER` | `claude` または `gemini` |
 | `ANTHROPIC_AUTH_TOKEN` | (Claude用) APIキー |
 | `ANTHROPIC_BASE_URL` | (Claude用) APIのベースURL |
-| `ANTHROPIC_MODEL` | (Claude用) 使用モデル（例: `claude-3-5-sonnet-20241022`） |
+| `ANTHROPIC_DEFAULT_MODEL` | (Claude用) 使用モデル（例: `claude-3-5-sonnet-20241022`） |
 | `GEMINI_API_KEY` | (Gemini用) APIキー |
 | `GEMINI_MODEL` | (Gemini用) 使用モデル（例: `gemini-1.5-pro`） |
 
@@ -138,6 +148,7 @@ go run ./cmd/claude_bot
 | 変数名 | 推奨値 | 説明 |
 | :--- | :--- | :--- |
 | `CHARACTER_PROMPT` | (任意) | Botの人格設定プロンプト。空文字列も可 |
+| `LLM_TEMPERATURE` | `1.0` | LLMの創造性パラメータ（0.0-1.0）。高いほど創造的 |
 | `ALLOW_REMOTE_USERS` | `false` | `true`: 他インスタンスからのメンションも受け付ける<br>`false`: 同一インスタンスのみ |
 | `ENABLE_FACT_STORE` | `true` | `true`: ユーザー情報を記憶する<br>`false`: 記憶機能を無効化 |
 | `ENABLE_IMAGE_RECOGNITION` | `false` | `true`: 画像認識を有効化（ Claude/Gemini 共に対応）<br>`false`: 画像認識を無効化 |
@@ -192,7 +203,10 @@ go run ./cmd/claude_bot
 ### 🛡️ データ整合性と信頼性
 - **アトミック書き込み**: データの破損を防ぐため、保存時は一時ファイルへの書き込みとリネームによるアトミック操作を行います。
 - **ファクト同期機能**: ディスク上の変更を検知し、メモリ上のデータを安全に更新する `SyncFromDisk` 機構を搭載しています。
-- **JSON自動修復**: LLMからの応答が不正なJSONの場合でも、自動的に修復して処理を継続するロバストな仕組みを備えています。
+- **JSON自動修復**: 
+    - LLMからの応答が不正なJSONの場合でも、自動的に修復して処理を継続するロバストな仕組みを備えています。
+    - **日本語・全角文字対応**: 全角コロンや日本語引用符などの表記ゆれも強力に補正します。
+- **エラー監視**: JSON修復失敗などのクリティカルなエラー発生時には、即座にSlackへ通知を行い、ログの消失を防ぎます。
 
 ### ファイルパス・システム設定
 | 変数名 | 推奨値 | 説明 |
@@ -201,6 +215,12 @@ go run ./cmd/claude_bot
 | `FACT_STORE_FILE` | `data/facts.json` | ファクトデータの保存先 |
 | `BOT_PROFILE_FILE` | `data/Profile.txt` | 生成されたプロフィールの保存先 |
 | `TIMEZONE` | `Asia/Tokyo` | ログ出力や時間管理に使用するタイムゾーン |
+
+### メトリクス・ログ設定
+| 変数名 | 推奨値 | 説明 |
+| :--- | :--- | :--- |
+| `METRICS_LOG_FILE` | `metrics.log` | メトリクス（JSON形式）の出力先 |
+| `METRICS_LOG_INTERVAL_MINUTES` | `5` | メトリクス出力間隔（分） |
 
 <details>
 <summary>Mastodon Access Tokenの取得方法</summary>
