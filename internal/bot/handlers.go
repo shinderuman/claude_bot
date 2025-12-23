@@ -122,7 +122,7 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 	// メッセージを生成
 	replyPrompt := llm.BuildImageGenerationReplyPrompt(imagePrompt, b.config.CharacterPrompt)
 	replyMessages := []model.Message{{Role: "user", Content: replyPrompt}}
-	response := b.llmClient.GenerateText(ctx, replyMessages, "", b.config.MaxResponseTokens, nil)
+	response := b.llmClient.GenerateText(ctx, replyMessages, "", b.config.MaxResponseTokens, nil, b.config.LLMTemperature)
 
 	if response == "" {
 		response = llm.Messages.Success.ImageGeneration
@@ -156,7 +156,7 @@ func (b *Bot) classifyIntent(ctx context.Context, message string) (model.IntentT
 	// システムプロンプトはシンプルに
 	systemPrompt := llm.Messages.System.IntentClassification
 
-	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxResponseTokens, nil)
+	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxResponseTokens, nil, 0.0)
 	if response == "" {
 		return model.IntentChat, "", nil, ""
 	}
@@ -231,7 +231,7 @@ func (b *Bot) generateFollowReply(ctx context.Context, targetAcct, template, fal
 	replyPrompt := fmt.Sprintf(template, b.config.CharacterPrompt, targetAcct)
 	replyMessages := []model.Message{{Role: "user", Content: replyPrompt}}
 
-	generatedReply := b.llmClient.GenerateText(ctx, replyMessages, "", b.config.MaxResponseTokens, nil)
+	generatedReply := b.llmClient.GenerateText(ctx, replyMessages, "", b.config.MaxResponseTokens, nil, b.config.LLMTemperature)
 	if generatedReply != "" {
 		return generatedReply
 	}
@@ -270,7 +270,7 @@ func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session
 	systemPrompt := llm.BuildSystemPrompt(b.config, "", "", "", true)
 
 	// 分析には長文の可能性があるため、サマリー用のトークン数を使用
-	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil)
+	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil, 0.0)
 
 	if response == "" {
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.AnalysisGeneration)
@@ -357,7 +357,7 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 	prompt := llm.BuildDailySummaryPrompt(statuses, targetDateStr, userMessage, loc)
 	systemPrompt := llm.BuildSystemPrompt(b.config, "", "", "", true)
 
-	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil)
+	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil, 0.0)
 
 	if response == "" {
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.SummaryGeneration)

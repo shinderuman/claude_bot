@@ -231,7 +231,7 @@ func (fc *FactCollector) extractFactsFromContent(ctx context.Context, status *go
 	prompt := llm.BuildFactExtractionPrompt(postAuthorUserName, postAuthor, content)
 	messages := []model.Message{{Role: "user", Content: prompt}}
 
-	response := fc.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, fc.config.MaxFactTokens, nil)
+	response := fc.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, fc.config.MaxFactTokens, nil, 0.0)
 	if response == "" {
 		return
 	}
@@ -342,7 +342,7 @@ func (fc *FactCollector) processURL(ctx context.Context, urlStr, urlDomain, sour
 	prompt := llm.BuildURLContentFactExtractionPrompt(urlContent)
 	messages := []model.Message{{Role: "user", Content: prompt}}
 
-	response := fc.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, fc.config.MaxFactTokens, nil)
+	response := fc.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, fc.config.MaxFactTokens, nil, 0.0)
 	if response == "" {
 		return
 	}

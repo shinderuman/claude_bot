@@ -28,12 +28,12 @@ func NewClient(cfg *config.Config) provider.Provider {
 	}
 }
 
-func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image) (string, error) {
+func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image, temperature float64) (string, error) {
 	params := anthropic.MessageNewParams{
 		Model:       anthropic.Model(c.config.AnthropicModel),
 		MaxTokens:   maxTokens,
 		Messages:    convertMessages(messages, images),
-		Temperature: anthropic.Float(c.config.LLMTemperature),
+		Temperature: anthropic.Float(temperature),
 	}
 
 	if systemPrompt != "" {

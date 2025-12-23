@@ -40,7 +40,7 @@ func NewClient(cfg *config.Config) provider.Provider {
 	}
 }
 
-func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image) (string, error) {
+func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image, temperature float64) (string, error) {
 	// システムプロンプトの設定
 	if systemPrompt != "" {
 		c.model.SystemInstruction = &genai.Content{
@@ -56,7 +56,7 @@ func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, 
 		c.model.SetMaxOutputTokens(int32(maxTokens))
 	}
 	// Temperatureの設定
-	c.model.SetTemperature(float32(c.config.LLMTemperature))
+	c.model.SetTemperature(float32(temperature))
 
 	// チャットセッションの開始
 	cs := c.model.StartChat()

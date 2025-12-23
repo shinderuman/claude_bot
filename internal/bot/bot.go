@@ -369,7 +369,7 @@ func (b *Bot) postErrorMessage(ctx context.Context, statusID, mention, visibilit
 	// エラーメッセージも文字数制限を守る
 	systemPrompt := llm.BuildSystemPrompt(b.config, "", "", "", true)
 
-	errorMsg := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxResponseTokens, nil)
+	errorMsg := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxResponseTokens, nil, b.config.LLMTemperature)
 
 	// LLM呼び出しが失敗した場合はデフォルトメッセージ
 	if errorMsg == "" {

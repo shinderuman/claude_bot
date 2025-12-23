@@ -128,7 +128,7 @@ func (b *Bot) executeAutoPost(ctx context.Context) {
 	systemPrompt := llm.BuildSystemPrompt(b.config, "", "", "", true)
 
 	// 画像なしで呼び出し
-	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, int64(b.config.MaxPostChars), nil)
+	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, int64(b.config.MaxPostChars), nil, b.config.LLMTemperature)
 
 	if response != "" {
 		// 公開投稿として送信

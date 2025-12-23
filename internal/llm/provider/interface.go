@@ -8,5 +8,5 @@ import (
 
 type Provider interface {
 	// GenerateContent はLLMにテキスト生成をリクエストします
-	GenerateContent(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image) (string, error)
+	GenerateContent(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image, temperature float64) (string, error)
 }

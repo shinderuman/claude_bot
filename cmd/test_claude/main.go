@@ -266,7 +266,7 @@ func testFactExtraction(cfg *config.Config, client *llm.Client, message string) 
 	// 事実抽出
 	messages := []model.Message{{Role: "user", Content: prompt}}
 	ctx := context.Background()
-	response := client.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, cfg.MaxResponseTokens, nil)
+	response := client.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, cfg.MaxResponseTokens, nil, 0.0)
 
 	if response == "" {
 		log.Fatal("エラー: 事実抽出に失敗しました")
@@ -304,7 +304,7 @@ func testRawImage(cfg *config.Config, client *llm.Client, message, imagePath str
 
 	// API呼び出し（システムプロンプトなし）
 	ctx := context.Background()
-	response := client.GenerateText(ctx, messages, "", cfg.MaxResponseTokens, currentImages)
+	response := client.GenerateText(ctx, messages, "", cfg.MaxResponseTokens, currentImages, cfg.LLMTemperature)
 
 	if response == "" {
 		log.Fatal("エラー: Claudeからの応答がありません")
@@ -357,7 +357,7 @@ func testAutoPost(cfg *config.Config, client *llm.Client) {
 
 	// API呼び出し
 	ctx := context.Background()
-	response := client.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, int64(cfg.MaxPostChars), nil)
+	response := client.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, int64(cfg.MaxPostChars), nil, cfg.LLMTemperature)
 
 	if response == "" {
 		log.Fatal("エラー: Claudeからの応答がありません")
@@ -447,7 +447,7 @@ func testErrorMessageGeneration(cfg *config.Config, client *llm.Client, errorDet
 
 	// API呼び出し
 	ctx := context.Background()
-	response := client.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, cfg.MaxResponseTokens, nil)
+	response := client.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, cfg.MaxResponseTokens, nil, cfg.LLMTemperature)
 
 	if response == "" {
 		log.Fatal("エラー: Claudeからの応答がありません")
@@ -490,7 +490,7 @@ func testConversation(cfg *config.Config, client *llm.Client, lastMessage string
 
 	// API呼び出し
 	ctx := context.Background()
-	response := client.GenerateText(ctx, messages, systemPrompt, cfg.MaxResponseTokens, nil)
+	response := client.GenerateText(ctx, messages, systemPrompt, cfg.MaxResponseTokens, nil, cfg.LLMTemperature)
 
 	if response == "" {
 		log.Fatal("エラー: Claudeからの応答がありません")

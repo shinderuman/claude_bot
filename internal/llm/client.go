@@ -42,17 +42,17 @@ func (c *Client) GenerateResponse(ctx context.Context, session *model.Session, c
 	}
 	systemPrompt := BuildSystemPrompt(c.config, sessionSummary, relevantFacts, botProfile, true)
 
-	return c.GenerateText(ctx, conversation.Messages, systemPrompt, c.config.MaxResponseTokens, currentImages)
+	return c.GenerateText(ctx, conversation.Messages, systemPrompt, c.config.MaxResponseTokens, currentImages, c.config.LLMTemperature)
 }
 
 func (c *Client) GenerateSummary(ctx context.Context, messages []model.Message, summary string) string {
 	systemPrompt := BuildSystemPrompt(c.config, summary, "", "", false)
-	return c.GenerateText(ctx, messages, systemPrompt, c.config.MaxSummaryTokens, nil)
+	return c.GenerateText(ctx, messages, systemPrompt, c.config.MaxSummaryTokens, nil, 0.0)
 }
 
 // GenerateText calls the configured LLM provider to generate text content
-func (c *Client) GenerateText(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, currentImages []model.Image) string {
-	content, err := c.provider.GenerateContent(ctx, messages, systemPrompt, maxTokens, currentImages)
+func (c *Client) GenerateText(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, currentImages []model.Image, temperature float64) string {
+	content, err := c.provider.GenerateContent(ctx, messages, systemPrompt, maxTokens, currentImages, temperature)
 	if err != nil {
 		log.Printf("LLM生成エラー: %v", err)
 		if errorNotifier != nil {

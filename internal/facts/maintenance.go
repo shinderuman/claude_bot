@@ -203,7 +203,7 @@ func (s *FactService) generateArchiveFacts(ctx context.Context, target string, f
 		// Use extraction system prompt for JSON output structure
 		systemPrompt := llm.Messages.System.FactExtraction
 
-		response := s.llmClient.GenerateText(ctx, messages, systemPrompt, s.config.MaxSummaryTokens, nil)
+		response := s.llmClient.GenerateText(ctx, messages, systemPrompt, s.config.MaxSummaryTokens, nil, 0.0)
 		if response == "" {
 			log.Printf("警告: バッチ %d-%d のLLM応答が空でした", i+1, end)
 			continue
@@ -265,7 +265,7 @@ func (s *FactService) SanitizeFacts(ctx context.Context, facts []model.Fact) ([]
 	messages := []model.Message{{Role: "user", Content: prompt}}
 
 	// Using FactExtraction system message as base (it asks for JSON output)
-	response := s.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, s.config.MaxFactTokens, nil)
+	response := s.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, s.config.MaxFactTokens, nil, 0.0)
 	if response == "" {
 		return facts, 0, nil
 	}
@@ -357,7 +357,7 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 	messages := []model.Message{{Role: "user", Content: prompt}}
 
 	// System Promptとしてキャラクター設定を渡す
-	profileText := s.llmClient.GenerateText(ctx, messages, s.config.CharacterPrompt, s.config.MaxSummaryTokens, nil)
+	profileText := s.llmClient.GenerateText(ctx, messages, s.config.CharacterPrompt, s.config.MaxSummaryTokens, nil, s.config.LLMTemperature)
 	if profileText == "" {
 		return fmt.Errorf("プロファイル生成結果が空でした")
 	}
