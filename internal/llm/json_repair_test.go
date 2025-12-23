@@ -178,6 +178,36 @@ ue"}]`,
 			want:  "", // Just check validity
 			exact: false,
 		},
+		{
+			name:  "MissingComma",
+			input: `[{"target":"__general__","key":"event","target":"__general__" "event":"1月21日までの開催"}]`,
+			want:  "",
+			exact: false,
+		},
+		{
+			name:  "UnexpectedColon",
+			input: `[{"target":"mesugakiroid","key":"value":" Pint Outlook","value": "HEJE"}]`,
+			want:  "",
+			exact: false,
+		},
+		{
+			name:  "KeyEqualsValue",
+			input: `[{"target":"__general__","key"="economic_indicators","value":"..."}]`,
+			want:  "",
+			exact: false,
+		},
+		{
+			name:  "SemicolonSeparator",
+			input: `[{"key":"val1"}; {"key":"val2"}]`,
+			want:  "",
+			exact: false,
+		},
+		{
+			name:  "TrailingCommaInArray",
+			input: `[{"key":"val1"},]`,
+			want:  "",
+			exact: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -428,4 +458,42 @@ func FuzzStructuralRepair(f *testing.F) {
 		r := &structuralRepairer{runes: []rune(input)}
 		_ = r.repair()
 	})
+}
+
+func TestUnmarshalWithRepair(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		target    interface{}
+		check     func(*testing.T, interface{})
+		wantError bool
+	}{
+		{
+			name:   "Single object to slice",
+			input:  `{"key": "value"}`,
+			target: &[]map[string]interface{}{},
+			check: func(t *testing.T, v interface{}) {
+				res := *(v.(*[]map[string]interface{}))
+				if len(res) != 1 {
+					t.Errorf("Expected 1 item, got %d", len(res))
+				} else if res[0]["key"] != "value" {
+					t.Errorf("Expected key=value, got %v", res[0])
+				}
+			},
+			wantError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := UnmarshalWithRepair(tt.input, tt.target, "Test")
+			if (err != nil) != tt.wantError {
+				t.Errorf("UnmarshalWithRepair() error = %v, wantError %v", err, tt.wantError)
+				return
+			}
+			if !tt.wantError && tt.check != nil {
+				tt.check(t, tt.target)
+			}
+		})
+	}
 }

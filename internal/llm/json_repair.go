@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"reflect"
 	"regexp"
 	"strings"
 )
@@ -263,6 +264,10 @@ func preprocessJSON(s string) string {
 	s = replaceOpeningJapaneseQuote(s)
 	s = replaceClosingJapaneseQuote(s)
 	s = fixMissingCommaQuotes(s)
+	s = fixMissingCommaBetweenValueAndKey(s)
+	s = fixUnexpectedColon(s)
+	s = fixInvalidKeyFormat(s)
+	s = fixSemicolonSeparator(s)
 	s = fixGarbageQuotes(s)
 	s = fixMergedKeyValue(s)
 	s = fixMissingOpeningQuotes(s)
@@ -298,6 +303,26 @@ func fixMissingCommaQuotes(s string) string {
 	return re.ReplaceAllString(s, `:"$1","$2":`)
 }
 
+func fixMissingCommaBetweenValueAndKey(s string) string {
+	re := regexp.MustCompile(`("[^"]*")(\s+)("[a-zA-Z0-9_]+":)`)
+	return re.ReplaceAllString(s, `$1,$2$3`)
+}
+
+func fixUnexpectedColon(s string) string {
+	re := regexp.MustCompile(`(:\s*"(\\.|[^"\\])*")\s*:\s*`)
+	return re.ReplaceAllString(s, `$1, "repaired_key":`)
+}
+
+func fixInvalidKeyFormat(s string) string {
+	re := regexp.MustCompile(`"?([a-zA-Z0-9_]+)"?\s*=\s*`)
+	return re.ReplaceAllString(s, `"$1":`)
+}
+
+func fixSemicolonSeparator(s string) string {
+	re := regexp.MustCompile(`([}\]])\s*;\s*([{\[])`)
+	return re.ReplaceAllString(s, `$1,$2`)
+}
+
 func fixGarbageQuotes(s string) string {
 	re := regexp.MustCompile(`([^:,\s\[\{])""(\s*[\}\],])`)
 	return re.ReplaceAllString(s, `$1"$2`)
@@ -328,6 +353,15 @@ func UnmarshalWithRepair(jsonStr string, v interface{}, logPrefix string) error 
 	if err := json.Unmarshal([]byte(jsonStr), v); err != nil {
 		repairedJSON := RepairJSON(jsonStr)
 		if err := json.Unmarshal([]byte(repairedJSON), v); err != nil {
+			if typeErr, ok := err.(*json.UnmarshalTypeError); ok {
+				if typeErr.Type.Kind() == reflect.Slice && typeErr.Value == "object" {
+					arrayWrapped := "[" + repairedJSON + "]"
+					if err := json.Unmarshal([]byte(arrayWrapped), v); err == nil {
+						return nil
+					}
+				}
+			}
+
 			msg := fmt.Sprintf("%sJSONパースエラー(修復後): %v", logPrefix, err)
 			detail := fmt.Sprintf("Original: %s\nRepaired: %s", jsonStr, repairedJSON)
 			log.Printf("%s\n%s", msg, detail)
