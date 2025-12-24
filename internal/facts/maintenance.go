@@ -203,7 +203,7 @@ func (s *FactService) generateArchiveFacts(ctx context.Context, target string, f
 		// Use extraction system prompt for JSON output structure
 		systemPrompt := llm.Messages.System.FactExtraction
 
-		response := s.llmClient.GenerateText(ctx, messages, systemPrompt, s.config.MaxSummaryTokens, nil, 0.0)
+		response := s.llmClient.GenerateText(ctx, messages, systemPrompt, s.config.MaxSummaryTokens, nil, llm.TemperatureSystem)
 		if response == "" {
 			log.Printf("警告: バッチ %d-%d のLLM応答が空でした", i+1, end)
 			continue
@@ -265,7 +265,7 @@ func (s *FactService) SanitizeFacts(ctx context.Context, facts []model.Fact) ([]
 	messages := []model.Message{{Role: "user", Content: prompt}}
 
 	// Using FactExtraction system message as base (it asks for JSON output)
-	response := s.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, s.config.MaxFactTokens, nil, 0.0)
+	response := s.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, s.config.MaxFactTokens, nil, llm.TemperatureSystem)
 	if response == "" {
 		return facts, 0, nil
 	}

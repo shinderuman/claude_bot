@@ -12,6 +12,11 @@ import (
 	"claude_bot/internal/model"
 )
 
+const (
+	// TemperatureSystem is the temperature used for system tasks requiring accuracy
+	TemperatureSystem = 0.0
+)
+
 type Client struct {
 	provider provider.Provider
 	config   *config.Config
@@ -47,7 +52,7 @@ func (c *Client) GenerateResponse(ctx context.Context, session *model.Session, c
 
 func (c *Client) GenerateSummary(ctx context.Context, messages []model.Message, summary string) string {
 	systemPrompt := BuildSystemPrompt(c.config, summary, "", "", false)
-	return c.GenerateText(ctx, messages, systemPrompt, c.config.MaxSummaryTokens, nil, 0.0)
+	return c.GenerateText(ctx, messages, systemPrompt, c.config.MaxSummaryTokens, nil, TemperatureSystem)
 }
 
 // GenerateText calls the configured LLM provider to generate text content

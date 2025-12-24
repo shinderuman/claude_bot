@@ -266,7 +266,7 @@ func testFactExtraction(cfg *config.Config, client *llm.Client, message string) 
 	// 事実抽出
 	messages := []model.Message{{Role: "user", Content: prompt}}
 	ctx := context.Background()
-	response := client.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, cfg.MaxResponseTokens, nil, 0.0)
+	response := client.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, cfg.MaxResponseTokens, nil, llm.TemperatureSystem)
 
 	if response == "" {
 		log.Fatal("エラー: 事実抽出に失敗しました")

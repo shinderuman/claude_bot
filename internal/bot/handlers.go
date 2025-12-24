@@ -156,7 +156,7 @@ func (b *Bot) classifyIntent(ctx context.Context, message string) (model.IntentT
 	// システムプロンプトはシンプルに
 	systemPrompt := llm.Messages.System.IntentClassification
 
-	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxResponseTokens, nil, 0.0)
+	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxResponseTokens, nil, llm.TemperatureSystem)
 	if response == "" {
 		return model.IntentChat, "", nil, ""
 	}
@@ -270,7 +270,7 @@ func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session
 	systemPrompt := llm.BuildSystemPrompt(b.config, "", "", "", true)
 
 	// 分析には長文の可能性があるため、サマリー用のトークン数を使用
-	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil, 0.0)
+	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil, llm.TemperatureSystem)
 
 	if response == "" {
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.AnalysisGeneration)
@@ -357,7 +357,7 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 	prompt := llm.BuildDailySummaryPrompt(statuses, targetDateStr, userMessage, loc)
 	systemPrompt := llm.BuildSystemPrompt(b.config, "", "", "", true)
 
-	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil, 0.0)
+	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil, llm.TemperatureSystem)
 
 	if response == "" {
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.SummaryGeneration)

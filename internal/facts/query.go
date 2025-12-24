@@ -24,7 +24,7 @@ func (s *FactService) QueryRelevantFacts(ctx context.Context, author, authorUser
 	prompt := llm.BuildFactQueryPrompt(authorUserName, author, message)
 	messages := []model.Message{{Role: "user", Content: prompt}}
 
-	response := s.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactQuery, s.config.MaxResponseTokens, nil, 0.0)
+	response := s.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactQuery, s.config.MaxResponseTokens, nil, llm.TemperatureSystem)
 	if response == "" {
 		return ""
 	}
