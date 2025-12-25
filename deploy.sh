@@ -15,6 +15,7 @@ SFTP_KEY_FILE="$HOME/.ssh/mastodon.pem"
 
 # データディレクトリ
 DATA_DIR="data"
+LOG_DIR="${DATA_DIR}/log"
 
 # デフォルト値
 DEPLOY_PROGRAM=false
@@ -33,11 +34,23 @@ sync_data_dir() {
         # リモートディレクトリを作成
         ssh -i "${SFTP_KEY_FILE}" "${SFTP_USER}@${REMOTE_HOST}" "mkdir -p ${REMOTE_DIR}/${DATA_DIR}"
 
+        # ログディレクトリがなければ作成 (ローカル)
+        mkdir -p "${LOG_DIR}"
+
+        # 除外設定
+        local EXCLUDES=(
+            --exclude='cluster_registry.json'
+            --exclude='*.example'
+            --exclude='*.lock'
+            --exclude='log/facts.json.*'
+            --exclude='metrics.log*'
+        )
+
         # リモート → ローカル（リモートの方が新しい場合のみ）
-        rsync -avuz --quiet --exclude='*.example' --exclude='facts.json.[0-9]*' -e "ssh -i ${SFTP_KEY_FILE}" "${remote_dir}/" "${DATA_DIR}/" 2>/dev/null || true
+        rsync -avuz --quiet "${EXCLUDES[@]}" -e "ssh -i ${SFTP_KEY_FILE}" "${remote_dir}/" "${DATA_DIR}/" 2>/dev/null || true
 
         # ローカル → リモート（ローカルの方が新しい場合のみ）
-        rsync -avuz --quiet --exclude='*.example' --exclude='facts.json.[0-9]*' -e "ssh -i ${SFTP_KEY_FILE}" "${DATA_DIR}/" "${remote_dir}/" 2>/dev/null || true
+        rsync -avuz --quiet "${EXCLUDES[@]}" -e "ssh -i ${SFTP_KEY_FILE}" "${DATA_DIR}/" "${remote_dir}/" 2>/dev/null || true
 
         echo "  ✓ ${DATA_DIR}/同期完了"
     else
@@ -49,18 +62,23 @@ sync_data_dir() {
 backup_remote_facts() {
     echo "リモートの facts.json をバックアップ中..."
     
+    # ログディレクトリの作成
+    if [ ! -d "${LOG_DIR}" ]; then
+        mkdir -p "${LOG_DIR}"
+    fi
+
     # ローテーション: 4->5, 3->4, 2->3, 1->2
     # 上書きを避けるため逆順に処理
     for i in {4..1}; do
-        if [ -f "${DATA_DIR}/facts.json.$i" ]; then
-            mv "${DATA_DIR}/facts.json.$i" "${DATA_DIR}/facts.json.$((i+1))"
+        if [ -f "${LOG_DIR}/facts.json.$i" ]; then
+            mv "${LOG_DIR}/facts.json.$i" "${LOG_DIR}/facts.json.$((i+1))"
         fi
     done
     
     # リモートの facts.json を facts.json.1 としてダウンロード
     # 初回などファイルがない場合のエラーは許容して続行
-    if scp -i "${SFTP_KEY_FILE}" "${SFTP_USER}@${REMOTE_HOST}:${REMOTE_DIR}/${DATA_DIR}/facts.json" "${DATA_DIR}/facts.json.1" 2>/dev/null; then
-        echo "  ✓ バックアップ完了: ${DATA_DIR}/facts.json.1"
+    if scp -i "${SFTP_KEY_FILE}" "${SFTP_USER}@${REMOTE_HOST}:${REMOTE_DIR}/${DATA_DIR}/facts.json" "${LOG_DIR}/facts.json.1" 2>/dev/null; then
+        echo "  ✓ バックアップ完了: ${LOG_DIR}/facts.json.1"
     else
         echo "  ⚠ リモートの facts.json の取得に失敗しました (初回デプロイ時は無視してください)"
     fi
