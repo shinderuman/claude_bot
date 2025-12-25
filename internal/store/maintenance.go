@@ -5,280 +5,104 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
-	"strings"
 	"time"
 
 	"claude_bot/internal/model"
 )
 
 func (s *FactStore) Cleanup(retention time.Duration) int {
-	s.mu.Lock()
-
+	ctx := context.Background()
 	threshold := time.Now().Add(-retention)
-	var activeFacts []model.Fact
-	deletedCount := 0
 
-	for _, fact := range s.Facts {
-		if fact.Timestamp.After(threshold) {
-			activeFacts = append(activeFacts, fact)
-		} else {
-			deletedCount++
-		}
+	allFacts := s.GetAllFacts()
+	targets := make(map[string]bool)
+	for _, f := range allFacts {
+		targets[f.Target] = true
 	}
 
-	s.Facts = activeFacts
-	s.mu.Unlock()
-
-	if deletedCount > 0 {
-		// SaveOverwriteでマージなし保存（削除を反映）
-		if err := s.SaveOverwrite(); err != nil {
-			log.Printf("ファクト保存エラー(Cleanup): %v", err)
+	deletedTotal := 0
+	for target := range targets {
+		count, err := s.storage.Remove(ctx, target, func(f model.Fact) bool {
+			return f.Timestamp.Before(threshold)
+		})
+		if err != nil {
+			log.Printf("Error cleaning up target %s: %v", target, err)
+			continue
 		}
+		deletedTotal += count
 	}
 
-	return deletedCount
+	return deletedTotal
 }
 
 // PerformMaintenance はファクトストアの総合的なメンテナンスを実行します
 func (s *FactStore) PerformMaintenance(retentionDays, maxFacts int) int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	// 1. Cleanup Old
+	deleted := s.Cleanup(time.Duration(retentionDays) * 24 * time.Hour)
 
-	initialCount := len(s.Facts)
-
-	// 1. 重複排除
-	s.removeDuplicatesUnsafe()
-
-	// 2. 古いファクトの削除
-	s.removeOldFactsUnsafe(retentionDays)
-
-	// 3. 上限超過分の削除
-	s.enforceMaxFactsUnsafe(maxFacts)
-
-	deletedCount := initialCount - len(s.Facts)
-	if deletedCount > 0 {
-		log.Printf("ファクトメンテナンス完了: %d件削除 (残り: %d件)", deletedCount, len(s.Facts))
-		// ロックを一時的に解放してSaveOverwriteを呼ぶ（マージせずに削除を反映）
-		s.mu.Unlock()
-		if err := s.SaveOverwrite(); err != nil {
-			log.Printf("ファクト保存エラー: %v", err)
-		}
-		s.mu.Lock()
-	}
-
-	return deletedCount
-}
-
-// removeDuplicatesUnsafe は重複ファクトを削除します (ロック不要)
-func (s *FactStore) removeDuplicatesUnsafe() {
-	type factKey struct {
-		Target string
-		Key    string
-		Value  string
-	}
-
-	seen := make(map[factKey]*model.Fact)
-	unique := make([]model.Fact, 0, len(s.Facts))
-
-	for i := range s.Facts {
-		fact := &s.Facts[i]
-		// Valueを文字列に変換して比較
-		valueStr := ""
-		if fact.Value != nil {
-			if str, ok := fact.Value.(string); ok {
-				valueStr = strings.TrimSpace(str)
-			}
-		}
-
-		key := factKey{
-			Target: fact.Target,
-			Key:    fact.Key,
-			Value:  valueStr,
-		}
-
-		if existing, exists := seen[key]; exists {
-			// 既存のファクトより新しい場合は置き換え
-			if fact.Timestamp.After(existing.Timestamp) {
-				seen[key] = fact
-			}
-		} else {
-			seen[key] = fact
+	// 2. Max Facts Enforcement
+	if maxFacts > 0 {
+		// EnforceMaxFacts keeps only the latest maxFacts facts in global timeline
+		removedCount, err := s.storage.EnforceMaxFacts(context.Background(), maxFacts)
+		if err != nil {
+			log.Printf("Max Facts Enforcement failed: %v", err)
+		} else if removedCount > 0 {
+			log.Printf("Max Facts Enforcement: Removed %d old facts from Redis", removedCount)
+			deleted += removedCount
 		}
 	}
 
-	// ユニークなファクトのみを保持
-	for _, fact := range seen {
-		unique = append(unique, *fact)
+	if deleted > 0 {
+		log.Printf("ファクトメンテナンス完了: %d件削除", deleted)
 	}
 
-	s.Facts = unique
-}
-
-// removeOldFactsUnsafe は古いファクトを削除します (ロック不要)
-func (s *FactStore) removeOldFactsUnsafe(retentionDays int) {
-	if retentionDays <= 0 {
-		return
-	}
-
-	cutoff := time.Now().AddDate(0, 0, -retentionDays)
-	filtered := make([]model.Fact, 0, len(s.Facts))
-
-	for _, fact := range s.Facts {
-		if fact.Timestamp.After(cutoff) {
-			filtered = append(filtered, fact)
-		}
-	}
-
-	s.Facts = filtered
-}
-
-// enforceMaxFactsUnsafe は最大ファクト数を超えた分を削除します (ロック不要)
-func (s *FactStore) enforceMaxFactsUnsafe(maxFacts int) {
-	if maxFacts <= 0 || len(s.Facts) <= maxFacts {
-		return
-	}
-
-	if len(s.Facts) > maxFacts {
-		// 最新のmaxFacts件のみを保持
-		s.Facts = s.Facts[len(s.Facts)-maxFacts:]
-	}
+	return deleted
 }
 
 // ReplaceFacts atomically replaces specified facts for the given target.
 // It removes facts listed in factsToRemove and adds facts from factsToAdd.
 func (s *FactStore) ReplaceFacts(target string, factsToRemove, factsToAdd []model.Fact) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 1000*time.Millisecond)
-	defer cancel()
-
-	locked, err := s.fileLock.TryLockContext(ctx, 50*time.Millisecond)
-	if err != nil || !locked {
-		return fmt.Errorf("failed to acquire file lock for replace: %v", err)
-	}
-	defer s.fileLock.Unlock() //nolint:errcheck
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	var diskFacts []model.Fact
-	data, err := os.ReadFile(s.saveFilePath)
-	if err == nil && len(data) > 0 {
-		if err := json.Unmarshal(data, &diskFacts); err != nil {
-			return fmt.Errorf("failed to unmarshal disk facts: %v", err)
-		}
-	} else if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to load facts from disk: %v", err)
-	}
-
-	// Use map to unique-ify and manage facts
-	factMap := make(map[string]model.Fact)
-
-	// 1. Load all existing facts (Disk first, then Memory to ensure latest state)
-	for _, f := range diskFacts {
-		factMap[f.ComputeUniqueKey()] = f
-	}
-	for _, f := range s.Facts {
-		factMap[f.ComputeUniqueKey()] = f
-	}
-
-	// 2. Remove specified facts
-	for _, f := range factsToRemove {
-		if f.Target == target {
-			delete(factMap, f.ComputeUniqueKey())
-		}
-	}
-
-	// 3. Add new facts
-	for _, f := range factsToAdd {
-		if f.Timestamp.IsZero() {
-			f.Timestamp = time.Now()
-		}
-		factMap[f.ComputeUniqueKey()] = f
-	}
-
-	// 4. Convert back to slice
-	finalFacts := make([]model.Fact, 0, len(factMap))
-	for _, f := range factMap {
-		finalFacts = append(finalFacts, f)
-	}
-
-	encoded, err := json.MarshalIndent(finalFacts, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal facts: %v", err)
-	}
-
-	if err := s.atomicWriteFile(encoded); err != nil {
-		return fmt.Errorf("failed to write facts to disk (atomic): %v", err)
-	}
-
-	s.Facts = finalFacts
-	s.lastModTime = time.Now()
-
-	return nil
+	return s.storage.Replace(context.Background(), target, factsToRemove, factsToAdd)
 }
 
-// RemoveFacts removes facts matching the condition and persists changes immediately via Atomic Update
+// RemoveFacts removes facts matching the condition and persists changes immediately
 func (s *FactStore) RemoveFacts(ctx context.Context, target string, shouldRemove func(model.Fact) bool) (int, error) {
-	// 1. Acquire File Lock FIRST to prevent concurrent Saves/Reads
-	// This ensures no one reads the "dirty" state while we are deleting
-	flockCtx, cancel := context.WithTimeout(ctx, 2*time.Second) // Longer timeout for maintenance
-	defer cancel()
+	// To preserve notification logic, we fetch, identify, notify, then remove.
 
-	locked, err := s.fileLock.TryLockContext(flockCtx, 100*time.Millisecond)
-	if err != nil || !locked {
-		return 0, fmt.Errorf("failed to acquire file lock for removal: %v", err)
-	}
-	defer s.fileLock.Unlock() //nolint:errcheck
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// 2. Refresh from disk to ensure we are deleting from latest state
-	// (Though Reload handles startup, redundant safety here is good)
-	if err := s.syncFromDiskUnsafe(); err != nil {
-		log.Printf("[RemoveFacts] Warning: Failed to sync from disk before removal: %v", err)
+	// 1. Get current facts for target
+	facts, err := s.storage.GetByTarget(ctx, target)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get facts for target %s: %w", target, err)
 	}
 
-	initialCount := len(s.Facts)
-	newFacts := make([]model.Fact, 0, initialCount)
-	deletedCount := 0
-
-	for _, fact := range s.Facts {
-		// ターゲットが一致し、かつ条件に合致する場合は削除対象（newFactsに追加しない）
-		if fact.Target == target && shouldRemove(fact) {
-			jsonBytes, _ := json.Marshal(fact)
-			log.Printf("🗑️ ファクト削除: %s", string(jsonBytes))
-
-			jsonIndentBytes, _ := json.MarshalIndent(fact, "", "    ")
-			msg := fmt.Sprintf("🗑️ ファクトを削除しました (Target: %s)\n```\n%s\n```", target, string(jsonIndentBytes))
-			s.slackClient.PostMessageAsync(ctx, msg)
-
-			deletedCount++
-			continue
+	var toRemove []model.Fact
+	for _, fact := range facts {
+		if shouldRemove(fact) {
+			toRemove = append(toRemove, fact)
 		}
-		newFacts = append(newFacts, fact)
 	}
 
-	if deletedCount > 0 {
-		s.Facts = newFacts
-
-		// 3. Save directly (Atomic Write)
-		data, err := json.MarshalIndent(s.Facts, "", "  ")
-		if err != nil {
-			return deletedCount, fmt.Errorf("failed to marshal facts: %v", err)
-		}
-
-		if err := s.atomicWriteFile(data); err != nil {
-			return deletedCount, fmt.Errorf("failed to write facts to disk: %w", err)
-		}
-
-		// Update timestamp
-		if stat, err := os.Stat(s.saveFilePath); err == nil {
-			s.lastModTime = stat.ModTime()
-		}
-
-		log.Printf("RemoveFacts: ターゲット %s から %d 件のファクトを削除しました", target, deletedCount)
+	if len(toRemove) == 0 {
+		return 0, nil
 	}
 
-	return deletedCount, nil
+	// 2. Notify
+	for _, fact := range toRemove {
+		jsonBytes, _ := json.Marshal(fact)
+		log.Printf("🗑️ ファクト削除: %s", string(jsonBytes))
+
+		jsonIndentBytes, _ := json.MarshalIndent(fact, "", "    ")
+		msg := fmt.Sprintf("🗑️ ファクトを削除しました (Target: %s)\n```\n%s\n```", target, string(jsonIndentBytes))
+		s.slackClient.PostMessageAsync(ctx, msg)
+	}
+
+	// 3. Execute Removal using Replace (Atomic)
+	err = s.storage.Replace(ctx, target, toRemove, nil)
+	if err != nil {
+		return 0, fmt.Errorf("failed to remove facts: %w", err)
+	}
+
+	return len(toRemove), nil
 }
+
+// Existing helper calls like removeDuplicatesUnsafe etc are removed as Storage handles it.

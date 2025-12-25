@@ -73,9 +73,7 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, sourceID, author,
 		s.factStore.AddFactWithSource(fact)
 		LogFactSaved(fact)
 	}
-	if err := s.factStore.Save(); err != nil {
-		log.Printf("ファクト保存エラー: %v", err)
-	}
+
 }
 
 // ExtractAndSaveFactsFromURLContent extracts facts from URL content and saves them to the store
@@ -130,9 +128,7 @@ func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, url
 		s.factStore.AddFactWithSource(fact)
 		LogFactSaved(fact)
 	}
-	if err := s.factStore.Save(); err != nil {
-		log.Printf("ファクト保存エラー: %v", err)
-	}
+
 }
 
 // ExtractAndSaveFactsFromSummary extracts facts from a conversation summary and saves them to the store
@@ -195,9 +191,7 @@ func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summar
 		s.factStore.AddFactWithSource(fact)
 		LogFactSaved(fact)
 	}
-	if err := s.factStore.Save(); err != nil {
-		log.Printf("ファクト保存エラー: %v", err)
-	}
+
 }
 
 // SaveColleagueFact saves or updates a colleague's profile fact
@@ -227,7 +221,7 @@ func (s *FactService) SaveColleagueFact(ctx context.Context, targetUserName, dis
 	}
 
 	s.factStore.AddFactWithSource(fact)
-	return s.factStore.Save()
+	return nil
 }
 
 // isValidFact checks if the fact is valid and worth saving

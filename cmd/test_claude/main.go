@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -60,7 +61,27 @@ func main() {
 		factsFile = "data/facts_test.json"
 		log.Printf("テストモード: %s を使用します", factsFile)
 	}
-	factStore := store.NewFactStore(factsFile, slack.NewClient("", "", "", ""))
+
+	memoryStore := store.NewMemoryFactStore()
+	// Load facts manually
+	if _, err := os.Stat(factsFile); err == nil {
+		data, err := os.ReadFile(factsFile)
+		if err != nil {
+			log.Fatalf("Failed to read facts file: %v", err)
+		}
+		var loadedFacts []model.Fact
+		if err := json.Unmarshal(data, &loadedFacts); err != nil {
+			log.Fatalf("Failed to parse facts: %v", err)
+		}
+		ctx := context.Background()
+		for _, f := range loadedFacts {
+			memoryStore.Add(ctx, f)
+		}
+	} else {
+		log.Printf("Facts file not found, starting with empty memory store: %s", factsFile)
+	}
+
+	factStore := store.NewFactStore(memoryStore, slack.NewClient("", "", "", ""), factsFile)
 	factService := facts.NewFactService(cfg, factStore, llmClient, nil, nil)
 
 	switch *mode {

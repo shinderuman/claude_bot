@@ -13,6 +13,7 @@ data/log/
 # ビルド成果物
 /claude_bot
 /test_claude
+/migrate_facts_check
 *.exe
 *.exe~
 *.dll

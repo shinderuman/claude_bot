@@ -38,7 +38,7 @@ func (s *FactService) PerformMaintenance(ctx context.Context) error {
 	}
 
 	log.Printf("メンテナンス完了: %d件のターゲット(担当分)を処理しました", archivedCount)
-	return s.factStore.Save()
+	return nil
 }
 
 // processTargetMaintenance handles maintenance for a single target
@@ -218,14 +218,12 @@ func (s *FactService) generateArchiveFacts(ctx context.Context, target string, f
 
 		allArchives = append(allArchives, chunkArchives...)
 
-		// Sleep only if we are doing multiple batches to avoid rate limits, though original code slept unconditionally
 		if totalFacts > FactArchiveBatchSize {
 			time.Sleep(1 * time.Second)
 		}
 	}
 
 	if len(allArchives) == 0 {
-		// Calling function handles empty list as error or empty result
 		return nil, nil
 	}
 
@@ -274,9 +272,8 @@ func (s *FactService) SanitizeFacts(ctx context.Context, facts []model.Fact) ([]
 		ConflictingFactIDs []string `json:"conflicting_fact_ids"`
 	}
 	jsonStr := llm.ExtractJSON(response)
-	// If parsing fails or empty, just return original facts (safer than deleting wrong things)
 	if err := llm.UnmarshalWithRepair(jsonStr, &result, "FactSanitization"); err != nil {
-		log.Printf("SanitizeFacts: JSON parse failed (skip sanitization): %v", err)
+		log.Printf("SanitizeFacts: JSON parse failed: %v", err)
 		return facts, 0, nil
 	}
 

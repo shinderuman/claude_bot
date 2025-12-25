@@ -183,7 +183,7 @@ func UpdateSessionWithSummary(session *model.Session, summary string, oldConvers
 	session.Summary = summary
 
 	// Remove old conversations
-	// This is a bit tricky because we need to remove specific conversations from the slice.
+	// Remove specific conversations from the slice.
 	// A simple way is to rebuild the slice.
 	var keepConvs []model.Conversation
 	oldMap := make(map[string]bool)

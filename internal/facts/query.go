@@ -16,11 +16,6 @@ func (s *FactService) QueryRelevantFacts(ctx context.Context, author, authorUser
 		return ""
 	}
 
-	// 最新のファクトをディスクから同期
-	if err := s.factStore.SyncFromDisk(); err != nil {
-		log.Printf("QueryRelevantFacts: SyncFromDisk failed: %v", err)
-	}
-
 	prompt := llm.BuildFactQueryPrompt(authorUserName, author, message)
 	messages := []model.Message{{Role: "user", Content: prompt}}
 

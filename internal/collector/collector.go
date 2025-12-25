@@ -272,9 +272,7 @@ func (fc *FactCollector) extractFactsFromContent(ctx context.Context, status *go
 		fc.factStore.AddFactWithSource(fact)
 		facts.LogFactSaved(fact)
 	}
-	if err := fc.factStore.Save(); err != nil {
-		log.Printf("ファクト保存エラー: %v", err)
-	}
+
 }
 
 // extractFactsFromURLs は投稿に含まれるURLからファクトを抽出します
@@ -388,9 +386,7 @@ func (fc *FactCollector) processURL(ctx context.Context, urlStr, urlDomain, sour
 		fc.factStore.AddFactWithSource(fact)
 		facts.LogFactSaved(fact)
 	}
-	if err := fc.factStore.Save(); err != nil {
-		log.Printf("ファクト保存エラー: %v", err)
-	}
+
 }
 
 // isNoiseURL はハッシュタグURLやユーザープロフィールURLなどのノイズURLかを判定します

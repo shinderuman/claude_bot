@@ -77,7 +77,7 @@ func (pd *PeerDiscoverer) DiscoverPeersFromRegistry(ctx context.Context, onPeerF
 		}
 
 		// Check if already following
-		// Note: This requires resolving username to ID first, which we might not have efficiently.
+		// Requires resolving username to ID first.
 		// So we'll fetch the account first.
 		account, err := pd.mastodonClient.GetAccountByUsername(ctx, username)
 		if err != nil {

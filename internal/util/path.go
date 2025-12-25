@@ -6,16 +6,8 @@ import (
 	"path/filepath"
 )
 
-// GetFilePath returns the absolute path for a file, checking the working directory first,
-// then falling back to the executable directory.
+// GetFilePath returns the absolute path for a file in the data directory relative to the executable.
 func GetFilePath(filename string) string {
-	// data/ ディレクトリ内のファイルを優先
-	localPath := filepath.Join("data", filename)
-	if _, err := os.Stat(localPath); err == nil {
-		return localPath
-	}
-
-	// 実行ファイルディレクトリの data/ を fallback
 	exePath, err := os.Executable()
 	if err != nil {
 		log.Fatal("実行ファイルパス取得エラー: ", err)

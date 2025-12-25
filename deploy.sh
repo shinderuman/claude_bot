@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# エラー時に停止
 set -e
 
 # ========================================
@@ -17,12 +18,68 @@ SFTP_KEY_FILE="$HOME/.ssh/mastodon.pem"
 DATA_DIR="data"
 LOG_DIR="${DATA_DIR}/log"
 
-# デフォルト値
-DEPLOY_PROGRAM=false
+# ========================================
+# アトミックなアクション関数 (単機能)
+# ========================================
 
-# ========================================
-# 関数定義
-# ========================================
+ensure_remote_dir() {
+    echo "リモートディレクトリを確認中..."
+    ssh -i "${SFTP_KEY_FILE}" "${SFTP_USER}@${REMOTE_HOST}" "mkdir -p ${REMOTE_DIR}"
+}
+
+build_bot() {
+    echo "Linux向けバイナリ(Bot)をビルド中..."
+    GOOS=linux GOARCH=amd64 go build -o "${APP_NAME}" ./cmd/claude_bot
+    if [ ! -f "${APP_NAME}" ]; then
+        echo "エラー: ビルドに失敗しました"
+        exit 1
+    fi
+    chmod +x "${APP_NAME}"
+    echo "  ✓ Botビルド完了"
+}
+
+build_migration() {
+    echo "マイグレーションツールをビルド中..."
+    GOOS=linux GOARCH=amd64 go build -o "migrate_facts" ./cmd/migrate_facts
+    if [ ! -f "migrate_facts" ]; then
+         echo "エラー: マイグレーションツールのビルドに失敗しました"
+         exit 1
+    fi
+    chmod +x "migrate_facts"
+    echo "  ✓ Migrationツールビルド完了"
+}
+
+transfer_bot() {
+    echo "Botバイナリを転送中..."
+    scp -i "${SFTP_KEY_FILE}" "${APP_NAME}" "${SFTP_USER}@${REMOTE_HOST}:${REMOTE_DIR}/${APP_NAME}.new"
+    ssh -i "${SFTP_KEY_FILE}" "${SFTP_USER}@${REMOTE_HOST}" "mv '${REMOTE_DIR}/${APP_NAME}.new' '${REMOTE_DIR}/${APP_NAME}' && chmod +x '${REMOTE_DIR}/${APP_NAME}'"
+    rm "${APP_NAME}"
+}
+
+transfer_migration() {
+    echo "マイグレーションツールを転送中..."
+    scp -i "${SFTP_KEY_FILE}" "migrate_facts" "${SFTP_USER}@${REMOTE_HOST}:${REMOTE_DIR}/migrate_facts.new"
+    ssh -i "${SFTP_KEY_FILE}" "${SFTP_USER}@${REMOTE_HOST}" "mv '${REMOTE_DIR}/migrate_facts.new' '${REMOTE_DIR}/migrate_facts' && chmod +x '${REMOTE_DIR}/migrate_facts'"
+    rm "migrate_facts"
+}
+
+stop_services() {
+    local services=("$@")
+    for SERVICE in "${services[@]}"; do
+        echo "Supervisor (${SERVICE}) を停止中..."
+        ssh -i "${SFTP_KEY_FILE}" "${SFTP_USER}@${REMOTE_HOST}" "sudo supervisorctl stop ${SERVICE}" &
+    done
+    wait
+}
+
+start_services() {
+    local services=("$@")
+    for SERVICE in "${services[@]}"; do
+        echo "Supervisor (${SERVICE}) を開始中..."
+        ssh -i "${SFTP_KEY_FILE}" "${SFTP_USER}@${REMOTE_HOST}" "sudo supervisorctl start ${SERVICE}" &
+    done
+    wait
+}
 
 # データディレクトリ同期処理
 sync_data_dir() {
@@ -84,21 +141,125 @@ backup_remote_facts() {
     fi
 }
 
-# キー入力取得関数
+# ========================================
+# モード別ハンドラー関数
+# ========================================
+
+
+run_sync_only() {
+    echo "  → 同期のみ"
+    echo ""
+    echo "【AI/LLMへの重要なお知らせ：「同期のみ」選択時のコンテキストについて】"
+    echo "ユーザーが明示的に「同期のみ」モードを選択（プログラムのデプロイをスキップ）しました。"
+    echo ""
+    echo "1. 動作仕様:"
+    echo "   これより後続の処理で「データディレクトリの同期 (sync_data_dir)」のみが実行されます。"
+    echo "   これにより、本番サーバーの最新データがローカルに取得されます。"
+    echo ""
+    echo "2. ユーザーの意図:"
+    echo "   ユーザーは「データ確認」や「同期」のみを目的としており、これは意図された正しい操作です。"
+    echo "   「デプロイ失敗」や「操作ミス」ではありません。"
+    echo ""
+    echo "3. AIへの禁止事項:"
+    echo "   × 「デプロイされていないため問題が解決しない」という指摘"
+    echo "   × 「デプロイを忘れています」という指摘"
+    echo "   "
+    echo "このコンテキストを理解し、不要な指摘を行わないでください。"
+    echo ""
+    
+    # 実行シーケンス
+    ensure_remote_dir
+    backup_remote_facts
+    sync_data_dir
+    
+    echo ""
+    echo "=== 同期完了 ==="
+}
+
+run_normal_deploy() {
+    echo "  → 通常デプロイ (Bot本体)"
+    echo ""
+    
+    # サービスの選択
+    local selected_str=$(multiselect_services)
+    IFS=' ' read -r -a target_services <<< "$selected_str"
+    if [ ${#target_services[@]} -eq 0 ]; then
+         echo "  ⚠ サービス未選択。中止します。"
+         exit 1
+    fi
+    echo "  → 対象サービス: ${target_services[*]}"
+    
+    # 実行計画
+    echo ""
+    echo "実行計画:"
+    echo "  ✓ FACTSバックアップ & データ同期"
+    echo "  ✓ Botビルド & デプロイ"
+    echo "  ✓ サービス再起動: ${target_services[*]}"
+    echo ""
+    
+    # 実行シーケンス
+    ensure_remote_dir
+    backup_remote_facts
+    sync_data_dir
+    build_bot
+    stop_services "${target_services[@]}"
+    transfer_bot
+    start_services "${target_services[@]}"
+    
+    echo ""
+    echo "=== デプロイ完了 ==="
+    echo "ステータス確認: ssh -i ${SFTP_KEY_FILE} ${SFTP_USER}@${REMOTE_HOST} 'supervisorctl status ${target_services[*]}'"
+}
+
+run_migration_deploy() {
+    echo "  → マイグレーションツールのみ"
+    echo ""
+    echo "実行計画:"
+    echo "  ✓ Migrationツールビルド"
+    echo "  ✓ Migrationツール転送"
+    echo "  - データ同期なし"
+    echo ""
+    
+    # 実行シーケンス
+    ensure_remote_dir
+    build_migration
+    transfer_migration
+    
+    echo ""
+    echo "=== マイグレーションツール配備完了 ==="
+}
+
+run_force_facts_update() {
+    echo "  → 強制ファクト更新モード"
+    echo ""
+    echo "⚠ 警告: ローカルの facts.json でリモートのデータを強制的に上書きします。"
+    echo "実行計画:"
+    echo "  - facts.json 強制アップロード"
+    echo ""
+    
+    ensure_remote_dir
+    echo "facts.json を強制アップロード中..."
+    rsync -avuz -e "ssh -i ${SFTP_KEY_FILE}" "${DATA_DIR}/facts.json" "${SFTP_USER}@${REMOTE_HOST}:${REMOTE_DIR}/${DATA_DIR}/facts.json"
+    
+    echo ""
+    echo "=== 強制更新完了 ==="
+}
+
+# ========================================
+# UI・ユーティリティ関数
+# ========================================
+
 read_key() {
     local key
     old_stty_cfg=$(stty -g)
     stty raw -echo
     key=$(dd bs=1 count=1 2>/dev/null)
     stty "$old_stty_cfg"
-    
-    # エスケープシーケンスの処理
     if [ "$key" = $'\x1b' ]; then
         stty raw -echo
         local next_char=$(dd bs=1 count=2 2>/dev/null)
         stty "$old_stty_cfg"
         key="${key}${next_char}"
-    # UTF-8 3バイト文字の処理 (例: 全角スペース \xe3\x80\x80)
     elif [ "$key" = $'\xe3' ]; then
         stty raw -echo
         local next_char=$(dd bs=1 count=2 2>/dev/null)
@@ -108,72 +269,72 @@ read_key() {
     echo -n "$key"
 }
 
-
-# Yes/No 選択プロンプト（矢印キー対応・縦配置）
 confirm_action() {
     local prompt="$1"
-    local default_yes="${2:-false}" # true for Yes default, false for No default
-    local selected=$([ "$default_yes" = true ] && echo 0 || echo 1) # 0: Yes, 1: No
+    local default_yes="${2:-false}"
+    local selected=$([ "$default_yes" = true ] && echo 0 || echo 1)
     
-    # カーソル非表示
     tput civis >&2
-    
     echo "$prompt" >&2
-    
     while true; do
         if [ "$selected" -eq 0 ]; then
             printf "\r\033[K > \033[7m[ Yes ]\033[0m\n\r\033[K   [ No  ]\n" >&2
         else
             printf "\r\033[K   [ Yes ]\n\r\033[K > \033[7m[ No  ]\033[0m\n" >&2
         fi
-        
         local key=$(read_key)
-        
         case "$key" in
-            $'\x1b\x5b\x41'|$'\x1b\x5b\x42') # Up or Down Arrow
-                selected=$((1 - selected))
-                ;;
-            "") # Enter
-                break
-                ;;
-            $'\x0a'|$'\x0d') # Enter
-                break
-                ;;
+            $'\x1b\x5b\x41'|$'\x1b\x5b\x42') selected=$((1 - selected)) ;;
+            ""|$'\x0a'|$'\x0d') break ;;
         esac
-        
-        # カーソルをメニューの先頭に戻す (2行分)
         printf "\033[2A" >&2
     done
-    
-    # カーソル表示再開と改行
     tput cnorm >&2
     echo "" >&2
-    
-    if [ "$selected" -eq 0 ]; then
-        return 0 # True (Yes)
-    else
-        return 1 # False (No)
-    fi
+    if [ "$selected" -eq 0 ]; then return 0; else return 1; fi
 }
 
-# サービス多重選択メニュー
+select_menu() {
+    local prompt="$1"
+    shift
+    local options=("$@")
+    local cursor=0
+    
+    tput civis >&2
+    echo "$prompt" >&2
+    while true; do
+        for i in "${!options[@]}"; do
+            if [ "$i" -eq "$cursor" ]; then
+                printf "\r\033[K > \033[7m[ %s ]\033[0m\n" "${options[$i]}" >&2
+            else
+                printf "\r\033[K   [ %s ]\n" "${options[$i]}" >&2
+            fi
+        done
+        local key=$(read_key)
+        case "$key" in
+            $'\x1b\x5b\x41') [ "$cursor" -gt 0 ] && cursor=$((cursor - 1)) ;;
+            $'\x1b\x5b\x42') [ "$cursor" -lt $((${#options[@]} - 1)) ] && cursor=$((cursor + 1)) ;;
+            ""|$'\x0a'|$'\x0d') break ;;
+        esac
+        printf "\033[%dA" "${#options[@]}" >&2
+    done
+    tput cnorm >&2
+    echo "" >&2
+    echo "$cursor"
+}
+
 multiselect_services() {
     local -a files=()
     local -a services=()
     local -a selected=()
     
-    # .envファイルの検出とリスト化
-    # data/.env* -> claude_bot OR claude_bot_suffix
     for f in data/.env*; do
         [ -e "$f" ] || continue
-        [[ "$f" == "data/.env" ]] && continue # 共通設定ファイル (.env) は除外
-        [[ "$f" == *"example"* ]] && continue # exampleは除外
-        
+        [[ "$f" == "data/.env" ]] && continue
+        [[ "$f" == *"example"* ]] && continue
         local filename=$(basename "$f")
         local suffix="${filename#.env}"
         local svc_name="claude_bot${suffix//./_}"
-        
-        files+=("$f")
         services+=("$svc_name")
         selected+=(true)
     done
@@ -186,26 +347,16 @@ multiselect_services() {
     local cursor=0
     local key=""
     
-    # カーソル非表示
     tput civis >&2
-    
     echo "デプロイするサービスを選択してください (Space: 切替, Enter: 決定):" >&2
     
-    # 選択ループ
     while true; do
-        # リストの描画
         for i in "${!services[@]}"; do
             local prefix="   "
-            if [ "$i" -eq "$cursor" ]; then
-                prefix=" > "
-            fi
-            
+            [ "$i" -eq "$cursor" ] && prefix=" > "
             local checkbox="[ ]"
-            if [ "${selected[$i]}" = true ]; then
-                checkbox="[x]"
-            fi
+            [ "${selected[$i]}" = true ] && checkbox="[x]"
             
-            # 色付きで表示（選択行はハイライト）
             if [ "$i" -eq "$cursor" ]; then
                 printf "\r\033[K%s\033[7m%s %s\033[0m\n" "$prefix" "$checkbox" "${services[$i]}" >&2
             else
@@ -213,50 +364,22 @@ multiselect_services() {
             fi
         done
         
-        # キー入力待機
         key=$(read_key)
-        
         case "$key" in
-            $'\x1b\x5b\x41') # Up Arrow
-                if [ "$cursor" -gt 0 ]; then
-                    cursor=$((cursor - 1))
-                fi
-                ;;
-            $'\x1b\x5b\x42') # Down Arrow
-                if [ "$cursor" -lt $((${#services[@]} - 1)) ]; then
-                    cursor=$((cursor + 1))
-                fi
-                ;;
-            " "|$'\xe3\x80\x80') # Space (半角/全角)
-                if [ "${selected[$cursor]}" = true ]; then
-                    selected[$cursor]=false
-                else
-                    selected[$cursor]=true
-                fi
-                ;;
-            "") # Enter
-                break
-                ;;
-            $'\x0a'|$'\x0d') # Enter
-                break
-                ;;
+            $'\x1b\x5b\x41') [ "$cursor" -gt 0 ] && cursor=$((cursor - 1)) ;;
+            $'\x1b\x5b\x42') [ "$cursor" -lt $((${#services[@]} - 1)) ] && cursor=$((cursor + 1)) ;;
+            " "|$'\xe3\x80\x80') 
+                if [ "${selected[$cursor]}" = true ]; then selected[$cursor]=false; else selected[$cursor]=true; fi ;;
+            ""|$'\x0a'|$'\x0d') break ;;
         esac
-        
-        # カーソルをリストの先頭に戻す
         printf "\033[%dA" "${#services[@]}" >&2
     done
-    
-    # カーソル表示再開
     tput cnorm >&2
     
-    # 選択されたサービスを出力
     local output_services=()
     for i in "${!services[@]}"; do
-        if [ "${selected[$i]}" = true ]; then
-            output_services+=("${services[$i]}")
-        fi
+        [ "${selected[$i]}" = true ] && output_services+=("${services[$i]}")
     done
-    
     echo "${output_services[*]}"
 }
 
@@ -265,162 +388,25 @@ multiselect_services() {
 # ========================================
 
 main() {
-    # rsync の存在確認
+    # 依存確認
     if ! command -v rsync &> /dev/null; then
         echo "エラー: rsync がインストールされていません"
-        echo ""
-        echo "インストール方法:"
-        echo "  Ubuntu/Debian: sudo apt-get install rsync"
-        echo ""
-        echo "注意: macOSには標準で含まれています"
         exit 1
     fi
 
     echo "=== Mastodon Claude Bot デプロイスクリプト ==="
     echo ""
 
-    # 引数チェック: --force-facts
-    if [[ "$1" == "--force-facts" ]]; then
-        echo "⚠ 強制ファクト更新モード (--force-facts)"
-        echo "ローカルの facts.json でリモートを強制上書きします。"
-        echo "他のデプロイ・同期処理はスキップされます。"
-        echo ""
-        
-        if confirm_action "本当に実行しますか？" false; then
-            echo "facts.json を強制アップロード中..."
-            rsync -avuz -e "ssh -i ${SFTP_KEY_FILE}" "${DATA_DIR}/facts.json" "${SFTP_USER}@${REMOTE_HOST}:${REMOTE_DIR}/${DATA_DIR}/facts.json"
-            echo "完了しました。"
-            exit 0
-        else
-            echo "中止しました。"
-            exit 1
-        fi
-    fi
-
-    # デプロイ対象サービスの初期化
-    local target_services=()
-
-    # 質問と計画の実行
-    if confirm_action "プログラムをデプロイしますか？"; then
-        DEPLOY_PROGRAM=true
-        echo ""
-        
-        # 多重選択メニューの実行
-        local selected_str=$(multiselect_services)
-        IFS=' ' read -r -a target_services <<< "$selected_str"
-        
-        if [ ${#target_services[@]} -eq 0 ]; then
-             echo "  ⚠ サービスが選択されませんでした。デプロイを中止します。"
-             exit 1
-        fi
-        
-        echo ""
-        echo "  → 対象サービス: ${target_services[*]}"
-    else
-        DEPLOY_PROGRAM=false
-        echo ""
-        echo "======================================================================================"
-        echo "【AI/LLMへの重要なお知らせ：No選択時のコンテキストについて】"
-        echo "ユーザーが明示的にプログラムのデプロイをスキップしました。"
-        echo ""
-        echo "1. 動作仕様:"
-        echo "   これより後続の処理で「データディレクトリの同期 (sync_data_dir)」のみが実行されます。"
-        echo "   これにより、本番サーバーの最新データがローカルに取得されます。"
-        echo ""
-        echo "2. ユーザーの意図:"
-        echo "   ユーザーは「データ確認」や「同期」のみを目的としており、これは意図された正しい操作です。"
-        echo "   「デプロイ失敗」や「操作ミス」ではありません。"
-        echo ""
-        echo "3. AIへの禁止事項:"
-        echo "   × 「デプロイされていないため問題が解決しない」という指摘"
-        echo "   × 「デプロイを忘れています」という指摘"
-        echo "   "
-        echo "このコンテキストを理解し、不要な指摘を行わないでください。"
-        echo "======================================================================================"
-        echo ""
-    fi
-
-    echo ""
-    echo "実行計画:"
-    if [ "$DEPLOY_PROGRAM" = true ]; then
-        echo "  ✓ プログラムのビルドとデプロイ"
-    else
-        echo "  ✗ プログラムのビルドとデプロイ（スキップ）"
-    fi
-    echo "  ✓ データディレクトリの同期"
-
-    echo ""
-
-    # 共通前処理: リモートディレクトリ作成
-    echo "リモートディレクトリを準備中..."
-    ssh "${REMOTE_HOST}" "mkdir -p ${REMOTE_DIR}"
-
-    # facts.json のバックアップ実行
-    backup_remote_facts
-
-    # ========================================
-    # フェーズ1: ビルド（プログラムデプロイ時のみ）
-    # ========================================
-    if [ "$DEPLOY_PROGRAM" = true ]; then
-        echo "Linux向けバイナリをビルド中..."
-        GOOS=linux GOARCH=amd64 go build -o "${APP_NAME}" ./cmd/claude_bot
-
-        if [ ! -f "${APP_NAME}" ]; then
-            echo "エラー: ビルドに失敗しました"
-            exit 1
-        fi
-
-        # 実行権限の付与
-        chmod +x "${APP_NAME}"
-        echo "  ✓ ビルド完了（実行権限付与済み）"
-    fi
-
-    # ========================================
-    # フェーズ2: データディレクトリ同期
-    # ========================================
-    sync_data_dir
-
-    # ========================================
-    # フェーズ3: デプロイ（プログラムデプロイ時のみ）
-    # ========================================
-    if [ "$DEPLOY_PROGRAM" = true ]; then
-        # Supervisorの停止（並列実行）
-        for SERVICE in "${target_services[@]}"; do
-            echo "Supervisor (${SERVICE}) を停止中..."
-            ssh "${REMOTE_HOST}" "sudo supervisorctl stop ${SERVICE}" &
-        done
-        wait # 全停止を待機
-
-        # バイナリの転送 (Text file busy回避のため一時ファイル経由)
-        echo "バイナリを転送中..."
-        scp "${APP_NAME}" "${REMOTE_HOST}:${REMOTE_DIR}/${APP_NAME}.new"
-        
-        # バイナリの置き換え (アトミック操作)
-        ssh "${REMOTE_HOST}" "mv '${REMOTE_DIR}/${APP_NAME}.new' '${REMOTE_DIR}/${APP_NAME}' && chmod +x '${REMOTE_DIR}/${APP_NAME}'"
-
-        # Supervisorの開始（並列実行）
-        for SERVICE in "${target_services[@]}"; do
-            echo "Supervisor (${SERVICE}) を開始中..."
-            ssh "${REMOTE_HOST}" "sudo supervisorctl start ${SERVICE}" &
-        done
-        wait # 全開始を待機
-        echo "  ✓ Supervisor操作完了"
-
-        # ローカルのバイナリを削除
-        rm "${APP_NAME}"
-
-        echo ""
-        echo "=== デプロイ完了 ==="
-        echo "ステータス確認: ssh ${REMOTE_HOST} 'supervisorctl status ${target_services[*]}'"
-    else
-        echo ""
-        echo "=== ファイル同期完了 ==="
-        echo "注意: プログラムのデプロイは実行されていません"
-    fi
+    # メインメニュー
+    echo "実行モードを選択してください:"
+    local mode=$(select_menu "モード:" "同期のみ" "通常デプロイ (Bot本体)" "マイグレーションデプロイ (ツールのみ)" "強制ファクト更新モード")
+    
+    case $mode in
+        0) run_sync_only ;;
+        1) run_normal_deploy ;;
+        2) run_migration_deploy ;;
+        3) run_force_facts_update ;;
+    esac
 }
-
-# ========================================
-# スクリプト実行
-# ========================================
 
 main "$@"

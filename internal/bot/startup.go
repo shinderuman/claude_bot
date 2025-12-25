@@ -15,7 +15,7 @@ import (
 // 2. Heavy: Compression, Maintenance Loop (Staggered by 10m)
 func (b *Bot) executeStartupTasks(ctx context.Context) {
 	// Record start time to identify "new" facts collected during the delay
-	bootTime := time.Now()
+	// bootTime := time.Now() (Unused)
 
 	// Calculate delay based on cluster position (Deterministic Slot)
 	instanceID, totalInstances, err := discovery.GetMyPosition(b.config.BotUsername)
@@ -30,10 +30,9 @@ func (b *Bot) executeStartupTasks(ctx context.Context) {
 	lightTasks := []func(context.Context){
 		func(ctx context.Context) {
 			if b.factStore != nil {
-				log.Println("遅延待機終了: 最新のファクトデータをディスクから再読み込みします...")
-				if err := b.factStore.Reload(bootTime); err != nil {
-					log.Printf("ファクトデータの再読み込みエラー: %v", err)
-				}
+				// Redis transition: Reload from disk is no longer needed/supported in the same way.
+				// Data is persistent in Redis.
+				log.Println("FactStore storage is ready.")
 			}
 		},
 		func(ctx context.Context) {

@@ -13,9 +13,7 @@ func (b *Bot) startFactMaintenanceLoop(ctx context.Context) {
 		return
 	}
 
-	// Maintenance loop jitter: 0 (or random, but for now fixed 0 is fine/simple)
 	jitterFunc := func(interval time.Duration) time.Duration {
-		// Maintenance usually doesn't need strict jitter, but let's add some to avoid thundering herd if multiple bots
 		minutes := int64(interval.Minutes())
 		if minutes > 0 {
 			return time.Duration(time.Now().UnixNano()%minutes) * time.Minute
@@ -54,7 +52,6 @@ func (b *Bot) startAutoPostLoop(ctx context.Context) {
 	b.runInWindowedLoop(ctx, interval, "自動投稿", b.executeAutoPost, jitterFunc)
 }
 
-// jitterFunc returns the delay duration relative to window start
 type jitterFunc func(interval time.Duration) time.Duration
 
 func (b *Bot) runInWindowedLoop(ctx context.Context, interval time.Duration, taskName string, task func(context.Context), getJitter jitterFunc) {
