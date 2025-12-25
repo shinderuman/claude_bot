@@ -2,7 +2,9 @@ package anthropic
 
 import (
 	"context"
+	"errors"
 	"log"
+	"net/http"
 
 	"claude_bot/internal/config"
 	"claude_bot/internal/llm/provider"
@@ -49,6 +51,14 @@ func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, 
 	}
 
 	return extractResponseText(msg), nil
+}
+
+func (c *Client) IsRetryable(err error) bool {
+	var aerr *anthropic.Error
+	if errors.As(err, &aerr) {
+		return aerr.StatusCode == http.StatusTooManyRequests || aerr.StatusCode >= http.StatusInternalServerError
+	}
+	return false
 }
 
 func extractResponseText(msg *anthropic.Message) string {

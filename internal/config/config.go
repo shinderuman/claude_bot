@@ -14,10 +14,12 @@ type Config struct {
 	MastodonAccessToken string
 
 	// LLM Provider Settings
-	LLMProvider    string // "claude" or "gemini"
-	LLMTemperature float64
-	GeminiAPIKey   string
-	GeminiModel    string
+	LLMProvider       string
+	LLMTemperature    float64
+	LLMMaxConcurrency int
+	LLMMaxRetries     int
+	GeminiAPIKey      string
+	GeminiModel       string
 
 	// Claude Settings
 	AnthropicAuthToken string
@@ -131,10 +133,12 @@ func LoadEnvironment(envPath string) {
 
 func LoadConfig() *Config {
 	cfg := &Config{
-		LLMProvider:    parseString(os.Getenv("LLM_PROVIDER")),
-		LLMTemperature: parseFloat(os.Getenv("LLM_TEMPERATURE")),
-		GeminiAPIKey:   os.Getenv("GEMINI_API_KEY"),
-		GeminiModel:    parseString(os.Getenv("GEMINI_MODEL")),
+		LLMProvider:       parseString(os.Getenv("LLM_PROVIDER")),
+		LLMTemperature:    parseFloat(os.Getenv("LLM_TEMPERATURE")),
+		LLMMaxConcurrency: parseInt(os.Getenv("LLM_MAX_CONCURRENCY")),
+		LLMMaxRetries:     parseInt(os.Getenv("LLM_MAX_RETRIES")),
+		GeminiAPIKey:      os.Getenv("GEMINI_API_KEY"),
+		GeminiModel:       parseString(os.Getenv("GEMINI_MODEL")),
 
 		AnthropicAuthToken: os.Getenv("ANTHROPIC_AUTH_TOKEN"),
 		AnthropicBaseURL:   os.Getenv("ANTHROPIC_BASE_URL"),

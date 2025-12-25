@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"strings"
+	"time"
 
 	"claude_bot/internal/config"
 	"claude_bot/internal/llm/provider"
@@ -18,8 +19,9 @@ const (
 )
 
 type Client struct {
-	provider provider.Provider
-	config   *config.Config
+	provider  provider.Provider
+	config    *config.Config
+	semaphore chan struct{}
 }
 
 func NewClient(cfg *config.Config) *Client {
@@ -35,8 +37,9 @@ func NewClient(cfg *config.Config) *Client {
 	}
 
 	return &Client{
-		provider: p,
-		config:   cfg,
+		provider:  p,
+		config:    cfg,
+		semaphore: make(chan struct{}, cfg.LLMMaxConcurrency),
 	}
 }
 
@@ -57,15 +60,62 @@ func (c *Client) GenerateSummary(ctx context.Context, messages []model.Message, 
 
 // GenerateText calls the configured LLM provider to generate text content
 func (c *Client) GenerateText(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, currentImages []model.Image, temperature float64) string {
-	content, err := c.provider.GenerateContent(ctx, messages, systemPrompt, maxTokens, currentImages, temperature)
+	// Semaphore acquisition to limit concurrency
+	select {
+	case c.semaphore <- struct{}{}:
+		defer func() { <-c.semaphore }()
+	case <-ctx.Done():
+		log.Printf("LLM生成キャンセル (待機中): %v", ctx.Err())
+		return ""
+	}
+
+	content, err := c.executeWithRetry(ctx, func() (string, error) {
+		return c.provider.GenerateContent(ctx, messages, systemPrompt, maxTokens, currentImages, temperature)
+	})
+
 	if err != nil {
-		log.Printf("LLM生成エラー: %v", err)
+		log.Printf("LLM生成エラー (最終): %v", err)
 		if errorNotifier != nil {
 			go errorNotifier("LLM生成エラー", err.Error())
 		}
 		return ""
 	}
 	return content
+}
+
+// executeWithRetry executes the given operation with exponential backoff retry logic
+func (c *Client) executeWithRetry(ctx context.Context, operation func() (string, error)) (string, error) {
+	var content string
+	var err error
+	maxRetries := c.config.LLMMaxRetries
+	baseDelay := 1 * time.Second
+
+	for i := 0; i <= maxRetries; i++ {
+		content, err = operation()
+		if err == nil {
+			return content, nil
+		}
+
+		// Check if error is retryable
+		isRetryable := c.provider.IsRetryable(err)
+
+		if !isRetryable {
+			return "", err
+		}
+
+		if i < maxRetries {
+			delay := baseDelay * (1 << i)
+			log.Printf("LLM生成エラー (429/5xx) - リトライ %d/%d 待機: %v. エラー: %v", i+1, maxRetries, delay, err)
+
+			select {
+			case <-time.After(delay):
+				continue
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+		}
+	}
+	return "", err
 }
 
 func ExtractJSON(s string) string {

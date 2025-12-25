@@ -5,12 +5,15 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
+	"net/http"
+	"strings"
 
 	"claude_bot/internal/config"
 	"claude_bot/internal/llm/provider"
 	"claude_bot/internal/model"
 
 	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
 )
 
@@ -117,15 +120,22 @@ func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, 
 	return extractResponseText(resp), nil
 }
 
+func (c *Client) IsRetryable(err error) bool {
+	if gerr, ok := err.(*googleapi.Error); ok {
+		return gerr.Code == http.StatusTooManyRequests || gerr.Code >= http.StatusInternalServerError
+	}
+	return false
+}
+
 func extractResponseText(resp *genai.GenerateContentResponse) string {
 	if len(resp.Candidates) > 0 {
-		var result string
+		var result strings.Builder
 		for _, part := range resp.Candidates[0].Content.Parts {
 			if txt, ok := part.(genai.Text); ok {
-				result += string(txt)
+				result.WriteString(string(txt))
 			}
 		}
-		return result
+		return result.String()
 	}
 	return ""
 }
