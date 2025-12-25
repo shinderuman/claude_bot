@@ -3,7 +3,7 @@
 data/.env*
 data/sessions*.json
 data/facts.json
-data/facts.json.lock
+data/facts.json.*
 data/url_blacklist.txt
 data/cluster_registry.json
 data/bot_profile_*.txt

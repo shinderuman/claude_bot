@@ -34,14 +34,35 @@ sync_data_dir() {
         ssh -i "${SFTP_KEY_FILE}" "${SFTP_USER}@${REMOTE_HOST}" "mkdir -p ${REMOTE_DIR}/${DATA_DIR}"
 
         # リモート → ローカル（リモートの方が新しい場合のみ）
-        rsync -avuz --quiet --exclude='*.example' -e "ssh -i ${SFTP_KEY_FILE}" "${remote_dir}/" "${DATA_DIR}/" 2>/dev/null || true
+        rsync -avuz --quiet --exclude='*.example' --exclude='facts.json.[0-9]*' -e "ssh -i ${SFTP_KEY_FILE}" "${remote_dir}/" "${DATA_DIR}/" 2>/dev/null || true
 
         # ローカル → リモート（ローカルの方が新しい場合のみ）
-        rsync -avuz --quiet --exclude='*.example' -e "ssh -i ${SFTP_KEY_FILE}" "${DATA_DIR}/" "${remote_dir}/" 2>/dev/null || true
+        rsync -avuz --quiet --exclude='*.example' --exclude='facts.json.[0-9]*' -e "ssh -i ${SFTP_KEY_FILE}" "${DATA_DIR}/" "${remote_dir}/" 2>/dev/null || true
 
         echo "  ✓ ${DATA_DIR}/同期完了"
     else
         echo "  ⚠ ${DATA_DIR}/ディレクトリが見つかりません"
+    fi
+}
+
+# facts.json のバックアップとローテーション
+backup_remote_facts() {
+    echo "リモートの facts.json をバックアップ中..."
+    
+    # ローテーション: 4->5, 3->4, 2->3, 1->2
+    # 上書きを避けるため逆順に処理
+    for i in {4..1}; do
+        if [ -f "${DATA_DIR}/facts.json.$i" ]; then
+            mv "${DATA_DIR}/facts.json.$i" "${DATA_DIR}/facts.json.$((i+1))"
+        fi
+    done
+    
+    # リモートの facts.json を facts.json.1 としてダウンロード
+    # 初回などファイルがない場合のエラーは許容して続行
+    if scp -i "${SFTP_KEY_FILE}" "${SFTP_USER}@${REMOTE_HOST}:${REMOTE_DIR}/${DATA_DIR}/facts.json" "${DATA_DIR}/facts.json.1" 2>/dev/null; then
+        echo "  ✓ バックアップ完了: ${DATA_DIR}/facts.json.1"
+    else
+        echo "  ⚠ リモートの facts.json の取得に失敗しました (初回デプロイ時は無視してください)"
     fi
 }
 
@@ -295,6 +316,9 @@ main() {
     # 共通前処理: リモートディレクトリ作成
     echo "リモートディレクトリを準備中..."
     ssh "${REMOTE_HOST}" "mkdir -p ${REMOTE_DIR}"
+
+    # facts.json のバックアップ実行
+    backup_remote_facts
 
     # ========================================
     # フェーズ1: ビルド（プログラムデプロイ時のみ）
