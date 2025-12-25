@@ -23,26 +23,15 @@ type FactStore struct {
 }
 
 func InitializeFactStore(cfg *config.Config, slackClient *slack.Client) *FactStore {
-	var storage FactStorage
-	var err error
 
-	if cfg.RedisURL != "" {
-		storage, err = NewRedisFactStore(cfg.RedisURL, cfg.RedisFactsKey)
-		if err != nil {
-			log.Printf("Redis接続エラー: %v. メモリ保存にフォールバックします。", err)
-			storage = NewMemoryFactStore()
-		} else {
-			log.Printf("Redis FactStore initialized (URL: %s, KeyPrefix: %s)", cfg.RedisURL, cfg.RedisFactsKey)
-		}
-	} else {
-		log.Println("RedisURL未設定。メモリ保存を使用します。")
-		storage = NewMemoryFactStore()
+	storage, err := NewRedisFactStore(cfg.RedisURL, cfg.RedisFactsKey)
+	if err != nil {
+		log.Fatalf("Redis初期化エラー: %v", err)
 	}
 
-	filePath := "facts.json"
-	if cfg.FactStoreFileName != "" {
-		filePath = cfg.FactStoreFileName
-	}
+	log.Printf("Redis FactStore initialized (URL: %s, KeyPrefix: %s)", cfg.RedisURL, cfg.RedisFactsKey)
+
+	filePath := cfg.FactStoreFileName
 
 	finalPath := filePath
 	if !filepath.IsAbs(finalPath) {

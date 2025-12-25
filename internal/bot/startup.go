@@ -29,13 +29,6 @@ func (b *Bot) executeStartupTasks(ctx context.Context) {
 	// 1. Lightweight Tasks
 	lightTasks := []func(context.Context){
 		func(ctx context.Context) {
-			if b.factStore != nil {
-				// Redis transition: Reload from disk is no longer needed/supported in the same way.
-				// Data is persistent in Redis.
-				log.Println("FactStore storage is ready.")
-			}
-		},
-		func(ctx context.Context) {
 			if b.factCollector != nil {
 				log.Println("起動時Peer探索を開始します...")
 				b.factCollector.DiscoverAndCollectPeerFacts(ctx)

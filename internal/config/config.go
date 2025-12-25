@@ -191,8 +191,8 @@ func LoadConfig() *Config {
 		FactRetentionDays: parseInt(os.Getenv("FACT_RETENTION_DAYS")),
 		MaxFacts:          parseInt(os.Getenv("MAX_FACTS")),
 
-		RedisURL:      os.Getenv("REDIS_URL"),
-		RedisFactsKey: os.Getenv("REDIS_FACTS_KEY"),
+		RedisURL:      parseString(os.Getenv("REDIS_URL")),
+		RedisFactsKey: parseString(os.Getenv("REDIS_FACTS_KEY")),
 
 		SessionFileName:   parseString(os.Getenv("SESSION_FILE")),
 		FactStoreFileName: parseString(os.Getenv("FACT_STORE_FILE")),
