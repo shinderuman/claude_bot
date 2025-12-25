@@ -125,8 +125,22 @@ func (s *FactStore) mergeFacts(disk, memory []model.Fact, lastSync time.Time) []
 		}
 	}
 
-	// 2. Add all disk facts (Source of Truth)
+	// Build map of memory facts for fast lookup of local deletions
+	memMap := make(map[string]bool)
+	for _, f := range memory {
+		memMap[f.ComputeUniqueKey()] = true
+	}
+
+	// Add all disk facts (Source of Truth), BUT respect local deletions
 	for _, f := range disk {
+		uniqueKey := f.ComputeUniqueKey()
+
+		if !memMap[uniqueKey] {
+			if !f.Timestamp.IsZero() && !lastSync.IsZero() && !f.Timestamp.After(lastSync) {
+				continue
+			}
+		}
+
 		addFact(f)
 	}
 

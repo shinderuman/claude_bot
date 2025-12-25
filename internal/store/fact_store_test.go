@@ -386,3 +386,102 @@ func TestFactStore_SearchFuzzy_ColleagueProfile(t *testing.T) {
 		t.Errorf("Regular fact value search should not happen: got %d results, want 0", len(results3))
 	}
 }
+
+func TestFactStore_OverwriteIssue(t *testing.T) {
+	// 1. Setup temp file
+	tmpFile, err := os.CreateTemp("", "fact_store_test_overwrite_*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Close()
+
+	// 2. Create store
+	store := NewFactStore(tmpFile.Name(), nil)
+
+	// 3. Add initial fact (V1)
+	target := "target_user"
+	key := "system:colleague_profile:target_user"
+	val1 := "Name: Old Name"
+
+	store.AddFact(target, target, "system", "system", key, val1)
+	if err := store.Save(); err != nil {
+		t.Fatalf("First save failed: %v", err)
+	}
+
+	// 4. Update phase: Delete old, Add new (V2)
+	store.RemoveFactsByKey(target, key)
+
+	val2 := "Name: New Name"
+	store.AddFact(target, target, "system", "system", key, val2)
+
+	// 5. Save again
+	if err := store.Save(); err != nil {
+		t.Fatalf("Second save failed: %v", err)
+	}
+
+	// 6. Verify Disk has ONLY V2
+	// Load a fresh store from disk
+	store2 := NewFactStore(tmpFile.Name(), nil)
+
+	var foundValues []string
+	for _, f := range store2.Facts {
+		if f.Key == key {
+			foundValues = append(foundValues, f.Value.(string))
+		}
+	}
+
+	if len(foundValues) != 1 {
+		t.Errorf("Mismatch in count. Content: %v, Expected: [%s]", foundValues, val2)
+	} else if foundValues[0] != val2 {
+		t.Errorf("Expected value %q, got %q", val2, foundValues[0])
+	}
+}
+
+func TestFactStore_PreserveDuplicates(t *testing.T) {
+	// 1. Setup temp file
+	tmpFile, err := os.CreateTemp("", "fact_store_test_preserve_duplicates_*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Close()
+
+	// 2. Create store
+	store := NewFactStore(tmpFile.Name(), nil)
+
+	// 3. Add initial fact (V1)
+	target := "target_user"
+	key := "regular_key"
+	val1 := "Value 1"
+
+	store.AddFact(target, target, "system", "system", key, val1)
+	if err := store.Save(); err != nil {
+		t.Fatalf("First save failed: %v", err)
+	}
+
+	// 4. Add another fact with SAME key but DIFFERENT value (V2)
+	// We DO NOT call RemoveFactsByKey here, so V1 should persist in memory too.
+	val2 := "Value 2"
+	store.AddFact(target, target, "system", "system", key, val2)
+
+	// 5. Save again
+	// Since V1 exists in memory (memMap has it), it should be merged from disk as well.
+	if err := store.Save(); err != nil {
+		t.Fatalf("Second save failed: %v", err)
+	}
+
+	// 6. Verify Disk has BOTH V1 and V2
+	store2 := NewFactStore(tmpFile.Name(), nil)
+
+	var foundValues []string
+	for _, f := range store2.Facts {
+		if f.Key == key {
+			foundValues = append(foundValues, f.Value.(string))
+		}
+	}
+
+	if len(foundValues) != 2 {
+		t.Errorf("Mismatch in count. Content: %v, Expected 2 items", foundValues)
+	}
+}
