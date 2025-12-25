@@ -80,10 +80,17 @@ func (s *FactService) processTargetMaintenance(ctx context.Context, target strin
 
 	if shouldArchive {
 		log.Printf("ターゲット %s: %d件を担当 -> アーカイブを実行します (理由: %s, Instance %d)", target, len(archiveCandidateFacts), reason, instanceID)
-		if _, err := s.archiveTargetFacts(ctx, target, archiveCandidateFacts); err != nil {
-			log.Printf("ターゲット %s のアーカイブ失敗: %v", target, err)
+		compressedFacts, err := s.compressFacts(ctx, target, archiveCandidateFacts, ArchiveFactThreshold)
+		if err != nil {
+			log.Printf("ターゲット %s の圧縮失敗: %v", target, err)
 			return false, err
 		}
+
+		if err := s.factStore.ReplaceFacts(target, archiveCandidateFacts, compressedFacts); err != nil {
+			log.Printf("ターゲット %s のアーカイブ保存失敗: %v", target, err)
+			return false, err
+		}
+		log.Printf("ターゲット %s のアーカイブ完了: %d件 -> %d件に圧縮 (永続化済み)", target, len(archiveCandidateFacts), len(compressedFacts))
 		return true, nil
 	}
 
@@ -113,7 +120,7 @@ func (s *FactService) shardFacts(facts []model.Fact, instanceID, totalInstances 
 
 // shouldArchiveFacts determines if facts should be archived based on thresholds
 func (s *FactService) shouldArchiveFacts(facts []model.Fact, totalInstances int) (bool, string) {
-	if len(facts) >= ArchiveFactThreshold/max(1, totalInstances) {
+	if len(facts) >= ArchiveFactThreshold {
 		return true, ArchiveReasonThresholdMet
 	}
 
@@ -133,55 +140,39 @@ func (s *FactService) shouldArchiveFacts(facts []model.Fact, totalInstances int)
 	return false, ArchiveReasonInsufficient
 }
 
-func (s *FactService) archiveTargetFacts(ctx context.Context, target string, facts []model.Fact) ([]model.Fact, error) {
-	log.Printf("ターゲット %s の事実をアーカイブ中 (対象: %d件)...", target, len(facts))
+// compressFacts compresses the given facts into a smaller set using the archive generator.
+// It repeats the compression until the number of facts is below the threshold or no further reduction is possible.
+// This function does NOT persist changes to the store.
+func (s *FactService) compressFacts(ctx context.Context, target string, facts []model.Fact, threshold int) ([]model.Fact, error) {
+	log.Printf("ターゲット %s のファクト圧縮開始 (対象: %d件, 閾値: %d)...", target, len(facts), threshold)
 
-	allArchives, err := s.generateArchiveFacts(ctx, target, facts)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(allArchives) == 0 {
-		return nil, fmt.Errorf("有効なアーカイブが生成されませんでした")
-	}
-
-	// 再帰的圧縮: アーカイブ数が多い場合はさらに圧縮
-	if len(allArchives) >= ArchiveFactThreshold && len(allArchives) < len(facts) {
-		log.Printf("再帰的圧縮: 生成されたアーカイブ数(%d)が多いため、再圧縮を実行します", len(allArchives))
-
-		recursiveArchives, err := s.archiveTargetFactsRecursion(ctx, target, allArchives)
-		if err == nil {
-			allArchives = recursiveArchives
-		} else {
-			log.Printf("再帰的圧縮エラー（無視して現在の結果を使用）: %v", err)
+	currentFacts := facts
+	for {
+		// Stop if below threshold
+		if len(currentFacts) < threshold {
+			break
 		}
+
+		compressed, err := s.archiveGenerator(ctx, target, currentFacts)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(compressed) == 0 {
+			return nil, fmt.Errorf("有効な圧縮結果が生成されませんでした")
+		}
+
+		// Stop if compression didn't effectively reduce size (to prevent infinite loops or useless work)
+		if len(compressed) >= len(currentFacts) {
+			log.Printf("これ以上圧縮できませんでした (現在: %d件)", len(compressed))
+			break
+		}
+
+		log.Printf("圧縮成功: %d件 -> %d件", len(currentFacts), len(compressed))
+		currentFacts = compressed
 	}
 
-	// 安全装置: データ損失防止
-	if len(facts) > 0 && len(allArchives) == 0 {
-		return nil, fmt.Errorf("アーカイブ生成結果が0件のため保存を中止しました")
-	}
-
-	if err := s.factStore.ReplaceFacts(target, facts, allArchives); err != nil {
-		return nil, fmt.Errorf("アーカイブ保存エラー(ReplaceFacts): %v", err)
-	}
-	log.Printf("ターゲット %s のアーカイブ完了(担当分): %d件 -> %d件に圧縮 (永続化済み)", target, len(facts), len(allArchives))
-
-	return allArchives, nil
-}
-
-func (s *FactService) archiveTargetFactsRecursion(ctx context.Context, target string, facts []model.Fact) ([]model.Fact, error) {
-	allArchives, err := s.generateArchiveFacts(ctx, target, facts)
-	if err != nil {
-		return nil, err
-	}
-
-	// Recursive step (Deep recursion)
-	if len(allArchives) >= ArchiveFactThreshold && len(allArchives) < len(facts) {
-		return s.archiveTargetFactsRecursion(ctx, target, allArchives)
-	}
-
-	return allArchives, nil
+	return currentFacts, nil
 }
 
 // generateArchiveFacts handles the common logic of batching facts, calling LLM, and parsing responses
@@ -352,12 +343,17 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 	if len(targetFacts) >= ArchiveBotFactThreshold {
 		log.Printf("自己圧縮開始: 対象 %d 件 (閾値: %d)", len(targetFacts), ArchiveBotFactThreshold)
 
-		// 既存の archiveTargetFacts を再利用
-		compressed, err := s.archiveTargetFacts(ctx, s.config.BotUsername, targetFacts)
+		// 既存の archiveTargetFacts を再利用 -> compressFacts に変更
+		compressed, err := s.compressFacts(ctx, s.config.BotUsername, targetFacts, ArchiveBotFactThreshold)
 		if err != nil {
 			log.Printf("自己圧縮プロセスでエラー発生（無視して続行）: %v", err)
 		} else {
 			log.Printf("自己圧縮完了: %d 件 -> %d 件に圧縮 (維持: %d 件)", len(targetFacts), len(compressed), len(keepFacts))
+
+			// 保存処理 (ReplaceFacts)
+			if err := s.factStore.ReplaceFacts(s.config.BotUsername, targetFacts, compressed); err != nil {
+				return fmt.Errorf("自己圧縮結果の保存に失敗しました: %w", err)
+			}
 
 			// ファクトリストを更新 (維持分 + 圧縮分)
 			facts = append(keepFacts, compressed...)

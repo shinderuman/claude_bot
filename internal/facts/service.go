@@ -1,6 +1,7 @@
 package facts
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strings"
@@ -19,7 +20,7 @@ const (
 
 	// Archive
 	ArchiveFactThreshold    = 20
-	ArchiveBotFactThreshold = 100
+	ArchiveBotFactThreshold = 80
 	ArchiveMinFactCount     = 2
 	ArchiveAgeDays          = 30
 	FactArchiveBatchSize    = 200
@@ -74,21 +75,24 @@ var (
 )
 
 type FactService struct {
-	config         *config.Config
-	factStore      *store.FactStore
-	llmClient      *llm.Client
-	mastodonClient *mastodon.Client
-	slackClient    *slack.Client
+	config           *config.Config
+	factStore        *store.FactStore
+	llmClient        *llm.Client
+	mastodonClient   *mastodon.Client
+	slackClient      *slack.Client
+	archiveGenerator func(ctx context.Context, target string, facts []model.Fact) ([]model.Fact, error)
 }
 
 func NewFactService(cfg *config.Config, store *store.FactStore, llm *llm.Client, mastodon *mastodon.Client, slack *slack.Client) *FactService {
-	return &FactService{
+	s := &FactService{
 		config:         cfg,
 		factStore:      store,
 		llmClient:      llm,
 		mastodonClient: mastodon,
 		slackClient:    slack,
 	}
+	s.archiveGenerator = s.generateArchiveFacts
+	return s
 }
 
 // LogFactSaved outputs a standardized log message for saved facts

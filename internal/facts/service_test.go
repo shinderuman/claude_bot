@@ -1,13 +1,16 @@
 package facts
 
 import (
+	"context"
 	"fmt"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"claude_bot/internal/config"
 	"claude_bot/internal/mastodon"
 	"claude_bot/internal/model"
+	"claude_bot/internal/store"
 
 	gomastodon "github.com/mattn/go-mastodon"
 )
@@ -370,11 +373,11 @@ func TestShouldArchiveFacts(t *testing.T) {
 			wantReason:     ArchiveReasonThresholdMet,
 		},
 		{
-			name:           "Threshold Met (Multiple Instances)",
-			facts:          makeFacts(5, now), // 20 / 4 = 5 -> 5 >= 5
+			name:           "Threshold NOT Met (Multiple Instances - No Scaling)",
+			facts:          makeFacts(5, now), // 5 < 20 (No longer divided by instances)
 			totalInstances: 4,
-			want:           true,
-			wantReason:     ArchiveReasonThresholdMet,
+			want:           false,
+			wantReason:     ArchiveReasonInsufficient,
 		},
 		{
 			name: "Old Data Met",
@@ -420,11 +423,85 @@ func TestShouldArchiveFacts(t *testing.T) {
 // Helper to create facts
 func makeFacts(count int, ts time.Time) []model.Fact {
 	var facts []model.Fact
-	for i := 0; i < count; i++ {
+	for i := range count {
 		facts = append(facts, model.Fact{
 			Value:     fmt.Sprintf("val%d", i),
 			Timestamp: ts,
 		})
 	}
 	return facts
+}
+
+func TestCompressFacts_Pure(t *testing.T) {
+	// 1. Setup temporary file for persistence testing
+	tmpDir := t.TempDir()
+	factsFile := filepath.Join(tmpDir, "facts.json")
+
+	// 2. Initialize real Store (to test actual persistence logic)
+	// Passing nil for Slack client as ReplaceFacts shouldn't use it
+	testStore := store.NewFactStore(factsFile, nil)
+
+	// 3. Setup Service with mocked generator
+	service, _ := getTestService()
+	service.factStore = testStore
+
+	// Mock the generator to return a specific compressed fact
+	service.archiveGenerator = func(ctx context.Context, tgt string, f []model.Fact) ([]model.Fact, error) {
+		return []model.Fact{
+			{
+				Target:    tgt,
+				Key:       "profile_summary",
+				Value:     "compressed_summary",
+				Timestamp: time.Now(),
+			},
+		}, nil
+	}
+
+	// 4. Add initial facts to store
+	target := "persistence_test_user"
+	initialFacts := []model.Fact{
+		{Target: target, Key: "k1", Value: "v1"},
+		{Target: target, Key: "k2", Value: "v2"},
+		{Target: target, Key: "k3", Value: "v3"},
+	}
+	for _, f := range initialFacts {
+		testStore.AddFactWithSource(f)
+	}
+	if err := testStore.SaveOverwrite(); err != nil {
+		t.Fatalf("Failed to save initial facts: %v", err)
+	}
+
+	// 5. Retrieve facts to pass to compressFacts
+	factsToArchive := testStore.GetFactsByTarget(target)
+	if len(factsToArchive) != 3 {
+		t.Fatalf("Setup failed: expected 3 facts, got %d", len(factsToArchive))
+	}
+
+	// 6. Execute compressFacts
+	// This function should be PURE and NOT persist changes
+	// Threshold set to 2 so execution happens (3 > 2)
+	compressed, err := service.compressFacts(context.Background(), target, factsToArchive, 2)
+	if err != nil {
+		t.Fatalf("compressFacts failed: %v", err)
+	}
+
+	// Verify compressed result
+	if len(compressed) != 1 {
+		t.Errorf("Compression result mismatch: expected 1 fact, got %d", len(compressed))
+	} else if compressed[0].Value != "compressed_summary" {
+		t.Errorf("Compression value mismatch: got %v", compressed[0].Value)
+	}
+
+	// 7. Verify In-Memory State (Should be Unchanged)
+	currentFacts := testStore.GetFactsByTarget(target)
+	if len(currentFacts) != 3 {
+		t.Errorf("Memory state changed! Expected 3 facts, got %d. compressFacts should be pure.", len(currentFacts))
+	}
+
+	// 8. Verify Disk Persistence (Should be Unchanged)
+	diskStore := store.NewFactStore(factsFile, nil)
+	diskFacts := diskStore.GetFactsByTarget(target)
+	if len(diskFacts) != 3 {
+		t.Errorf("Disk state changed! Expected 3 facts, got %d. compressFacts should be pure.", len(diskFacts))
+	}
 }
