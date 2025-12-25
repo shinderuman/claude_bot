@@ -364,14 +364,14 @@ func TestShouldArchiveFacts(t *testing.T) {
 	}{
 		{
 			name:           "Threshold Met (Single Instance)",
-			facts:          makeFacts(10, now), // 10 facts
+			facts:          makeFacts(20, now), // 20 facts
 			totalInstances: 1,
 			want:           true,
 			wantReason:     ArchiveReasonThresholdMet,
 		},
 		{
 			name:           "Threshold Met (Multiple Instances)",
-			facts:          makeFacts(3, now), // 10 / 4 = 2.5 -> 3 >= 2
+			facts:          makeFacts(5, now), // 20 / 4 = 5 -> 5 >= 5
 			totalInstances: 4,
 			want:           true,
 			wantReason:     ArchiveReasonThresholdMet,
@@ -388,7 +388,7 @@ func TestShouldArchiveFacts(t *testing.T) {
 		},
 		{
 			name:           "Insufficient Count (Threshold)",
-			facts:          makeFacts(9, now),
+			facts:          makeFacts(19, now),
 			totalInstances: 1,
 			want:           false,
 			wantReason:     ArchiveReasonInsufficient,

@@ -52,8 +52,9 @@ func (s *FactService) processTargetMaintenance(ctx context.Context, target strin
 		log.Printf("自己プロファイル更新: %s (全 %d 件)", target, len(allFacts))
 		if err := s.GenerateAndSaveBotProfile(ctx, allFacts); err != nil {
 			log.Printf("自己プロファイル生成エラー: %v", err)
-			// プロファイル生成失敗はメンテナンス全体の失敗とはしない
+			return false, err
 		}
+		return true, nil
 	}
 
 	myFacts := s.shardFacts(allFacts, instanceID, totalInstances)
@@ -79,7 +80,7 @@ func (s *FactService) processTargetMaintenance(ctx context.Context, target strin
 
 	if shouldArchive {
 		log.Printf("ターゲット %s: %d件を担当 -> アーカイブを実行します (理由: %s, Instance %d)", target, len(archiveCandidateFacts), reason, instanceID)
-		if err := s.archiveTargetFacts(ctx, target, archiveCandidateFacts); err != nil {
+		if _, err := s.archiveTargetFacts(ctx, target, archiveCandidateFacts); err != nil {
 			log.Printf("ターゲット %s のアーカイブ失敗: %v", target, err)
 			return false, err
 		}
@@ -132,20 +133,20 @@ func (s *FactService) shouldArchiveFacts(facts []model.Fact, totalInstances int)
 	return false, ArchiveReasonInsufficient
 }
 
-func (s *FactService) archiveTargetFacts(ctx context.Context, target string, facts []model.Fact) error {
+func (s *FactService) archiveTargetFacts(ctx context.Context, target string, facts []model.Fact) ([]model.Fact, error) {
 	log.Printf("ターゲット %s の事実をアーカイブ中 (対象: %d件)...", target, len(facts))
 
 	allArchives, err := s.generateArchiveFacts(ctx, target, facts)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if len(allArchives) == 0 {
-		return fmt.Errorf("有効なアーカイブが生成されませんでした")
+		return nil, fmt.Errorf("有効なアーカイブが生成されませんでした")
 	}
 
 	// 再帰的圧縮: アーカイブ数が多い場合はさらに圧縮
-	if len(allArchives) >= ArchiveFactThreshold*2 && len(allArchives) < len(facts) {
+	if len(allArchives) >= ArchiveFactThreshold && len(allArchives) < len(facts) {
 		log.Printf("再帰的圧縮: 生成されたアーカイブ数(%d)が多いため、再圧縮を実行します", len(allArchives))
 
 		recursiveArchives, err := s.archiveTargetFactsRecursion(ctx, target, allArchives)
@@ -158,15 +159,15 @@ func (s *FactService) archiveTargetFacts(ctx context.Context, target string, fac
 
 	// 安全装置: データ損失防止
 	if len(facts) > 0 && len(allArchives) == 0 {
-		return fmt.Errorf("アーカイブ生成結果が0件のため保存を中止しました")
+		return nil, fmt.Errorf("アーカイブ生成結果が0件のため保存を中止しました")
 	}
 
 	if err := s.factStore.ReplaceFacts(target, facts, allArchives); err != nil {
-		return fmt.Errorf("アーカイブ保存エラー(ReplaceFacts): %v", err)
+		return nil, fmt.Errorf("アーカイブ保存エラー(ReplaceFacts): %v", err)
 	}
 	log.Printf("ターゲット %s のアーカイブ完了(担当分): %d件 -> %d件に圧縮 (永続化済み)", target, len(facts), len(allArchives))
 
-	return nil
+	return allArchives, nil
 }
 
 func (s *FactService) archiveTargetFactsRecursion(ctx context.Context, target string, facts []model.Fact) ([]model.Fact, error) {
@@ -176,7 +177,7 @@ func (s *FactService) archiveTargetFactsRecursion(ctx context.Context, target st
 	}
 
 	// Recursive step (Deep recursion)
-	if len(allArchives) >= ArchiveFactThreshold*2 && len(allArchives) < len(facts) {
+	if len(allArchives) >= ArchiveFactThreshold && len(allArchives) < len(facts) {
 		return s.archiveTargetFactsRecursion(ctx, target, allArchives)
 	}
 
@@ -189,10 +190,7 @@ func (s *FactService) generateArchiveFacts(ctx context.Context, target string, f
 	totalFacts := len(facts)
 
 	for i := 0; i < totalFacts; i += FactArchiveBatchSize {
-		end := i + FactArchiveBatchSize
-		if end > totalFacts {
-			end = totalFacts
-		}
+		end := min(i+FactArchiveBatchSize, totalFacts)
 
 		batch := facts[i:end]
 		log.Printf("バッチ処理中: %d - %d / %d", i+1, end, totalFacts)
@@ -336,6 +334,34 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 		if len(facts) == 0 {
 			log.Printf("浄化の結果、ファクトが0件になりました。プロファイル生成をスキップします。")
 			return nil
+		}
+	}
+
+	// 1. 圧縮対象フィルタリング
+	var targetFacts []model.Fact
+	var keepFacts []model.Fact
+	for _, f := range facts {
+		if strings.HasPrefix(f.Key, "system:") {
+			keepFacts = append(keepFacts, f)
+			continue
+		}
+		targetFacts = append(targetFacts, f)
+	}
+
+	// 2. 閾値チェック & 実行
+	if len(targetFacts) >= ArchiveBotFactThreshold {
+		log.Printf("自己圧縮開始: 対象 %d 件 (閾値: %d)", len(targetFacts), ArchiveBotFactThreshold)
+
+		// 既存の archiveTargetFacts を再利用
+		compressed, err := s.archiveTargetFacts(ctx, s.config.BotUsername, targetFacts)
+		if err != nil {
+			log.Printf("自己圧縮プロセスでエラー発生（無視して続行）: %v", err)
+		} else {
+			log.Printf("自己圧縮完了: %d 件 -> %d 件に圧縮 (維持: %d 件)", len(targetFacts), len(compressed), len(keepFacts))
+
+			// ファクトリストを更新 (維持分 + 圧縮分)
+			facts = append(keepFacts, compressed...)
+			log.Printf("自己圧縮によりファクトが整理されました。プロファイル生成には圧縮後のデータを使用します。")
 		}
 	}
 

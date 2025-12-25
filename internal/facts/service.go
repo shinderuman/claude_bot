@@ -16,6 +16,24 @@ import (
 const (
 	// Validation
 	MinFactValueLength = 2
+
+	// Archive
+	ArchiveFactThreshold    = 20
+	ArchiveBotFactThreshold = 100
+	ArchiveMinFactCount     = 2
+	ArchiveAgeDays          = 30
+	FactArchiveBatchSize    = 200
+
+	// Archive Reasons
+	ArchiveReasonThresholdMet = "割り当て件数が閾値を超えていたため"
+	ArchiveReasonOldData      = "古いデータが含まれており、かつ最低件数を満たしたため"
+	ArchiveReasonInsufficient = "条件を満たさなかったため"
+
+	// Query
+	RecentFactsCount = 5
+
+	// System Author
+	SystemAuthor = "system"
 )
 
 var (
@@ -53,25 +71,6 @@ var (
 		"性格":    "attribute",
 		"特徴":    "attribute",
 	}
-)
-
-const (
-	// Archive
-	ArchiveFactThreshold = 10
-	ArchiveMinFactCount  = 2
-	ArchiveAgeDays       = 30
-	FactArchiveBatchSize = 200
-
-	// Archive Reasons
-	ArchiveReasonThresholdMet = "割り当て件数が閾値を超えていたため"
-	ArchiveReasonOldData      = "古いデータが含まれており、かつ最低件数を満たしたため"
-	ArchiveReasonInsufficient = "条件を満たさなかったため"
-
-	// Query
-	RecentFactsCount = 5
-
-	// System Author
-	SystemAuthor = "system"
 )
 
 type FactService struct {
