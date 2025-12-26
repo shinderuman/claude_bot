@@ -18,8 +18,8 @@ const (
 	MinFactValueLength = 2
 
 	// Archive
-	ArchiveFactThreshold = 10
-	ArchiveMinFactCount  = 2
+	ArchiveFactThreshold = 50
+	ArchiveMinFactCount  = 10
 	ArchiveAgeDays       = 30
 	FactArchiveBatchSize = 200
 

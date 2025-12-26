@@ -73,7 +73,7 @@ func TestShardingDistribution(t *testing.T) {
 
 func TestSmallBatchSkipping(t *testing.T) {
 	totalInstances := 4
-	threshold := 5 // 20 / 4
+	threshold := 50 / 4 // 12
 
 	var facts []model.Fact
 	for i := range 5 {
@@ -364,31 +364,32 @@ func TestShouldArchiveFacts(t *testing.T) {
 	}{
 		{
 			name:           "Threshold Met (Single Instance)",
-			facts:          makeFacts(10, now), // 10 facts
+			facts:          makeFacts(50, now), // 50 facts
 			totalInstances: 1,
 			want:           true,
 			wantReason:     ArchiveReasonThresholdMet,
 		},
 		{
 			name:           "Threshold Met (Multiple Instances)",
-			facts:          makeFacts(3, now), // 10 / 4 = 2.5 -> 3 >= 2
+			facts:          makeFacts(13, now), // 50 / 4 = 12.5 -> 13 >= 12
 			totalInstances: 4,
 			want:           true,
 			wantReason:     ArchiveReasonThresholdMet,
 		},
 		{
 			name: "Old Data Met",
-			facts: []model.Fact{
-				{Value: "old", Timestamp: oldTime},
-				{Value: "new", Timestamp: now},
-			}, // 2 facts, one old
+			facts: func() []model.Fact {
+				f := makeFacts(9, now)
+				f = append(f, model.Fact{Value: "old", Timestamp: oldTime})
+				return f
+			}(), // 10 facts total (9 new, 1 old) >= 10
 			totalInstances: 1,
 			want:           true,
 			wantReason:     ArchiveReasonOldData,
 		},
 		{
 			name:           "Insufficient Count (Threshold)",
-			facts:          makeFacts(9, now),
+			facts:          makeFacts(49, now),
 			totalInstances: 1,
 			want:           false,
 			wantReason:     ArchiveReasonInsufficient,
@@ -397,7 +398,7 @@ func TestShouldArchiveFacts(t *testing.T) {
 			name: "Insufficient Count (Old Data)",
 			facts: []model.Fact{
 				{Value: "old", Timestamp: oldTime},
-			}, // Only 1 fact, need 2
+			}, // Only 1 fact, need 10
 			totalInstances: 1,
 			want:           false,
 			wantReason:     ArchiveReasonInsufficient,

@@ -152,18 +152,6 @@ func (s *FactService) archiveTargetFacts(ctx context.Context, target string, fac
 		return fmt.Errorf("有効なアーカイブが生成されませんでした")
 	}
 
-	// 再帰的圧縮: アーカイブ数が多い場合はさらに圧縮
-	if len(allArchives) >= ArchiveFactThreshold*2 && len(allArchives) < len(facts) {
-		log.Printf("再帰的圧縮: 生成されたアーカイブ数(%d)が多いため、再圧縮を実行します", len(allArchives))
-
-		recursiveArchives, err := s.archiveTargetFactsRecursion(ctx, target, allArchives)
-		if err == nil {
-			allArchives = recursiveArchives
-		} else {
-			log.Printf("再帰的圧縮エラー（無視して現在の結果を使用）: %v", err)
-		}
-	}
-
 	// 安全装置: データ損失防止
 	if len(facts) > 0 && len(allArchives) == 0 {
 		return fmt.Errorf("アーカイブ生成結果が0件のため保存を中止しました")
@@ -175,20 +163,6 @@ func (s *FactService) archiveTargetFacts(ctx context.Context, target string, fac
 	log.Printf("ターゲット %s のアーカイブ完了(担当分): %d件 -> %d件に圧縮 (永続化済み)", target, len(facts), len(allArchives))
 
 	return nil
-}
-
-func (s *FactService) archiveTargetFactsRecursion(ctx context.Context, target string, facts []model.Fact) ([]model.Fact, error) {
-	allArchives, err := s.generateArchiveFacts(ctx, target, facts)
-	if err != nil {
-		return nil, err
-	}
-
-	// Recursive step (Deep recursion)
-	if len(allArchives) >= ArchiveFactThreshold*2 && len(allArchives) < len(facts) {
-		return s.archiveTargetFactsRecursion(ctx, target, allArchives)
-	}
-
-	return allArchives, nil
 }
 
 // generateArchiveFacts handles the common logic of batching facts, calling LLM, and parsing responses
