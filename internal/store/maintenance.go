@@ -54,6 +54,7 @@ func (s *FactStore) PerformMaintenance(retentionDays, maxFacts int) int {
 
 	if deleted > 0 {
 		log.Printf("ファクトメンテナンス完了: %d件削除", deleted)
+		go s.saveAsync()
 	}
 
 	return deleted
@@ -62,7 +63,11 @@ func (s *FactStore) PerformMaintenance(retentionDays, maxFacts int) int {
 // ReplaceFacts atomically replaces specified facts for the given target.
 // It removes facts listed in factsToRemove and adds facts from factsToAdd.
 func (s *FactStore) ReplaceFacts(target string, factsToRemove, factsToAdd []model.Fact) error {
-	return s.storage.Replace(context.Background(), target, factsToRemove, factsToAdd)
+	err := s.storage.Replace(context.Background(), target, factsToRemove, factsToAdd)
+	if err == nil {
+		go s.saveAsync()
+	}
+	return err
 }
 
 // RemoveFacts removes facts matching the condition and persists changes immediately
@@ -101,6 +106,9 @@ func (s *FactStore) RemoveFacts(ctx context.Context, target string, shouldRemove
 	if err != nil {
 		return 0, fmt.Errorf("failed to remove facts: %w", err)
 	}
+
+	// 4. Persist changes
+	go s.saveAsync()
 
 	return len(toRemove), nil
 }
