@@ -119,7 +119,7 @@ func (s *MemoryFactStore) SearchFuzzy(ctx context.Context, targets []string, key
 				results = append(results, fact)
 				break
 			}
-			if strings.HasPrefix(fact.Key, "system:") {
+			if strings.HasPrefix(fact.Key, model.SystemFactKeyPrefix) {
 				valStr := fmt.Sprintf("%v", fact.Value)
 				if strings.Contains(valStr, key) {
 					results = append(results, fact)

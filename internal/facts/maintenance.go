@@ -48,7 +48,15 @@ func (s *FactService) processTargetMaintenance(ctx context.Context, target strin
 		return false, nil
 	}
 
+	// Botターゲット（自分自身）の場合は統合処理を行う
 	if target == s.config.BotUsername {
+		log.Printf("Botターゲット %s のファクト統合・整理を開始します (全 %d 件)", target, len(allFacts))
+		if err := s.ConsolidateBotFacts(ctx, target, allFacts); err != nil {
+			log.Printf("ファクト統合エラー: %v", err)
+		} else {
+			// 統合成功時はリストをリロード
+			allFacts = s.factStore.GetFactsByTarget(target)
+		}
 		log.Printf("自己プロファイル更新: %s (全 %d 件)", target, len(allFacts))
 		if err := s.GenerateAndSaveBotProfile(ctx, allFacts); err != nil {
 			log.Printf("自己プロファイル生成エラー: %v", err)
@@ -65,7 +73,7 @@ func (s *FactService) processTargetMaintenance(ctx context.Context, target strin
 	// システム管理用のファクト（同僚プロファイルなど）はアーカイブ対象外とする
 	var archiveCandidateFacts []model.Fact
 	for _, f := range myFacts {
-		if !strings.HasPrefix(f.Key, "system:") {
+		if !strings.HasPrefix(f.Key, model.SystemFactKeyPrefix) {
 			archiveCandidateFacts = append(archiveCandidateFacts, f)
 		}
 	}
@@ -245,72 +253,74 @@ func (s *FactService) generateArchiveFacts(ctx context.Context, target string, f
 	return allArchives, nil
 }
 
-// SanitizeFacts identifies and removes conflicting facts via LLM
-func (s *FactService) SanitizeFacts(ctx context.Context, facts []model.Fact) ([]model.Fact, int, error) {
+// ConsolidateBotFacts consolidates facts for a bot target using LLM to maintain character richness
+func (s *FactService) ConsolidateBotFacts(ctx context.Context, target string, facts []model.Fact) error {
+	if len(facts) == 0 {
+		return nil
+	}
+
+	// 1. Prepare input list
 	var factList strings.Builder
 	for _, f := range facts {
-		if strings.HasPrefix(f.Key, "system:") {
+		if strings.HasPrefix(f.Key, model.SystemFactKeyPrefix) {
 			continue
 		}
-		fmt.Fprintf(&factList, "- [ID:%s] %s: %v\n", f.ComputeUniqueKey(), f.Key, f.Value)
+		fmt.Fprintf(&factList, "- [ID:%s] %s: %v (source: %s)\n", f.ComputeUniqueKey(), f.Key, f.Value, f.SourceType)
 	}
 
 	if factList.Len() == 0 {
-		return facts, 0, nil
+		return nil
 	}
 
-	prompt := llm.BuildFactSanitizationPrompt(s.config.CharacterPrompt, factList.String())
+	// 2. Generate consolidated facts via LLM
+	prompt := llm.BuildFactConsolidationPrompt(factList.String(), s.config.CharacterPrompt)
 	messages := []model.Message{{Role: "user", Content: prompt}}
 
-	// Using FactExtraction system message as base (it asks for JSON output)
-	response := s.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, s.config.MaxFactTokens, nil, llm.TemperatureSystem)
+	// System Prompt for JSON extraction
+	response := s.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, s.config.MaxFactTokens*2, nil, llm.TemperatureSystem)
 	if response == "" {
-		return facts, 0, nil
+		return fmt.Errorf("ConsolidateBotFacts: LLM response empty")
 	}
 
-	var result struct {
-		ConflictingFactIDs []string `json:"conflicting_fact_ids"`
-	}
+	// 3. Parse JSON
+	var consolidatedFacts []model.Fact
 	jsonStr := llm.ExtractJSON(response)
-	if err := llm.UnmarshalWithRepair(jsonStr, &result, "FactSanitization"); err != nil {
-		log.Printf("SanitizeFacts: JSON parse failed: %v", err)
-		return facts, 0, nil
+	if err := llm.UnmarshalWithRepair(jsonStr, &consolidatedFacts, "FactConsolidation"); err != nil {
+		return fmt.Errorf("ConsolidateBotFacts: JSON parse failed: %v", err)
 	}
 
-	if len(result.ConflictingFactIDs) == 0 {
-		return facts, 0, nil
+	if len(consolidatedFacts) == 0 {
+		return fmt.Errorf("ConsolidateBotFacts: Result is empty")
 	}
 
-	// Create a set of IDs to remove
-	toRemove := make(map[string]bool)
-	for _, id := range result.ConflictingFactIDs {
-		toRemove[id] = true
-	}
-
-	// Execute removal in store
-	// All profile facts should have the same target (the bot)
-	target := facts[0].Target
-	deleted, err := s.factStore.RemoveFacts(ctx, target, func(f model.Fact) bool {
-		return toRemove[f.ComputeUniqueKey()]
-	})
-
-	if err != nil {
-		return facts, 0, err
-	}
-
-	if deleted > 0 {
-		log.Printf("SanitizeFacts: %d 件の矛盾するファクトを削除しました (Target: %s)", deleted, target)
-		// Filter returned facts for next step
-		var cleanFacts []model.Fact
-		for _, f := range facts {
-			if !toRemove[f.ComputeUniqueKey()] {
-				cleanFacts = append(cleanFacts, f)
-			}
+	// 4. Post-process and Save
+	for i := range consolidatedFacts {
+		consolidatedFacts[i].Target = target
+		if consolidatedFacts[i].TargetUserName == "" {
+			consolidatedFacts[i].TargetUserName = facts[0].TargetUserName
 		}
-		return cleanFacts, deleted, nil
+		if consolidatedFacts[i].Author == "" {
+			consolidatedFacts[i].Author = model.SourceTypeSystem
+		}
+		consolidatedFacts[i].Timestamp = time.Now()
+		consolidatedFacts[i].SourceType = model.SourceTypeArchive
 	}
 
-	return facts, 0, nil
+	// system:ファクトを除外して更新対象リストを作成
+	var factsToReplace []model.Fact
+	for _, f := range facts {
+		if !strings.HasPrefix(f.Key, model.SystemFactKeyPrefix) {
+			factsToReplace = append(factsToReplace, f)
+		}
+	}
+
+	// Replace existing facts (only non-system ones) with consolidated ones
+	if err := s.factStore.ReplaceFacts(target, factsToReplace, consolidatedFacts); err != nil {
+		return fmt.Errorf("ConsolidateBotFacts: ReplaceFacts failed: %v", err)
+	}
+
+	log.Printf("ConsolidateBotFacts: %s のファクトを統合しました (%d -> %d 件)", target, len(facts), len(consolidatedFacts))
+	return nil
 }
 
 // GenerateAndSaveBotProfile generates a profile summary from facts and saves it to a file
@@ -323,25 +333,12 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 		return nil
 	}
 
-	// 自己浄化プロセス: キャラクター設定と矛盾するファクトを除外
-	cleanFacts, deleted, err := s.SanitizeFacts(ctx, facts)
-	if err != nil {
-		log.Printf("自己浄化プロセスでエラー発生（無視して続行）: %v", err)
-	} else if deleted > 0 {
-		log.Printf("自己浄化により %d 件のファクトが削除されました。プロファイル生成には浄化後のデータを使用します。", deleted)
-		facts = cleanFacts // 浄化済みのリストを使用
-		if len(facts) == 0 {
-			log.Printf("浄化の結果、ファクトが0件になりました。プロファイル生成をスキップします。")
-			return nil
-		}
-	}
-
 	// ファクトリストの構築（同僚情報は除外）
 	var factsBuilder strings.Builder
 
 	for _, f := range facts {
 		// system:colleague_profile で始まるキーは同僚情報（知識）なので、自己プロファイル生成の入力からは除外する
-		if strings.HasPrefix(f.Key, "system:colleague_profile") {
+		if strings.HasPrefix(f.Key, model.SystemColleagueProfileKeyPrefix) {
 			continue
 		}
 

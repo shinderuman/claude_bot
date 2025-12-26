@@ -1,12 +1,12 @@
 package facts
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strings"
 
 	"claude_bot/internal/config"
-	"claude_bot/internal/llm"
 	"claude_bot/internal/mastodon"
 	"claude_bot/internal/model"
 	"claude_bot/internal/slack"
@@ -69,20 +69,22 @@ const (
 
 	// Query
 	RecentFactsCount = 5
-
-	// System Author
-	SystemAuthor = "system"
 )
+
+// LLMClient defines the interface for LLM operations
+type LLMClient interface {
+	GenerateText(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, currentImages []model.Image, temperature float64) string
+}
 
 type FactService struct {
 	config         *config.Config
 	factStore      *store.FactStore
-	llmClient      *llm.Client
+	llmClient      LLMClient
 	mastodonClient *mastodon.Client
 	slackClient    *slack.Client
 }
 
-func NewFactService(cfg *config.Config, store *store.FactStore, llm *llm.Client, mastodon *mastodon.Client, slack *slack.Client) *FactService {
+func NewFactService(cfg *config.Config, store *store.FactStore, llm LLMClient, mastodon *mastodon.Client, slack *slack.Client) *FactService {
 	return &FactService{
 		config:         cfg,
 		factStore:      store,

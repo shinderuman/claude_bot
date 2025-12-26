@@ -237,9 +237,9 @@ func BuildCardPrompt(card *mastodon.Card) string {
 	return sb.String()
 }
 
-// BuildFactSanitizationPrompt creates a prompt for detecting conflicting facts
-func BuildFactSanitizationPrompt(characterPrompt, factsList string) string {
-	return fmt.Sprintf(Templates.FactSanitization, characterPrompt, factsList)
+// BuildFactConsolidationPrompt creates a prompt for consolidating facts with character richness
+func BuildFactConsolidationPrompt(factsList, characterConfig string) string {
+	return fmt.Sprintf(Templates.FactConsolidation, characterConfig, factsList)
 }
 
 // -----------------------------------------------------------------------------

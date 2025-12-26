@@ -196,7 +196,7 @@ func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summar
 
 // SaveColleagueFact saves or updates a colleague's profile fact
 func (s *FactService) SaveColleagueFact(ctx context.Context, targetUserName, displayName, note string) error {
-	key := fmt.Sprintf("system:colleague_profile:%s", targetUserName)
+	key := fmt.Sprintf("%s%s", model.SystemColleagueProfileKeyPrefix, targetUserName)
 	value := fmt.Sprintf("Name: %s\nBio: %s", displayName, note)
 
 	// Bot自身をターゲットとして保存
@@ -209,8 +209,8 @@ func (s *FactService) SaveColleagueFact(ctx context.Context, targetUserName, dis
 	fact := model.Fact{
 		Target:             myUsername,
 		TargetUserName:     myUsername,
-		Author:             SystemAuthor, // システムが自動収集
-		AuthorUserName:     SystemAuthor,
+		Author:             model.SourceTypeSystem, // システムが自動収集
+		AuthorUserName:     model.SourceTypeSystem,
 		Key:                key,
 		Value:              value,
 		Timestamp:          time.Now(),

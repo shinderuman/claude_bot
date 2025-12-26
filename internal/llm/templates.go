@@ -1,5 +1,7 @@
 package llm
 
+import "claude_bot/internal/model"
+
 // Templates holds long prompt template strings
 var Templates = struct {
 	FactExtraction           string
@@ -33,7 +35,7 @@ var Templates = struct {
 		Instruction string
 	}
 	BotProfileGeneration string
-	FactSanitization     string
+	FactConsolidation    string
 }{
 	FactExtraction: `以下のユーザーの発言から、永続的に保存すべき「事実」を抽出してください。
 
@@ -212,7 +214,7 @@ Webページの内容:
 
 2. キーの推測:
 - 「好きな食べ物は？」→ "好きな食べ物", "食事", "好物" など
-- 「同僚は誰？」「〇〇さんは？」→ "colleague_profile", "system:colleague_profile", その人の名前
+- 「同僚は誰？」「〇〇さんは？」→ "colleague_profile", "` + model.SystemColleagueProfileKeyPrefix + `", その人の名前
 - 文脈から広めに推測してください
 
 ` + Messages.Instruction.CompactJSONObject + `
@@ -390,22 +392,29 @@ JSONは1行で出力すること(改行・インデントなし)`,
 
 出力形式:
 テキストのみを出力してください。挨拶や説明は不要です。`,
-	FactSanitization: `以下の「あなたに関する事実リスト」の中で、あなたの「本来のキャラクター設定」と**致命的に矛盾する**（明らかに別人の名前や設定である）項目があれば、そのIDを指摘してください。
+
+	FactConsolidation: `以下の「事実リスト」は、あるキャラクター（AIアシスタント）に関する記憶の断片です。
+これらを整理・統合し、**より質が高く、重複のない「洗練された事実リスト」**として再構築してください。
 
 【キャラクター設定】
 %s
 
-【事実リスト】
+【処理する事実リスト】
 %s
 
-【判定基準】
-1. **名前の不一致**: キャラクター名と異なる名前を名乗っている事実（例: 「私の名前は〇〇」）は矛盾とみなします。
-2. **設定の不一致**: 職業、種族、性格などが根本的に異なる事実は矛盾とみなします。
-3. **些細な違いは無視**: 口調の違いや、設定の解釈の幅に収まるものは矛盾としません。
+【統合の超重要ルール】
+1. **重複の統合**: 同じ内容の事実は1つにまとめてください。
+2. **矛盾の解消**: キャラクター設定と明らかに矛盾する事実（別人の名前、設定など）は**削除**してください。
+3. **「濃さ」の維持（最重要）**:
+   - キャラクター設定に合致する「ユニークな嗜好」「具体的なエピソード」「独特な言い回し」は、**決して要約して薄めないでください**。
+   - 例: 「肉が好き」と「A5ランクのシャトーブリアンしか勝たん」がある場合、「肉が好き」に丸めるのではなく、**「A5ランクのシャトーブリアンをこよなく愛する（肉好き）」**のように詳細を残して統合してください。
+   - 一般的・退屈な表現よりも、キャラクターらしい**具体的で生き生きとした表現**を優先してください。
 
-出力形式:
-{"conflicting_fact_ids": ["fact_id_1", "fact_id_2"]}
+【出力形式】
+` + Messages.Instruction.CompactJSON + `
 
-矛盾する事実がない場合は、"conflicting_fact_ids" に空配列 [] を返してください。
-JSONのみを出力してください。`,
+重要:
+- target, target_username, author, author_username は、元のリストから最も適切なものを継承してください。
+- 統合によって生成された事実の author は "` + model.SourceTypeSystem + `" としても構いません。
+- key は "profile", "preference", "attribute" などの標準的なものを使用するか、内容を表す適切な英語キーを使用してください。`,
 }

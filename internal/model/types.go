@@ -51,6 +51,12 @@ const (
 
 	// UnknownTarget は不明なターゲットを示す
 	UnknownTarget = "unknown"
+
+	// SystemFactKeyPrefix is the prefix for system-managed facts
+	SystemFactKeyPrefix = SourceTypeSystem + ":"
+
+	// SystemColleagueProfileKeyPrefix is the prefix for colleague profile facts
+	SystemColleagueProfileKeyPrefix = SystemFactKeyPrefix + "colleague_profile:"
 )
 
 type Conversation struct {
