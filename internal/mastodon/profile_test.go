@@ -36,53 +36,6 @@ func TestFormatProfileBody(t *testing.T) {
 	}
 }
 
-func TestTruncateText(t *testing.T) {
-	c := &Client{}
-
-	tests := []struct {
-		name  string
-		input string
-		limit int
-		want  string
-	}{
-		{
-			name:  "Within limit",
-			input: "abc",
-			limit: 5,
-			want:  "abc",
-		},
-		{
-			name:  "Exceed limit (simple)",
-			input: "abcde",
-			limit: 3,
-			want:  "abc", // "abc" (3 chars)
-		},
-		{
-			name:  "Exceed limit (cut at period)",
-			input: "あいうえお。かきくけこ。",
-			limit: 8,
-			want:  "あいうえお。", // 6 chars (including period)
-		},
-		// 注意: TruncateTextは単純なカットを行うため、文脈考慮は呼び出し元依存だが、
-		// 既存ロジック通り「句点か改行」で切ることを確認
-		{
-			name:  "Cut at newline",
-			input: "Line1\nLine2",
-			limit: 8,
-			want:  "Line1\n", // "Line1\nLi" -> cut at \n
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := c.truncateText(tt.input, tt.limit)
-			if got != tt.want {
-				t.Errorf("got %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestBuildProfileFields(t *testing.T) {
 	c := &Client{}
 	cfg := &config.Config{

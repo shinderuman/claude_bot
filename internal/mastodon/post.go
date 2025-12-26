@@ -185,15 +185,17 @@ func (c *Client) postReply(ctx context.Context, inReplyToID, content, visibility
 
 // PostStatus posts a new status (not a reply)
 func (c *Client) PostStatus(ctx context.Context, content, visibility string) (*gomastodon.Status, error) {
-	content += BotTag
+	limit := c.config.MaxPostChars - len([]rune(BotTag))
+	truncated := truncateText(content, limit) + BotTag
+
 	toot := &gomastodon.Toot{
-		Status:     content,
+		Status:     truncated,
 		Visibility: visibility,
 	}
 
 	status, err := c.client.PostStatus(ctx, toot)
 	if err != nil {
-		c.handlePostError(err, "Status", content)
+		c.handlePostError(err, "Status", truncated)
 		return nil, err
 	}
 	return status, nil

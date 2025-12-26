@@ -50,29 +50,7 @@ func (c *Client) FormatProfileBody(text string) string {
 // TruncateToSafeProfileBody truncates text to fit within the profile limit allowing for the disclaimer.
 func (c *Client) TruncateToSafeProfileBody(text string) string {
 	limit := MaxMastodonProfileChars - len([]rune(DisclaimerText))
-	return c.truncateText(text, limit)
-}
-
-// truncateText truncates text to the specified limit, trying to break at sentences.
-func (c *Client) truncateText(text string, limit int) string {
-	runes := []rune(text)
-	if len(runes) <= limit {
-		return text
-	}
-
-	truncated := runes[:limit]
-	lastPeriod := -1
-	for i := len(truncated) - 1; i >= 0; i-- {
-		if truncated[i] == '。' || truncated[i] == '\n' {
-			lastPeriod = i
-			break
-		}
-	}
-
-	if lastPeriod != -1 {
-		truncated = truncated[:lastPeriod+1]
-	}
-	return string(truncated)
+	return truncateText(text, limit)
 }
 
 // UpdateProfileWithFields constructs and updates both the profile note and custom fields
