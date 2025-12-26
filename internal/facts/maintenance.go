@@ -197,10 +197,7 @@ func (s *FactService) generateArchiveFacts(ctx context.Context, target string, f
 	totalFacts := len(facts)
 
 	for i := 0; i < totalFacts; i += FactArchiveBatchSize {
-		end := i + FactArchiveBatchSize
-		if end > totalFacts {
-			end = totalFacts
-		}
+		end := min(i+FactArchiveBatchSize, totalFacts)
 
 		batch := facts[i:end]
 		log.Printf("バッチ処理中: %d - %d / %d", i+1, end, totalFacts)

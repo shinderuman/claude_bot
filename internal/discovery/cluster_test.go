@@ -49,7 +49,7 @@ func TestGetKnownBotUsernames(t *testing.T) {
 	}
 
 	// Execution
-	usernames, err := GetKnownBotUsernames()
+	usernames, err := GetKnownBotUsernames(dataDir)
 	if err != nil {
 		t.Fatalf("GetKnownBotUsernames returned error: %v", err)
 	}

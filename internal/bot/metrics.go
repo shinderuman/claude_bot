@@ -65,7 +65,7 @@ func (b *Bot) startMetricsLogger(ctx context.Context) {
 func (b *Bot) collectAndLogMetrics() error {
 	// 1. データ収集と計算
 	allFacts := b.factStore.GetAllFacts()
-	botUsernames, err := discovery.GetKnownBotUsernames()
+	botUsernames, err := discovery.GetKnownBotUsernames(util.GetFilePath(""))
 	if err != nil {
 		log.Printf("Warning: failed to get known bot usernames for metrics: %v", err)
 	}

@@ -215,8 +215,7 @@ func GetMyPosition(username string) (int, int, error) {
 }
 
 // GetKnownBotUsernames scans .env* files in the data directory to find all defined bot usernames.
-func GetKnownBotUsernames() ([]string, error) {
-	dataDir := util.GetFilePath("")
+func GetKnownBotUsernames(dataDir string) ([]string, error) {
 
 	files, err := os.ReadDir(dataDir)
 	if err != nil {
