@@ -69,7 +69,7 @@ func (b *Bot) handleBroadcastCommand(ctx context.Context, status *gomastodon.Sta
 	// 擬似的なメンション通知を作成して処理を委譲
 	// Type: Mention として扱い、通常の応答フローに乗せる
 	notification := &gomastodon.Notification{
-		Type:    "mention",
+		Type:    model.SourceTypeMention,
 		Status:  &statusCopy,
 		Account: status.Account,
 	}

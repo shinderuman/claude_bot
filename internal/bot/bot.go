@@ -34,9 +34,6 @@ const (
 	DateFormatHM       = "15:04"               // HH:MM
 	DateTimeFormat     = "2006-01-02 15:04:05" // YYYY-MM-DD HH:MM:SS
 
-	// Notification Types (Mastodon API)
-	NotificationTypeMention = "mention"
-
 	// Auto Post
 	AutoPostFactCount = 5
 
@@ -178,7 +175,7 @@ func (b *Bot) Run(ctx context.Context) error {
 				if e.Notification.Status != nil {
 					b.lastUserStatusMap[e.Notification.Account.Acct] = string(e.Notification.Status.ID)
 				}
-				if e.Notification.Type == NotificationTypeMention && e.Notification.Status != nil {
+				if e.Notification.Type == model.SourceTypeMention && e.Notification.Status != nil {
 					b.handleNotification(ctx, e.Notification, "")
 				}
 			case *gomastodon.UpdateEvent:

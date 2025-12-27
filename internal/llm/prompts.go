@@ -331,7 +331,7 @@ func BuildFactArchivingPrompt(facts []model.Fact) string {
 	}
 
 	instruction := ""
-	if target == "__general__" {
+	if target == model.GeneralTarget {
 		instruction = Templates.FactArchiving.InstructionGeneral
 	} else {
 		instruction = fmt.Sprintf(Templates.FactArchiving.InstructionUser, targetUserName, target)

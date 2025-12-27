@@ -157,7 +157,7 @@ func calculateFactStats(facts []model.Fact, botUsernames []string) FactStats {
 		// BySource
 		src := f.SourceType
 		if src == "" {
-			src = "unknown"
+			src = model.UnknownTarget
 		}
 		stats.BySource[src]++
 
