@@ -20,7 +20,8 @@ func (b *Bot) startFactMaintenanceLoop(ctx context.Context) {
 		}
 		return 0
 	}
-	b.runInWindowedLoop(ctx, FactMaintenanceInterval, "ファクトメンテナンス", func(ctx context.Context) {
+	interval := time.Duration(b.config.FactMaintenanceIntervalHours) * time.Hour
+	b.runInWindowedLoop(ctx, interval, "ファクトメンテナンス", func(ctx context.Context) {
 		log.Println("ファクトメンテナンスを実行中...")
 		if err := b.factService.PerformMaintenance(ctx); err != nil {
 			log.Printf("ファクトメンテナンスエラー: %v", err)

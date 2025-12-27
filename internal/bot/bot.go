@@ -43,15 +43,11 @@ const (
 	// Daily Summary
 	DailySummaryDaysLimit = 3
 
-	// Maintenance
-	FactMaintenanceInterval = 6 * time.Hour
-
 	// Rollback
 	RollbackCountSmall  = 1
 	RollbackCountMedium = 2
 
 	// Conversation
-
 	BroadcastContinuityThreshold = 10 * time.Minute
 
 	// Startup Delays (Staggered to prevent race/load)

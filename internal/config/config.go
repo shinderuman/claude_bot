@@ -42,6 +42,8 @@ type Config struct {
 	ConversationRetentionHours           int
 	ConversationIdleHours                int
 	ConversationMinKeepCount             int
+	// Fact Maintenance
+	FactMaintenanceIntervalHours int
 
 	// LLM & Post Settings
 	MaxResponseTokens int64
@@ -164,6 +166,7 @@ func LoadConfig() *Config {
 		ConversationRetentionHours:           parseInt(os.Getenv("CONVERSATION_RETENTION_HOURS")),
 		ConversationIdleHours:                parseInt(os.Getenv("CONVERSATION_IDLE_HOURS")),
 		ConversationMinKeepCount:             parseInt(os.Getenv("CONVERSATION_MIN_KEEP_COUNT")),
+		FactMaintenanceIntervalHours:         parseInt(os.Getenv("FACT_MAINTENANCE_INTERVAL_HOURS")),
 
 		MaxResponseTokens: int64(parseInt(os.Getenv("MAX_RESPONSE_TOKENS"))),
 		MaxSummaryTokens:  int64(parseInt(os.Getenv("MAX_SUMMARY_TOKENS"))),
