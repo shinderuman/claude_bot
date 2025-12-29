@@ -7,20 +7,28 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"claude_bot/internal/config"
 	"claude_bot/internal/llm/provider"
 	"claude_bot/internal/model"
+	"claude_bot/internal/slack"
 
 	"github.com/google/generative-ai-go/genai"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
 )
 
+const (
+	MinResponseLength = 5
+	MaxRetries        = 5
+)
+
 type Client struct {
-	client *genai.Client
-	model  *genai.GenerativeModel
-	config *config.Config
+	client      *genai.Client
+	model       *genai.GenerativeModel
+	config      *config.Config
+	slackClient *slack.Client
 }
 
 func NewClient(cfg *config.Config) provider.Provider {
@@ -37,13 +45,44 @@ func NewClient(cfg *config.Config) provider.Provider {
 	model := client.GenerativeModel(modelName)
 
 	return &Client{
-		client: client,
-		model:  model,
-		config: cfg,
+		client:      client,
+		model:       model,
+		config:      cfg,
+		slackClient: slack.NewClient(cfg.SlackBotToken, cfg.SlackChannelID, cfg.SlackErrorChannelID, cfg.BotUsername),
 	}
 }
 
 func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image, temperature float64) (string, error) {
+	c.configureModel(systemPrompt, maxTokens, temperature)
+
+	parts, err := c.buildCurrentMessageParts(messages, images)
+	if err != nil {
+		return "", err
+	}
+
+	for i := 0; i <= MaxRetries; i++ {
+		cs := c.buildChatSession(messages)
+
+		if i > 0 {
+			log.Printf("Gemini リトライ実行 %d/%d", i, MaxRetries)
+		}
+
+		resp, err := cs.SendMessage(ctx, parts...)
+		if err != nil {
+			log.Printf("Gemini API呼び出しエラー: %v", err)
+			return "", err
+		}
+
+		responseText, err := c.validateResponse(ctx, resp)
+		if err == nil {
+			return responseText, nil
+		}
+	}
+
+	return "", fmt.Errorf("Gemini 生成応答が短すぎます (最大リトライ回数超過)")
+}
+
+func (c *Client) configureModel(systemPrompt string, maxTokens int64, temperature float64) {
 	// システムプロンプトの設定
 	if systemPrompt != "" {
 		c.model.SystemInstruction = &genai.Content{
@@ -54,7 +93,6 @@ func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, 
 	}
 
 	// トークン上限の設定
-	// GeminiはMaxOutputTokensで設定
 	if maxTokens > 0 {
 		c.model.SetMaxOutputTokens(int32(maxTokens))
 	}
@@ -66,24 +104,17 @@ func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, 
 			Category:  genai.HarmCategorySexuallyExplicit,
 			Threshold: genai.HarmBlockNone,
 		},
-		// {
-		// 	Category:  genai.HarmCategoryHarassment,
-		// 	Threshold: genai.HarmBlockNone,
-		// },
-		// {
-		// 	Category:  genai.HarmCategoryHateSpeech,
-		// 	Threshold: genai.HarmBlockNone,
-		// },
-		// {
-		// 	Category:  genai.HarmCategoryDangerousContent,
-		// 	Threshold: genai.HarmBlockNone,
-		// },
 	}
+}
 
+func (c *Client) buildChatSession(messages []model.Message) *genai.ChatSession {
 	// チャットセッションの開始
 	cs := c.model.StartChat()
+	cs.History = c.buildHistory(messages)
+	return cs
+}
 
-	// 履歴の変換と追加
+func (c *Client) buildHistory(messages []model.Message) []*genai.Content {
 	// GeminiのHistoryは、最新のメッセージを含まない過去のやり取り
 	var history []*genai.Content
 
@@ -101,12 +132,14 @@ func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, 
 				Parts: []genai.Part{genai.Text(msg.Content)},
 			})
 		}
-		cs.History = history
 	}
+	return history
+}
 
-	// 最新メッセージの送信
+func (c *Client) buildCurrentMessageParts(messages []model.Message, images []model.Image) ([]genai.Part, error) {
+	// 最新メッセージの取得
 	if len(messages) == 0 {
-		return "", fmt.Errorf("メッセージが空です")
+		return nil, fmt.Errorf("メッセージが空です")
 	}
 
 	lastMsg := messages[len(messages)-1]
@@ -128,15 +161,21 @@ func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, 
 			parts = append(parts, genai.ImageData(img.MediaType, data))
 		}
 	}
+	return parts, nil
+}
 
-	// 生成実行
-	resp, err := cs.SendMessage(ctx, parts...)
-	if err != nil {
-		log.Printf("Gemini API呼び出しエラー: %v", err)
-		return "", err
+func (c *Client) validateResponse(ctx context.Context, resp *genai.GenerateContentResponse) (string, error) {
+	responseText := extractResponseText(resp)
+	runeCount := utf8.RuneCountInString(responseText)
+
+	if runeCount > MinResponseLength {
+		return responseText, nil
 	}
 
-	return extractResponseText(resp), nil
+	msg := fmt.Sprintf("⚠️ [生成異常] Geminiが短い応答を返しました (%d文字): %s. リトライします...", runeCount, responseText)
+	c.slackClient.PostMessageAsync(ctx, msg)
+
+	return "", fmt.Errorf("response too short")
 }
 
 func (c *Client) IsRetryable(err error) bool {

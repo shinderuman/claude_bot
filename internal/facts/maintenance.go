@@ -325,17 +325,6 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 		return fmt.Errorf("プロファイル生成結果が空でした")
 	}
 
-	if len([]rune(profileText)) <= 5 {
-		warnMsg := fmt.Sprintf("⚠️ [生成異常] Geminiが短い応答を返しました: %s", profileText)
-		log.Println(warnMsg)
-		if s.slackClient != nil {
-			if err := s.slackClient.PostMessage(ctx, warnMsg); err != nil {
-				log.Printf("Slack警告通知エラー: %v", err)
-			}
-		}
-		return fmt.Errorf("プロファイルが短すぎるため保存を中止しました: %s", profileText)
-	}
-
 	if err := os.WriteFile(s.config.BotProfileFile, []byte(profileText), 0644); err != nil {
 		return fmt.Errorf("プロファイルファイル保存失敗 (%s): %v", s.config.BotProfileFile, err)
 	}
