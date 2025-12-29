@@ -142,3 +142,34 @@ func TestConsolidateBotFacts(t *testing.T) {
 		t.Fatalf("ConsolidateBotFacts failed: %v", err)
 	}
 }
+
+func TestGenerateAndSaveBotProfile_ShortResponse(t *testing.T) {
+	// Setup
+	mockLLM := &MockLLMClient{
+		GenerateTextFunc: func(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, currentImages []model.Image, temperature float64) string {
+			return "OK" // Return short response
+		},
+	}
+
+	cfg := &config.Config{
+		CharacterPrompt: "Test Character",
+		BotProfileFile:  "test_profile.txt",
+	}
+
+	// Use empty store and nil slack client
+	service := NewFactService(cfg, nil, mockLLM, nil, nil)
+
+	// Execute
+	facts := []model.Fact{{Key: "test", Value: "test"}}
+	err := service.GenerateAndSaveBotProfile(context.Background(), facts)
+
+	// Verify
+	if err == nil {
+		t.Fatal("Expected error for short profile response, got nil")
+	}
+
+	expectedErrorPart := "プロファイルが短すぎるため保存を中止しました"
+	if !strings.Contains(err.Error(), expectedErrorPart) {
+		t.Errorf("Expected error containing %q, got %q", expectedErrorPart, err.Error())
+	}
+}

@@ -61,6 +61,25 @@ func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, 
 	// Temperatureの設定
 	c.model.SetTemperature(float32(temperature))
 
+	c.model.SafetySettings = []*genai.SafetySetting{
+		{
+			Category:  genai.HarmCategorySexuallyExplicit,
+			Threshold: genai.HarmBlockNone,
+		},
+		// {
+		// 	Category:  genai.HarmCategoryHarassment,
+		// 	Threshold: genai.HarmBlockNone,
+		// },
+		// {
+		// 	Category:  genai.HarmCategoryHateSpeech,
+		// 	Threshold: genai.HarmBlockNone,
+		// },
+		// {
+		// 	Category:  genai.HarmCategoryDangerousContent,
+		// 	Threshold: genai.HarmBlockNone,
+		// },
+	}
+
 	// チャットセッションの開始
 	cs := c.model.StartChat()
 

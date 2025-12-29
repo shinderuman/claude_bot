@@ -304,11 +304,9 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 		return nil
 	}
 
-	// ファクトリストの構築（同僚情報は除外）
 	var factsBuilder strings.Builder
 
 	for _, f := range facts {
-		// system:colleague_profile で始まるキーは同僚情報（知識）なので、自己プロファイル生成の入力からは除外する
 		if strings.HasPrefix(f.Key, model.SystemColleagueProfileKeyPrefix) {
 			continue
 		}
@@ -325,6 +323,17 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 	profileText := s.llmClient.GenerateText(ctx, messages, s.config.CharacterPrompt, s.config.MaxSummaryTokens, nil, s.config.LLMTemperature)
 	if profileText == "" {
 		return fmt.Errorf("プロファイル生成結果が空でした")
+	}
+
+	if len([]rune(profileText)) <= 5 {
+		warnMsg := fmt.Sprintf("⚠️ [生成異常] Geminiが短い応答を返しました: %s", profileText)
+		log.Println(warnMsg)
+		if s.slackClient != nil {
+			if err := s.slackClient.PostMessage(ctx, warnMsg); err != nil {
+				log.Printf("Slack警告通知エラー: %v", err)
+			}
+		}
+		return fmt.Errorf("プロファイルが短すぎるため保存を中止しました: %s", profileText)
 	}
 
 	if err := os.WriteFile(s.config.BotProfileFile, []byte(profileText), 0644); err != nil {
