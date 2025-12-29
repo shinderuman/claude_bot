@@ -71,7 +71,7 @@ func extractResponseText(msg *anthropic.Message) string {
 func convertMessages(messages []model.Message, currentImages []model.Image) []anthropic.MessageParam {
 	result := make([]anthropic.MessageParam, len(messages))
 	for i, msg := range messages {
-		if msg.Role == "assistant" {
+		if msg.Role == model.RoleAssistant {
 			result[i] = anthropic.NewAssistantMessage(anthropic.NewTextBlock(msg.Content))
 		} else {
 			// 最後のユーザーメッセージに画像を添付

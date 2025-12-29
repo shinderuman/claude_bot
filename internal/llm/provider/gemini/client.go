@@ -39,9 +39,6 @@ func NewClient(cfg *config.Config) provider.Provider {
 	}
 
 	modelName := cfg.GeminiModel
-	if modelName == "" {
-		modelName = "gemini-1.5-pro"
-	}
 	model := client.GenerativeModel(modelName)
 
 	return &Client{
@@ -122,9 +119,9 @@ func (c *Client) buildHistory(messages []model.Message) []*genai.Content {
 	if len(messages) > 1 {
 		for i := 0; i < len(messages)-1; i++ {
 			msg := messages[i]
-			role := "user"
-			if msg.Role == "assistant" {
-				role = "model"
+			role := model.RoleUser
+			if msg.Role == model.RoleAssistant {
+				role = model.RoleModel
 			}
 
 			history = append(history, &genai.Content{

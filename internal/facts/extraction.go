@@ -18,7 +18,7 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, sourceID, author,
 	}
 
 	prompt := llm.BuildFactExtractionPrompt(authorUserName, author, message)
-	messages := []model.Message{{Role: "user", Content: prompt}}
+	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 
 	response := s.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, s.config.MaxFactTokens, nil, llm.TemperatureSystem)
 	if response == "" {
@@ -83,7 +83,7 @@ func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, url
 	}
 
 	prompt := llm.BuildURLContentFactExtractionPrompt(urlContent)
-	messages := []model.Message{{Role: "user", Content: prompt}}
+	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 
 	response := s.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, s.config.MaxFactTokens, nil, llm.TemperatureSystem)
 	if response == "" {
@@ -138,7 +138,7 @@ func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summar
 	}
 
 	prompt := llm.BuildSummaryFactExtractionPrompt(summary)
-	messages := []model.Message{{Role: "user", Content: prompt}}
+	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 
 	response := s.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, s.config.MaxFactTokens, nil, llm.TemperatureSystem)
 	if response == "" {

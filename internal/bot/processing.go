@@ -51,7 +51,7 @@ func (b *Bot) prepareConversation(ctx context.Context, conversation *model.Conve
 
 	// メッセージを保存
 	userStatusIDs := []string{statusID}
-	store.AddMessage(conversation, "user", userMessage, userStatusIDs)
+	store.AddMessage(conversation, model.RoleUser, userMessage, userStatusIDs)
 
 	return userMessage
 }

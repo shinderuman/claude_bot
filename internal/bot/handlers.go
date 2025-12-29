@@ -82,7 +82,7 @@ func (b *Bot) handleChatResponse(ctx context.Context, session *model.Session, co
 	}
 
 	// 履歴に追加
-	store.AddMessage(conversation, "assistant", response, postedIDs)
+	store.AddMessage(conversation, model.RoleAssistant, response, postedIDs)
 
 	session.LastUpdated = time.Now()
 	return true
@@ -121,7 +121,7 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 	// 画像を添付して返信
 	// メッセージを生成
 	replyPrompt := llm.BuildImageGenerationReplyPrompt(imagePrompt, b.config.CharacterPrompt)
-	replyMessages := []model.Message{{Role: "user", Content: replyPrompt}}
+	replyMessages := []model.Message{{Role: model.RoleUser, Content: replyPrompt}}
 	response := b.llmClient.GenerateText(ctx, replyMessages, "", b.config.MaxResponseTokens, nil, b.config.LLMTemperature)
 
 	if response == "" {
@@ -138,7 +138,7 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 	}
 
 	// 成功したら履歴に追加
-	store.AddMessage(conversation, "assistant", response, []string{postedID})
+	store.AddMessage(conversation, model.RoleAssistant, response, []string{postedID})
 
 	session.LastUpdated = time.Now()
 	return true
@@ -156,7 +156,7 @@ func (b *Bot) classifyIntent(ctx context.Context, message string) (model.IntentT
 	// システムプロンプトはシンプルに
 	systemPrompt := llm.Messages.System.IntentClassification
 
-	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxResponseTokens, nil, llm.TemperatureSystem)
+	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: model.RoleUser, Content: prompt}}, systemPrompt, b.config.MaxResponseTokens, nil, llm.TemperatureSystem)
 	if response == "" {
 		return model.IntentChat, "", nil, ""
 	}
@@ -217,7 +217,7 @@ func (b *Bot) handleFollowRequest(ctx context.Context, conversation *model.Conve
 			postedIDs = append(postedIDs, string(s.ID))
 		}
 		// 成功したら履歴に追加
-		store.AddMessage(conversation, "assistant", replyMessage, postedIDs)
+		store.AddMessage(conversation, model.RoleAssistant, replyMessage, postedIDs)
 	}
 
 	return true
@@ -229,7 +229,7 @@ func (b *Bot) generateFollowReply(ctx context.Context, targetAcct, template, fal
 	}
 
 	replyPrompt := fmt.Sprintf(template, b.config.CharacterPrompt, targetAcct)
-	replyMessages := []model.Message{{Role: "user", Content: replyPrompt}}
+	replyMessages := []model.Message{{Role: model.RoleUser, Content: replyPrompt}}
 
 	generatedReply := b.llmClient.GenerateText(ctx, replyMessages, "", b.config.MaxResponseTokens, nil, b.config.LLMTemperature)
 	if generatedReply != "" {
@@ -270,7 +270,7 @@ func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session
 	systemPrompt := llm.BuildSystemPrompt(b.config, "", "", "", true)
 
 	// 分析には長文の可能性があるため、サマリー用のトークン数を使用
-	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil, llm.TemperatureSystem)
+	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: model.RoleUser, Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil, llm.TemperatureSystem)
 
 	if response == "" {
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.AnalysisGeneration)
@@ -292,7 +292,7 @@ func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session
 	}
 
 	// 5. 会話履歴にアシスタントの発言（全ID）を追加
-	store.AddMessage(conversation, "assistant", response, postedIDs)
+	store.AddMessage(conversation, model.RoleAssistant, response, postedIDs)
 
 	session.LastUpdated = time.Now()
 	return true
@@ -357,7 +357,7 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 	prompt := llm.BuildDailySummaryPrompt(statuses, targetDateStr, userMessage, loc)
 	systemPrompt := llm.BuildSystemPrompt(b.config, "", "", "", true)
 
-	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil, llm.TemperatureSystem)
+	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: model.RoleUser, Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil, llm.TemperatureSystem)
 
 	if response == "" {
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.SummaryGeneration)
@@ -379,7 +379,7 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 	}
 
 	// 履歴に追加
-	store.AddMessage(conversation, "assistant", response, postedIDs)
+	store.AddMessage(conversation, model.RoleAssistant, response, postedIDs)
 
 	session.LastUpdated = time.Now()
 	return true

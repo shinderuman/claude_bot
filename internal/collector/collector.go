@@ -229,7 +229,7 @@ func (fc *FactCollector) extractFactsFromContent(ctx context.Context, status *go
 
 	// LLMでファクト抽出
 	prompt := llm.BuildFactExtractionPrompt(postAuthorUserName, postAuthor, content)
-	messages := []model.Message{{Role: "user", Content: prompt}}
+	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 
 	response := fc.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, fc.config.MaxFactTokens, nil, llm.TemperatureSystem)
 	if response == "" {
@@ -338,7 +338,7 @@ func (fc *FactCollector) processURL(ctx context.Context, urlStr, urlDomain, sour
 
 	// LLMでファクト抽出（URLコンテンツ用のプロンプトを使用）
 	prompt := llm.BuildURLContentFactExtractionPrompt(urlContent)
-	messages := []model.Message{{Role: "user", Content: prompt}}
+	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 
 	response := fc.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, fc.config.MaxFactTokens, nil, llm.TemperatureSystem)
 	if response == "" {

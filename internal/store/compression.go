@@ -81,7 +81,7 @@ func (h *ConversationHistory) compressOldConversations(ctx context.Context, sess
 func (h *ConversationHistory) generateSummary(ctx context.Context, messages []model.Message, existingSummary string, llmClient *llm.Client) string {
 	formattedMessages := formatMessagesForSummary(messages)
 	summaryPrompt := llm.BuildSummaryPrompt(formattedMessages, existingSummary)
-	summaryMessages := []model.Message{{Role: "user", Content: summaryPrompt}}
+	summaryMessages := []model.Message{{Role: model.RoleUser, Content: summaryPrompt}}
 	return llmClient.GenerateSummary(ctx, summaryMessages, existingSummary)
 }
 
@@ -89,7 +89,7 @@ func formatMessagesForSummary(messages []model.Message) string {
 	var builder strings.Builder
 	for _, msg := range messages {
 		role := "ユーザー"
-		if msg.Role == "assistant" {
+		if msg.Role == model.RoleAssistant {
 			role = "アシスタント"
 		}
 		builder.WriteString(role)

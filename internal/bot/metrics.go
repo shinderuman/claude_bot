@@ -166,8 +166,8 @@ func calculateFactStats(facts []model.Fact, botUsernames []string) FactStats {
 		// 優先順位: General > Assistant > Bots > Users
 		if target == model.GeneralTarget {
 			stats.ByTarget["general"]++
-		} else if target == "assistant" {
-			stats.ByTarget["assistant"]++
+		} else if target == model.RoleAssistant {
+			stats.ByTarget[model.RoleAssistant]++
 		} else if isBot[target] {
 			stats.ByTarget[target]++
 		} else {

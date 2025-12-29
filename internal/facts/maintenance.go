@@ -177,7 +177,7 @@ func (s *FactService) generateArchiveFacts(ctx context.Context, target string, f
 		log.Printf("バッチ処理中: %d - %d / %d", i+1, end, totalFacts)
 
 		prompt := llm.BuildFactArchivingPrompt(batch)
-		messages := []model.Message{{Role: "user", Content: prompt}}
+		messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 
 		// Use extraction system prompt for JSON output structure
 		systemPrompt := llm.Messages.System.FactExtraction
@@ -245,7 +245,7 @@ func (s *FactService) ConsolidateBotFacts(ctx context.Context, target string, fa
 
 	// 2. Generate consolidated facts via LLM
 	prompt := llm.BuildFactConsolidationPrompt(factList.String(), s.config.CharacterPrompt)
-	messages := []model.Message{{Role: "user", Content: prompt}}
+	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 
 	// System Prompt for JSON extraction
 	response := s.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, s.config.MaxFactTokens*2, nil, llm.TemperatureSystem)
@@ -317,7 +317,7 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 
 	prompt := llm.BuildBotProfilePrompt(factsBuilder.String())
 
-	messages := []model.Message{{Role: "user", Content: prompt}}
+	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 
 	// System Promptとしてキャラクター設定を渡す
 	profileText := s.llmClient.GenerateText(ctx, messages, s.config.CharacterPrompt, s.config.MaxSummaryTokens, nil, s.config.LLMTemperature)

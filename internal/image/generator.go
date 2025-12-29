@@ -29,7 +29,7 @@ func (g *ImageGenerator) GenerateSVG(ctx context.Context, prompt string) (string
 	}
 
 	userPrompt := llm.BuildImageGenerationPrompt(prompt)
-	messages := []model.Message{{Role: "user", Content: userPrompt}}
+	messages := []model.Message{{Role: model.RoleUser, Content: userPrompt}}
 	response := g.llmClient.GenerateText(ctx, messages, llm.Messages.System.ImageGeneration, g.config.MaxImageTokens, nil, llm.TemperatureSystem)
 
 	if response == "" {
