@@ -141,6 +141,9 @@ func TestConsolidateBotFacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ConsolidateBotFacts failed: %v", err)
 	}
+
+	// wait for saveAsync
+	time.Sleep(100 * time.Millisecond)
 }
 
 func TestGenerateAndSaveBotProfile_ShortResponse(t *testing.T) {

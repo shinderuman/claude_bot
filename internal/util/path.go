@@ -6,12 +6,24 @@ import (
 	"path/filepath"
 )
 
-// GetFilePath returns the absolute path for a file in the data directory relative to the executable.
+const DataDirName = "data"
+
 func GetFilePath(filename string) string {
-	exePath, err := os.Executable()
-	if err != nil {
-		log.Fatal("実行ファイルパス取得エラー: ", err)
+	exe, err := os.Executable()
+	if err == nil {
+		path := filepath.Join(filepath.Dir(exe), DataDirName, filename)
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
 	}
-	exeDir := filepath.Dir(exePath)
-	return filepath.Join(exeDir, "data", filename)
+
+	if cwd, err := os.Getwd(); err == nil {
+		path := filepath.Join(cwd, DataDirName, filename)
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+
+	log.Fatal("設定ファイルが見つかりません: ", filename)
+	return ""
 }
