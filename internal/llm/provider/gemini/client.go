@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"claude_bot/internal/config"
@@ -20,8 +21,12 @@ import (
 )
 
 const (
-	MinResponseLength = 5
-	MaxRetries        = 5
+	MinProfileResponseLength = 50
+	MaxRetries               = 5
+)
+
+var (
+	retryBaseDelay = 10 * time.Second
 )
 
 type Client struct {
@@ -61,7 +66,9 @@ func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, 
 		cs := c.buildChatSession(messages)
 
 		if i > 0 {
-			log.Printf("Gemini リトライ実行 %d/%d", i, MaxRetries)
+			delay := retryBaseDelay * time.Duration(1<<(i-1))
+			log.Printf("Gemini リトライ実行 %d/%d (待機: %v)", i, MaxRetries, delay)
+			time.Sleep(delay)
 		}
 
 		resp, err := cs.SendMessage(ctx, parts...)
@@ -98,7 +105,19 @@ func (c *Client) configureModel(systemPrompt string, maxTokens int64, temperatur
 
 	c.model.SafetySettings = []*genai.SafetySetting{
 		{
+			Category:  genai.HarmCategoryHarassment,
+			Threshold: genai.HarmBlockNone,
+		},
+		{
+			Category:  genai.HarmCategoryHateSpeech,
+			Threshold: genai.HarmBlockNone,
+		},
+		{
 			Category:  genai.HarmCategorySexuallyExplicit,
+			Threshold: genai.HarmBlockNone,
+		},
+		{
+			Category:  genai.HarmCategoryDangerousContent,
 			Threshold: genai.HarmBlockNone,
 		},
 	}
@@ -165,12 +184,22 @@ func (c *Client) validateResponse(ctx context.Context, resp *genai.GenerateConte
 	responseText := extractResponseText(resp)
 	runeCount := utf8.RuneCountInString(responseText)
 
-	if runeCount > MinResponseLength {
+	if runeCount > MinProfileResponseLength {
 		return responseText, nil
 	}
 
-	msg := fmt.Sprintf("⚠️ [生成異常] Geminiが短い応答を返しました (%d文字): %s. リトライします...", runeCount, responseText)
-	c.slackClient.PostMessageAsync(ctx, msg)
+	isProfileGeneration, _ := ctx.Value(model.ContextKeyIsProfileGeneration).(bool)
+	if !isProfileGeneration {
+		return responseText, nil
+	}
+
+	var finishReason genai.FinishReason
+	if len(resp.Candidates) > 0 {
+		finishReason = resp.Candidates[0].FinishReason
+	}
+
+	msg := fmt.Sprintf("⚠️ [生成異常] Geminiが短い応答を返しました (%d文字, Reason: %s)\n```\n%s\n```\nリトライします...", runeCount, finishReason, responseText)
+	c.slackClient.PostErrorMessageAsync(ctx, msg)
 
 	return "", fmt.Errorf("response too short")
 }

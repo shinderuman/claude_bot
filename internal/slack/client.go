@@ -141,3 +141,15 @@ func (c *Client) PostMessageAsync(ctx context.Context, message string) {
 		}
 	}()
 }
+
+// PostErrorMessageAsync sends a message asynchronously to the configured Error Slack channel
+func (c *Client) PostErrorMessageAsync(ctx context.Context, message string) {
+	if !c.enabled {
+		return
+	}
+	go func() {
+		if err := c.PostErrorMessage(ctx, message); err != nil {
+			log.Printf("SlackAsyncErrorPostError: %v", err)
+		}
+	}()
+}

@@ -9,10 +9,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/generative-ai-go/genai"
 	"google.golang.org/api/option"
 )
+
+func init() {
+	retryBaseDelay = 1 * time.Millisecond
+}
 
 // Mock response structures for Gemini REST API
 type geminiContent struct {
@@ -56,18 +61,19 @@ func TestGenerateContent_RetryLogic(t *testing.T) {
 				},
 			}
 		} else {
-			// Return valid response
-			resp = geminiResponse{
-				Candidates: []geminiCandidate{
-					{
-						Content: geminiContent{
-							Parts: []geminiPart{
-								{Text: "これは正常な長さの応答です。"}, // > 5 chars
+			// 最終リトライで成功
+			if retryCount == 6 {
+				resp = geminiResponse{
+					Candidates: []geminiCandidate{
+						{
+							Content: geminiContent{
+								Parts: []geminiPart{
+									{Text: "これは正常な長さの応答です。これは正常な長さの応答です。これは正常な長さの応答です。これは正常な長さの応答です。これで50文字を超えます。"},
+								},
 							},
-							Role: "model",
 						},
 					},
-				},
+				}
 			}
 		}
 
@@ -103,14 +109,22 @@ func TestGenerateContent_RetryLogic(t *testing.T) {
 		{Role: "user", Content: "こんにちは"},
 	}
 
+	// Enable profiling context to trigger retry logic
+	ctx = context.WithValue(ctx, model.ContextKeyIsProfileGeneration, true)
+
 	respText, err := client.GenerateContent(ctx, messages, "", 100, nil, 0.0)
 	if err != nil {
 		t.Fatalf("GenerateContent failed: %v", err)
 	}
 
-	expected := "これは正常な長さの応答です。"
+	expected := "これは正常な長さの応答です。これは正常な長さの応答です。これは正常な長さの応答です。これは正常な長さの応答です。これで50文字を超えます。"
 	if respText != expected {
 		t.Errorf("Expected response %q, got %q", expected, respText)
+	}
+
+	// Verify constants
+	if MinProfileResponseLength != 50 {
+		t.Errorf("Expected MinProfileResponseLength to be 50, got %d", MinProfileResponseLength)
 	}
 
 	if retryCount != 6 {
@@ -155,6 +169,9 @@ func TestGenerateContent_MaxRetriesExceeded(t *testing.T) {
 		{Role: "user", Content: "Hi"},
 	}
 
+	// Enable profiling context to trigger retry logic
+	ctx = context.WithValue(ctx, model.ContextKeyIsProfileGeneration, true)
+
 	_, err = client.GenerateContent(ctx, messages, "", 100, nil, 0.0)
 	if err == nil {
 		t.Fatal("Expected error due to max retries exceeded, got nil")
@@ -163,5 +180,54 @@ func TestGenerateContent_MaxRetriesExceeded(t *testing.T) {
 	expectedErr := "Gemini 生成応答が短すぎます (最大リトライ回数超過)"
 	if err.Error() != expectedErr {
 		t.Errorf("Expected error %q, got %q", expectedErr, err.Error())
+	}
+}
+
+func TestGenerateContent_ShortResponseAllowed(t *testing.T) {
+	// Setup mock server that returns short response
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := geminiResponse{
+			Candidates: []geminiCandidate{
+				{
+					Content: geminiContent{
+						Parts: []geminiPart{
+							{Text: "あた"}, // 2 chars
+						},
+					},
+				},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]geminiResponse{resp})
+	}))
+	defer ts.Close()
+
+	ctx := context.Background()
+	gClient, err := genai.NewClient(ctx, option.WithAPIKey("test-key"), option.WithEndpoint(ts.URL), option.WithHTTPClient(ts.Client()))
+	if err != nil {
+		t.Fatalf("Failed to create genai client: %v", err)
+	}
+	defer gClient.Close()
+
+	client := &Client{
+		client:      gClient,
+		model:       gClient.GenerativeModel("gemini-1.5-pro"),
+		config:      &config.Config{},
+		slackClient: slack.NewClient("", "", "", ""), // Disabled client
+	}
+
+	messages := []model.Message{
+		{Role: "user", Content: "Hi"},
+	}
+
+	// Without profiler context, short response should be accepted
+	respText, err := client.GenerateContent(ctx, messages, "", 100, nil, 0.0)
+	if err != nil {
+		t.Fatalf("GenerateContent failed: %v", err)
+	}
+
+	expected := "あた"
+	if respText != expected {
+		t.Errorf("Expected response %q, got %q", expected, respText)
 	}
 }

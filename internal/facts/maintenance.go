@@ -320,7 +320,8 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 
 	// System Promptとしてキャラクター設定を渡す
-	profileText := s.llmClient.GenerateText(ctx, messages, s.config.CharacterPrompt, s.config.MaxSummaryTokens, nil, s.config.LLMTemperature)
+	generateCtx := context.WithValue(ctx, model.ContextKeyIsProfileGeneration, true)
+	profileText := s.llmClient.GenerateText(generateCtx, messages, s.config.CharacterPrompt, s.config.MaxSummaryTokens, nil, s.config.LLMTemperature)
 	if profileText == "" {
 		return fmt.Errorf("プロファイル生成結果が空でした")
 	}
