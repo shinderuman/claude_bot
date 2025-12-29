@@ -290,60 +290,6 @@ func TestBuildProfileFields_OrderGuarantee(t *testing.T) {
 	}
 }
 
-func TestIsValidFact(t *testing.T) {
-	s, _ := getTestService()
-	tests := []struct {
-		name   string
-		target string
-		key    string
-		value  interface{}
-		want   bool
-	}{
-		{"Valid Fact", "test-user", "hobby", "programming", true},
-		{"Invalid Target", "unknown", "hobby", "programming", false},
-		{"Invalid Target (Case)", "UNKNOWN", "hobby", "programming", false},
-		{"Invalid Target (None)", "none", "hobby", "programming", false},
-		{"Invalid Key (ID)", "test-user", "user-id", "123", false},
-		{"Invalid Key (Follower)", "test-user", "follower_count", "100", false},
-		{"Invalid Value (Unknown)", "test-user", "hobby", "不明", false},
-		{"Invalid Value (None)", "test-user", "hobby", "なし", false},
-		{"Invalid Value (Short)", "test-user", "hobby", "a", false},
-		{"Valid Value (Number)", "test-user", "height", 170, true}, // Check non-string
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := s.isValidFact(tt.target, tt.key, tt.value); got != tt.want {
-				t.Errorf("isValidFact() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestNormalizeKey(t *testing.T) {
-	s, _ := getTestService()
-	tests := []struct {
-		name string
-		key  string
-		want string
-	}{
-		{"No Mapping", "hobby", "hobby"},
-		{"Mapping: Preference", "好きなもの", "preference"},
-		{"Mapping: Preference (Partial)", "私が好きなもの", "preference"},
-		{"Mapping: Location", "居住地", "location"},
-		{"Mapping: Possession", "ペット", "possession"},
-		{"Capitalized", "Hobby", "hobby"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := s.normalizeKey(tt.key); got != tt.want {
-				t.Errorf("normalizeKey() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestShouldArchiveFacts(t *testing.T) {
 	s, _ := getTestService()
 

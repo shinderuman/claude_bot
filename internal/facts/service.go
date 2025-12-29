@@ -32,43 +32,6 @@ const (
 	RecentFactsCount = 5
 )
 
-var (
-	// InvalidTargets は無効なターゲットのリスト
-	InvalidTargets = []string{
-		"user", "user_id", "userid", "unknown", "none", "no_name", "someone", "anonymous",
-		"undefined", "null", "test_user", "sample_user",
-	}
-
-	// InvalidKeys は無効なキーの部分一致リスト
-	InvalidKeys = []string{"username", "displayname", "display_name", "account", "id", "follower", "following"}
-
-	// InvalidValues は無効な値のリスト
-	InvalidValues = []string{"不明", "なし", "特になし", "unknown", "none", "n/a"}
-
-	// KeyNormalizationMappings はキーの正規化マッピング
-	KeyNormalizationMappings = map[string]string{
-		"好きなもの": "preference",
-		"好き":    "preference",
-		"趣味":    "preference",
-		"推し":    "preference",
-		"好物":    "preference",
-		"職業":    "occupation",
-		"仕事":    "occupation",
-		"居住地":   "location",
-		"住まい":   "location",
-		"場所":    "location",
-		"出身":    "location",
-		"所有":    "possession",
-		"持ち物":   "possession",
-		"ペット":   "possession",
-		"経験":    "experience",
-		"資格":    "experience",
-		"経歴":    "experience",
-		"性格":    "attribute",
-		"特徴":    "attribute",
-	}
-)
-
 // LLMClient defines the interface for LLM operations
 type LLMClient interface {
 	GenerateText(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, currentImages []model.Image, temperature float64) string

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strings"
 	"time"
 
 	"claude_bot/internal/llm"
@@ -38,14 +37,6 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, sourceID, author,
 
 	log.Printf("事実抽出JSON: %d件抽出", len(extracted))
 	for _, item := range extracted {
-		// 品質フィルタリング
-		if !s.isValidFact(item.Target, item.Key, item.Value) {
-			continue
-		}
-
-		// キーの正規化
-		item.Key = s.normalizeKey(item.Key)
-
 		// Targetが空なら発言者をセット
 		target := item.Target
 		targetUserName := item.TargetUserName
@@ -102,14 +93,6 @@ func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, url
 
 	log.Printf("URL事実抽出JSON: %d件抽出", len(extracted))
 	for _, item := range extracted {
-		// 品質フィルタリング
-		if !s.isValidFact(item.Target, item.Key, item.Value) {
-			continue
-		}
-
-		// キーの正規化
-		item.Key = s.normalizeKey(item.Key)
-
 		// URLコンテンツ抽出ではtargetは常に__general__
 		fact := model.Fact{
 			Target:             item.Target,
@@ -156,14 +139,6 @@ func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summar
 	}
 
 	for _, item := range extracted {
-		// 品質フィルタリング
-		if !s.isValidFact(item.Target, item.Key, item.Value) {
-			continue
-		}
-
-		// キーの正規化
-		item.Key = s.normalizeKey(item.Key)
-
 		// ターゲットの補正（要約抽出なので基本は会話相手）
 		target := item.Target
 		targetUserName := item.TargetUserName
@@ -222,59 +197,4 @@ func (s *FactService) SaveColleagueFact(ctx context.Context, targetUserName, dis
 
 	s.factStore.AddFactWithSource(fact)
 	return nil
-}
-
-// isValidFact checks if the fact is valid and worth saving
-func (s *FactService) isValidFact(target, key string, value interface{}) bool {
-	// ターゲットのチェック
-	targetLower := strings.ToLower(target)
-	invalidTargets := InvalidTargets
-	for _, t := range invalidTargets {
-		if targetLower == t {
-			return false
-		}
-	}
-
-	// キーのチェック
-	keyLower := strings.ToLower(key)
-	invalidKeys := InvalidKeys
-	for _, k := range invalidKeys {
-		if strings.Contains(keyLower, k) {
-			return false
-		}
-	}
-
-	// 値のチェック (文字列の場合)
-	if strVal, ok := value.(string); ok {
-		// 極端に短い値は除外 (数値や特定の単語を除く)
-		if len([]rune(strVal)) < MinFactValueLength {
-			return false
-		}
-		// "不明" "なし" などの無意味な値を除外
-		invalidValues := InvalidValues
-		valLower := strings.ToLower(strVal)
-		for _, v := range invalidValues {
-			if valLower == v {
-				return false
-			}
-		}
-	}
-
-	return true
-}
-
-// normalizeKey normalizes the fact key
-func (s *FactService) normalizeKey(key string) string {
-	keyLower := strings.ToLower(key)
-
-	// マッピングルール
-	mappings := KeyNormalizationMappings
-
-	for k, v := range mappings {
-		if strings.Contains(keyLower, k) {
-			return v
-		}
-	}
-
-	return keyLower
 }
