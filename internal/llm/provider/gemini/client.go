@@ -62,8 +62,9 @@ func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, 
 		return "", err
 	}
 
+	history := c.buildHistory(messages)
 	for i := 0; i <= MaxRetries; i++ {
-		cs := c.buildChatSession(messages)
+		cs := c.buildChatSession(history)
 
 		if i > 0 {
 			delay := retryBaseDelay * time.Duration(1<<(i-1))
@@ -123,10 +124,10 @@ func (c *Client) configureModel(systemPrompt string, maxTokens int64, temperatur
 	}
 }
 
-func (c *Client) buildChatSession(messages []model.Message) *genai.ChatSession {
+func (c *Client) buildChatSession(history []*genai.Content) *genai.ChatSession {
 	// チャットセッションの開始
 	cs := c.model.StartChat()
-	cs.History = c.buildHistory(messages)
+	cs.History = history
 	return cs
 }
 
