@@ -160,7 +160,7 @@ func (s *FactService) archiveTargetFacts(ctx context.Context, target string, fac
 	if err := s.factStore.ReplaceFacts(target, facts, allArchives); err != nil {
 		return fmt.Errorf("アーカイブ保存エラー(ReplaceFacts): %v", err)
 	}
-	log.Printf("ターゲット %s のアーカイブ完了(担当分): %d件 -> %d件に圧縮 (永続化済み)", target, len(facts), len(allArchives))
+	log.Printf("ターゲット %s のアーカイブ完了(担当分): %d件 -> %d件に圧縮", target, len(facts), len(allArchives))
 
 	return nil
 }
