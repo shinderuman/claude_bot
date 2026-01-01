@@ -28,12 +28,13 @@ func NewClient(cfg *config.Config) *Client {
 	var p provider.Provider
 
 	switch cfg.LLMProvider {
-	case "claude":
+	case config.LLMProviderClaude:
 		p = anthropic.NewClient(cfg)
-	case "gemini":
+	case config.LLMProviderGemini:
 		p = gemini.NewClient(cfg)
 	default:
-		log.Fatalf("エラー: 未知のプロバイダー '%s' が指定されました。'claude' または 'gemini' を指定してください。", cfg.LLMProvider)
+		log.Fatalf("エラー: 未知のプロバイダー '%s' が指定されました。'%s' または '%s' を指定してください。",
+			cfg.LLMProvider, config.LLMProviderClaude, config.LLMProviderGemini)
 	}
 
 	return &Client{

@@ -41,6 +41,8 @@ func TestBuildProfileFields(t *testing.T) {
 	cfg := &config.Config{
 		AllowRemoteUsers: true,
 		Timezone:         "Asia/Tokyo",
+		LLMProvider:      "gemini",
+		GeminiModel:      "gemini-1.5-pro",
 	}
 	authKey := "test-auth-key"
 	existingFields := []mastodon.Field{
@@ -49,23 +51,37 @@ func TestBuildProfileFields(t *testing.T) {
 
 	got := c.BuildProfileFields(cfg, existingFields, authKey)
 
-	// フィールド数の確認 (Existing + SystemID + Status + Updated = 4)
-	if len(got) != 4 {
-		t.Errorf("Expected 4 fields, got %d", len(got))
+	// フィールド数の確認 (Existing + ModelName + SystemID + Status + Updated = 5)
+	if len(got) != 5 {
+		t.Errorf("Expected 5 fields, got %d", len(got))
 	}
 
 	// 順序の確認
 	if got[0].Name != "Existing" {
 		t.Errorf("First field should be preserved. Got %s", got[0].Name)
 	}
+
+	// SystemID Check
 	if got[1].Name != ProfileFieldSystemID {
 		t.Errorf("Second field should be SystemID. Got %s", got[1].Name)
 	}
+
+	// MentionStatus Check
 	if got[2].Name != ProfileFieldMentionStatus {
 		t.Errorf("Third field should be MentionStatus. Got %s", got[2].Name)
 	}
+
+	// LastUpdated Check
 	if got[3].Name != ProfileFieldLastUpdated {
 		t.Errorf("Fourth field should be LastUpdated. Got %s", got[3].Name)
+	}
+
+	// Model Name Check
+	if got[4].Name != ProfileFieldModelName {
+		t.Errorf("Fifth field should be ModelName. Got %s", got[4].Name)
+	}
+	if got[4].Value != "gemini-1.5-pro" {
+		t.Errorf("ModelName value incorrect. Got %s", got[4].Value)
 	}
 }
 

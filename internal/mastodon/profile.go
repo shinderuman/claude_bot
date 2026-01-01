@@ -27,6 +27,9 @@ const (
 	// MentionStatusStopped indicates that the bot does not accept mentions from remote users
 	MentionStatusStopped = "停止中"
 
+	// ProfileFieldModelName is the key name for the model name in the profile fields
+	ProfileFieldModelName = "AIモデル"
+
 	// DisclaimerText is the disclaimer appended to the Mastodon profile
 	DisclaimerText = "\n\n\n※このアカウントの投稿には事実に基づく内容が含まれることもありますが、すべての正確性は保証できません。"
 
@@ -79,6 +82,7 @@ func (c *Client) BuildProfileFields(cfg *config.Config, currentFields []gomastod
 		ProfileFieldSystemID:      {},
 		ProfileFieldMentionStatus: {},
 		ProfileFieldLastUpdated:   {},
+		ProfileFieldModelName:     {},
 	}
 
 	// 1. Existing fields: Keep non-target fields (Preserve user order)
@@ -122,6 +126,22 @@ func (c *Client) BuildProfileFields(cfg *config.Config, currentFields []gomastod
 		Name:  ProfileFieldLastUpdated,
 		Value: lastUpdated,
 	})
+
+	// Model Name
+	var modelName string
+	switch cfg.LLMProvider {
+	case config.LLMProviderGemini:
+		modelName = cfg.GeminiModel
+	case config.LLMProviderClaude:
+		modelName = cfg.AnthropicModel
+	}
+
+	if modelName != "" {
+		newFields = append(newFields, gomastodon.Field{
+			Name:  ProfileFieldModelName,
+			Value: modelName,
+		})
+	}
 
 	return newFields
 }

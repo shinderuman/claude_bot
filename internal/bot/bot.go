@@ -200,7 +200,7 @@ func (b *Bot) logStartupInfo() {
 
 	// Bot基本情報
 	var modelInfo string
-	if b.config.LLMProvider == "gemini" {
+	if b.config.LLMProvider == config.LLMProviderGemini {
 		modelInfo = fmt.Sprintf("Gemini: %s", b.config.GeminiModel)
 	} else {
 		modelInfo = fmt.Sprintf("Claude: %s (%s)", b.config.AnthropicModel, b.config.AnthropicBaseURL)

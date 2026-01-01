@@ -208,14 +208,14 @@ func LoadConfig() *Config {
 
 	// プロバイダー固有のバリデーション
 	switch cfg.LLMProvider {
-	case "gemini":
+	case LLMProviderGemini:
 		if cfg.GeminiAPIKey == "" {
 			log.Fatal("エラー: Geminiプロバイダーが選択されていますが、GEMINI_API_KEYが設定されていません")
 		}
 		if cfg.GeminiModel == "" {
 			log.Fatal("エラー: Geminiプロバイダーが選択されていますが、GEMINI_MODELが設定されていません")
 		}
-	case "claude":
+	case LLMProviderClaude:
 		if cfg.AnthropicAuthToken == "" {
 			log.Fatal("エラー: Claudeプロバイダーが選択されていますが、ANTHROPIC_AUTH_TOKENが設定されていません")
 		}
