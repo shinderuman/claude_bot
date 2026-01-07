@@ -118,7 +118,7 @@ func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summar
 		return
 	}
 
-	prompt := llm.BuildSummaryFactExtractionPrompt(summary)
+	prompt := llm.BuildSummaryFactExtractionPrompt(summary, userID)
 	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 
 	response := s.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, s.config.MaxFactTokens, nil, llm.TemperatureSystem)
@@ -195,7 +195,7 @@ func (s *FactService) SaveColleagueFact(ctx context.Context, targetUserName, dis
 }
 
 // resolveFactTarget normalizes the target and username, and determines if the fact should be saved.
-// treatUnknownAsAuthor: for summary// resolveFactTarget normalizes the target and username, and determines if the fact should be saved.
+// treatUnknownAsAuthor: for summary extraction, "unknown" target is often the conversation partner.
 func resolveFactTarget(target, targetUserName, authorID, authorName string, treatUnknownAsAuthor bool) (string, string, bool) {
 	if target == model.RoleUser || target == "" {
 		target = authorID
@@ -206,14 +206,18 @@ func resolveFactTarget(target, targetUserName, authorID, authorName string, trea
 	}
 
 	if target == authorID {
-		if targetUserName == "" || targetUserName == model.UnknownTarget || targetUserName == model.RoleUser {
+		if isInvalidValue(targetUserName) {
 			targetUserName = authorName
 		}
 	}
 
-	if target == model.UnknownTarget || target == model.RoleUser || target == "" {
+	if isInvalidValue(target) || isInvalidValue(targetUserName) {
 		return "", "", false
 	}
 
 	return target, targetUserName, true
+}
+
+func isInvalidValue(value string) bool {
+	return value == model.UnknownTarget || value == model.RoleUser || value == ""
 }

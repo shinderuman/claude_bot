@@ -206,8 +206,8 @@ func BuildIntentClassificationPrompt(userMessage string, now time.Time) string {
 }
 
 // BuildSummaryFactExtractionPrompt creates a prompt for extracting facts from conversation summaries
-func BuildSummaryFactExtractionPrompt(summary string) string {
-	return fmt.Sprintf(Templates.SummaryFactExtraction, summary)
+func BuildSummaryFactExtractionPrompt(summary, userID string) string {
+	return fmt.Sprintf(Templates.SummaryFactExtraction, userID, summary, userID)
 }
 
 // BuildURLContentFactExtractionPrompt creates a prompt for extracting facts from URL content

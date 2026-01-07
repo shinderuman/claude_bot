@@ -87,7 +87,7 @@ func TestExtractAndSaveFacts_DropUnidentifiable(t *testing.T) {
 	}
 }
 
-func TestExtractAndSaveFacts_SafeFromFalseCorrection(t *testing.T) {
+func TestExtractAndSaveFacts_DropExampleUnknownUsername(t *testing.T) {
 	// Setup
 	var capturedFacts []model.Fact
 
@@ -114,17 +114,8 @@ func TestExtractAndSaveFacts_SafeFromFalseCorrection(t *testing.T) {
 
 	service.ExtractAndSaveFacts(context.Background(), "status3", authorID, authorName, "Other person is kind", model.SourceTypeMention, "", "", "")
 
-	if len(capturedFacts) == 0 {
-		t.Fatal("Expected fact to be saved")
-	}
-
-	savedFact := capturedFacts[0]
-	if savedFact.Target != "other456" {
-		t.Errorf("Expected Target to represent the other person other456, got %s", savedFact.Target)
-	}
-
-	// Should NOT be author's name
-	if savedFact.TargetUserName == authorName {
-		t.Errorf("Dangerous! TargetUserName was incorrectly replaced with author's name %s for a different target", authorName)
+	// Verification: Should NOT save fact if username is unknown
+	if len(capturedFacts) > 0 {
+		t.Errorf("Expected fact with unknown username to be dropped, but got: %v", capturedFacts[0])
 	}
 }
