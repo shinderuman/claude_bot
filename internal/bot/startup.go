@@ -41,23 +41,13 @@ func (b *Bot) executeStartupTasks(ctx context.Context) {
 				log.Printf("起動時クリーンアップ完了: %d件削除", deleted)
 			}
 		},
-	}
-
-	// 2. Heavy Tasks
-	heavyTasks := []func(context.Context){
-		func(ctx context.Context) {
-			if b.factService != nil {
-				log.Println("起動時ファクトアーカイブ（抽出・圧縮）を実行します...")
-				if err := b.factService.PerformMaintenance(ctx); err != nil {
-					log.Printf("起動時アーカイブエラー: %v", err)
-				}
-				log.Println("起動時アーカイブ完了")
-			}
-		},
 		func(ctx context.Context) {
 			b.startFactMaintenanceLoop(ctx)
 		},
 	}
+
+	// 2. Heavy Tasks
+	heavyTasks := []func(context.Context){}
 
 	// Schedule Light Tasks
 	lightDelay := time.Duration(instanceID) * StartupInitSlotDuration
