@@ -85,12 +85,16 @@ func NewBot(cfg *config.Config) *Bot {
 	}
 	mastodonClient := mastodon.NewClient(mastodonConfig)
 
-	// Slack Client
 	slackClient := slack.NewClient(cfg.SlackBotToken, cfg.SlackChannelID, cfg.SlackErrorChannelID, cfg.BotUsername)
 
 	factStore := store.InitializeFactStore(cfg, slackClient)
 
-	factService := facts.NewFactService(cfg, factStore, llmClient, mastodonClient, slackClient)
+	knownBots, err := discovery.GetKnownBotUsernamesMap(util.GetFilePath("."))
+	if err != nil {
+		knownBots = make(map[string]struct{})
+	}
+
+	factService := facts.NewFactService(cfg, factStore, llmClient, mastodonClient, slackClient, knownBots)
 
 	var imageGen *image.ImageGenerator
 	if cfg.EnableImageGeneration {
@@ -110,7 +114,6 @@ func NewBot(cfg *config.Config) *Bot {
 	}
 
 	// FactCollectorの初期化
-	// FactCollectionEnabled(全体収集) または EnableFactStore(Peer収集用) が有効な場合に初期化
 	if cfg.IsAnyCollectionEnabled() {
 		bot.factCollector = collector.NewFactCollector(cfg, factStore, llmClient, mastodonClient, factService)
 	}
@@ -140,7 +143,7 @@ func (b *Bot) Run(ctx context.Context) error {
 		discovery.StartHeartbeatLoop(ctx, b.config.BotUsername)
 	}
 
-	// ファクト関連のバックグラウンド処理（競合回避のためランダム遅延を入れて開始）
+	// ファクト関連のバックグラウンド処理
 	go b.executeStartupTasks(ctx)
 
 	// Start Metrics Logger
@@ -167,7 +170,6 @@ func (b *Bot) Run(ctx context.Context) error {
 		case event := <-eventChan:
 			switch e := event.(type) {
 			case *gomastodon.NotificationEvent:
-				// NotificationにはStatusが含まれるので、ここでも最終ステータスIDを更新する
 				if e.Notification.Status != nil {
 					b.lastUserStatusMap[e.Notification.Account.Acct] = string(e.Notification.Status.ID)
 				}
@@ -175,8 +177,6 @@ func (b *Bot) Run(ctx context.Context) error {
 					b.handleNotification(ctx, e.Notification, "")
 				}
 			case *gomastodon.UpdateEvent:
-				// ユーザーの最新ステータスIDを更新
-				// StreamUserはホームTLも含むため発言者のAcctをキーにしてIDを保存
 				prevID := b.lastUserStatusMap[e.Status.Account.Acct]
 				b.lastUserStatusMap[e.Status.Account.Acct] = string(e.Status.ID)
 

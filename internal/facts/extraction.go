@@ -25,7 +25,6 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, sourceID, author,
 	}
 
 	var extracted []model.Fact
-	// JSON部分のみ抽出
 	jsonStr := llm.ExtractJSON(response)
 	if err := llm.UnmarshalWithRepair(jsonStr, &extracted, "事実抽出"); err != nil {
 		return
@@ -43,7 +42,6 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, sourceID, author,
 			continue
 		}
 
-		// ソース情報を設定
 		fact := model.Fact{
 			Target:             target,
 			TargetUserName:     targetUserName,
@@ -57,6 +55,10 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, sourceID, author,
 			SourceURL:          sourceURL,
 			PostAuthor:         postAuthor,
 			PostAuthorUserName: postAuthorUserName,
+		}
+
+		if !s.shouldSaveFact(fact) {
+			continue
 		}
 
 		s.factStore.AddFactWithSource(fact)
@@ -91,7 +93,6 @@ func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, url
 
 	log.Printf("URL事実抽出JSON: %d件抽出", len(extracted))
 	for _, item := range extracted {
-		// URLコンテンツ抽出ではtargetは常に__general__
 		fact := model.Fact{
 			Target:             item.Target,
 			TargetUserName:     item.TargetUserName,
@@ -104,6 +105,10 @@ func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, url
 			SourceURL:          sourceURL,
 			PostAuthor:         postAuthor,
 			PostAuthorUserName: postAuthorUserName,
+		}
+
+		if !s.shouldSaveFact(fact) {
+			continue
 		}
 
 		s.factStore.AddFactWithSource(fact)
@@ -137,7 +142,6 @@ func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summar
 	}
 
 	for _, item := range extracted {
-		// Summary抽出では treatUnknownAsAuthor = true
 		target, targetUserName, ok := resolveFactTarget(item.Target, item.TargetUserName, userID, userID, true)
 		if !ok {
 			log.Printf("⚠️ 特定不能なターゲットのため保存スキップ(Summary): Key=%s, Value=%v", item.Key, item.Value)
@@ -147,7 +151,7 @@ func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summar
 		fact := model.Fact{
 			Target:             target,
 			TargetUserName:     targetUserName,
-			Author:             userID, // 情報源はユーザーとの会話
+			Author:             userID,
 			AuthorUserName:     userID,
 			Key:                item.Key,
 			Value:              item.Value,
@@ -156,6 +160,10 @@ func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summar
 			SourceURL:          "",
 			PostAuthor:         "",
 			PostAuthorUserName: "",
+		}
+
+		if !s.shouldSaveFact(fact) {
+			continue
 		}
 
 		s.factStore.AddFactWithSource(fact)
@@ -169,17 +177,14 @@ func (s *FactService) SaveColleagueFact(ctx context.Context, targetUserName, dis
 	key := fmt.Sprintf("%s%s", model.SystemColleagueProfileKeyPrefix, targetUserName)
 	value := fmt.Sprintf("Name: %s\nBio: %s", displayName, note)
 
-	// Bot自身をターゲットとして保存
 	myUsername := s.config.BotUsername
 
-	// 既存の同僚ファクトを削除（上書き）して、常に最新の状態を維持する
-	// これにより、重複したプロフィール情報が蓄積されるのを防ぐ
 	s.factStore.RemoveFactsByKey(myUsername, key)
 
 	fact := model.Fact{
 		Target:             myUsername,
 		TargetUserName:     myUsername,
-		Author:             model.SourceTypeSystem, // システムが自動収集
+		Author:             model.SourceTypeSystem,
 		AuthorUserName:     model.SourceTypeSystem,
 		Key:                key,
 		Value:              value,
@@ -187,7 +192,7 @@ func (s *FactService) SaveColleagueFact(ctx context.Context, targetUserName, dis
 		SourceType:         model.SourceTypeSystem,
 		SourceURL:          "",
 		PostAuthor:         targetUserName,
-		PostAuthorUserName: targetUserName, // 情報源としての同僚
+		PostAuthorUserName: targetUserName,
 	}
 
 	s.factStore.AddFactWithSource(fact)

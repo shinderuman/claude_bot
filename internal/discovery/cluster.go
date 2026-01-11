@@ -38,7 +38,6 @@ type Node struct {
 
 // StartHeartbeatLoop starts a background loop to keep the bot registered
 func StartHeartbeatLoop(ctx context.Context, username string) {
-	// 初回登録
 	if _, _, err := GetMyPosition(username); err != nil {
 		log.Printf("[Discovery] Initial registration failed: %v", err)
 	}
@@ -62,11 +61,9 @@ func StartHeartbeatLoop(ctx context.Context, username string) {
 // GetMyPosition registers the current bot and returns its position and total count
 // Sorting is based on JoinedAt (Arrival Order) to ensure deterministic indexing.
 func GetMyPosition(username string) (int, int, error) {
-	// util.GetFilePath already handles the "data/" prefix logic
 	registryPath := util.GetFilePath(RegistryFileName)
 	lockPath := registryPath + ".lock"
 
-	// Create/Acquire Lock
 	fileLock := flock.New(lockPath)
 
 	locked, err := fileLock.TryLockContext(context.TODO(), 1000*time.Millisecond)
@@ -83,7 +80,6 @@ func GetMyPosition(username string) (int, int, error) {
 	}
 	defer fileLock.Unlock() //nolint:errcheck
 
-	// MkdirAllは絶対パスでもOK
 	if err := os.MkdirAll(filepath.Dir(registryPath), 0755); err != nil {
 		return 0, 0, err
 	}
@@ -94,7 +90,6 @@ func GetMyPosition(username string) (int, int, error) {
 		if len(data) > 0 {
 			if err := json.Unmarshal(data, &registry); err != nil {
 				log.Printf("[Discovery] Warning: Failed to unmarshal registry (will overwrite): %v", err)
-				// 読み込み失敗時は空として扱う（追記ではなく新規作成になる）
 			}
 		} else {
 			log.Println("[Discovery] Registry file is empty.")
@@ -124,7 +119,6 @@ func GetMyPosition(username string) (int, int, error) {
 
 		// Handle duplicates: Keep the one with latest timestamp, but prefer oldest JoinedAt
 		if existing, exists := nodeMap[node.Username]; exists {
-			// Merge logic: keep oldest JoinedAt, latest LastUpdated
 			bestJoinedAt := existing.JoinedAt
 			if bestJoinedAt.IsZero() || (!node.JoinedAt.IsZero() && node.JoinedAt.Before(bestJoinedAt)) {
 				bestJoinedAt = node.JoinedAt
@@ -161,7 +155,7 @@ func GetMyPosition(username string) (int, int, error) {
 		selfNode = *oldSelf
 		selfNode.LastUpdated = now
 		if selfNode.JoinedAt.IsZero() {
-			selfNode.JoinedAt = now // Migration: First time seeing JoinedAt
+			selfNode.JoinedAt = now
 		}
 	} else {
 		// New entry
@@ -234,7 +228,6 @@ func GetKnownBotUsernames(dataDir string) ([]string, error) {
 		}
 
 		name := file.Name()
-		// Check for .env prefix and exclude .env.example
 		if len(name) < 4 || name[:4] != ".env" || name == ".env.example" {
 			continue
 		}
@@ -260,4 +253,18 @@ func GetKnownBotUsernames(dataDir string) ([]string, error) {
 	}
 	sort.Strings(usernames)
 	return usernames, nil
+}
+
+// GetKnownBotUsernamesMap returns a set of known bot usernames for efficient O(1) lookup.
+func GetKnownBotUsernamesMap(dataDir string) (map[string]struct{}, error) {
+	names, err := GetKnownBotUsernames(dataDir)
+	if err != nil {
+		return nil, err
+	}
+
+	botMap := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		botMap[name] = struct{}{}
+	}
+	return botMap, nil
 }

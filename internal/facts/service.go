@@ -15,7 +15,8 @@ import (
 
 const (
 	// Validation
-	MinFactValueLength = 2
+	MinFactValueLength    = 2
+	BlockedBotFactKeyword = "bot"
 
 	// Archive
 	ArchiveFactThreshold = 50
@@ -43,15 +44,17 @@ type FactService struct {
 	llmClient      LLMClient
 	mastodonClient *mastodon.Client
 	slackClient    *slack.Client
+	knownBots      map[string]struct{}
 }
 
-func NewFactService(cfg *config.Config, store *store.FactStore, llm LLMClient, mastodon *mastodon.Client, slack *slack.Client) *FactService {
+func NewFactService(cfg *config.Config, store *store.FactStore, llm LLMClient, mastodon *mastodon.Client, slack *slack.Client, knownBots map[string]struct{}) *FactService {
 	return &FactService{
 		config:         cfg,
 		factStore:      store,
 		llmClient:      llm,
 		mastodonClient: mastodon,
 		slackClient:    slack,
+		knownBots:      knownBots,
 	}
 }
 
@@ -102,4 +105,13 @@ func formatAuthor(fact model.Fact) string {
 		}
 	}
 	return ""
+}
+
+func (s *FactService) shouldSaveFact(fact model.Fact) bool {
+	if _, isBot := s.knownBots[fact.Target]; !isBot {
+		return true
+	}
+
+	valStr := fmt.Sprint(fact.Value)
+	return !strings.Contains(strings.ToLower(valStr), BlockedBotFactKeyword)
 }

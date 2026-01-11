@@ -81,8 +81,8 @@ func main() {
 		log.Printf("Facts file not found, starting with empty memory store: %s", factsFile)
 	}
 
-	factStore := store.NewFactStore(memoryStore, slack.NewClient("", "", "", ""), factsFile)
-	factService := facts.NewFactService(cfg, factStore, llmClient, nil, nil)
+	factStore := store.NewFactStore(memoryStore, nil, factsFile)
+	factService := facts.NewFactService(cfg, factStore, llmClient, nil, nil, nil)
 
 	switch *mode {
 	case "response":
@@ -348,7 +348,8 @@ func testAutoPost(cfg *config.Config, client *llm.Client) {
 
 	// Storeの初期化
 	_ = store.InitializeHistory(cfg)
-	factStore := store.InitializeFactStore(cfg, slack.NewClient(cfg.SlackBotToken, cfg.SlackChannelID, cfg.SlackErrorChannelID, cfg.BotUsername))
+	slackClient := slack.NewClient(cfg.SlackBotToken, cfg.SlackChannelID, cfg.SlackErrorChannelID, cfg.BotUsername)
+	factStore := store.InitializeFactStore(cfg, slackClient)
 
 	// ファクトバンドル取得
 	facts, err := factStore.GetRandomGeneralFactBundle(5)

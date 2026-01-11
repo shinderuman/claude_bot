@@ -281,7 +281,7 @@ var repairTestCases = []struct {
 		exact: false,
 	},
 	{
-		name:  "Error 13: Missing closing brace before next object",
+		name: "Error 13: Missing closing brace before next object",
 		input: `[
 {"target": "t1", "value": "v1"},
 {"target": "t2", "value": "v2",

@@ -2,7 +2,6 @@ package facts
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -126,15 +125,8 @@ func TestConsolidateBotFacts(t *testing.T) {
 	}
 
 	// Use store package to create FactStore wrapper
-	tmpDir := t.TempDir()
-	fs := store.NewFactStore(mockStorage, nil, filepath.Join(tmpDir, "facts.json"))
-
-	cfg := &config.Config{
-		CharacterPrompt: "Test Character",
-		MaxFactTokens:   1000,
-	}
-
-	service := NewFactService(cfg, fs, mockLLM, nil, nil)
+	factStore := store.NewFactStore(mockStorage, nil, "")
+	service := NewFactService(&config.Config{EnableFactStore: true}, factStore, mockLLM, nil, nil, nil)
 
 	// Execute
 	err := service.ConsolidateBotFacts(context.Background(), target, facts)
