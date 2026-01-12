@@ -161,3 +161,145 @@ func TestClient_RetryLogic(t *testing.T) {
 		t.Errorf("Expected delay >= 3s, got %v", elapsed)
 	}
 }
+
+func TestClient_adjustForGemma(t *testing.T) {
+	tests := []struct {
+		name           string
+		provider       string
+		modelName      string
+		messages       []model.Message
+		systemPrompt   string
+		expectSystem   string
+		expectFirstMsg string // Check logic integration
+	}{
+		{
+			name:      "Should apply workaround: System prompt merged into user message",
+			provider:  config.LLMProviderClaude,
+			modelName: "google/gemma-3n-e2b-it:free",
+			messages: []model.Message{
+				{Role: model.RoleUser, Content: "Hello"},
+			},
+			systemPrompt:   "You are a helpful assistant.",
+			expectSystem:   "", // Should be cleared
+			expectFirstMsg: "System Instructions:\nYou are a helpful assistant.\n\nUser Message:\nHello",
+		},
+		{
+			name:      "Should NOT apply workaround: Returns original messages",
+			provider:  config.LLMProviderClaude,
+			modelName: "claude-3-5-sonnet",
+			messages: []model.Message{
+				{Role: model.RoleUser, Content: "Hello"},
+			},
+			systemPrompt:   "System",
+			expectSystem:   "System",
+			expectFirstMsg: "Hello",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				LLMProvider:    tt.provider,
+				AnthropicModel: tt.modelName,
+			}
+			client := &Client{config: cfg}
+
+			outMsgs, outSystem := client.adjustForGemma(tt.messages, tt.systemPrompt)
+
+			if outSystem != tt.expectSystem {
+				t.Errorf("adjustForGemma() systemPrompt = %v, want %v", outSystem, tt.expectSystem)
+			}
+
+			if len(tt.messages) > 0 && len(outMsgs) > 0 {
+				if outMsgs[0].Content != tt.expectFirstMsg {
+					t.Errorf("adjustForGemma() first message content = %v, want %v", outMsgs[0].Content, tt.expectFirstMsg)
+				}
+			}
+		})
+	}
+}
+
+func TestClient_shouldApplyGemmaWorkaround(t *testing.T) {
+	tests := []struct {
+		name         string
+		provider     string
+		modelName    string
+		messages     []model.Message
+		systemPrompt string
+		want         bool
+	}{
+		{
+			name:      "Should apply: Claude + Gemma + SystemPrompt + UserMsg",
+			provider:  config.LLMProviderClaude,
+			modelName: "google/gemma-3n-e2b-it:free",
+			messages: []model.Message{
+				{Role: model.RoleUser, Content: "Hello"},
+			},
+			systemPrompt: "System",
+			want:         true,
+		},
+		{
+			name:      "Should NOT apply: Non-Claude provider",
+			provider:  config.LLMProviderGemini,
+			modelName: "google/gemma-3n-e2b-it:free",
+			messages: []model.Message{
+				{Role: model.RoleUser, Content: "Hello"},
+			},
+			systemPrompt: "System",
+			want:         false,
+		},
+		{
+			name:      "Should NOT apply: Non-Gemma model",
+			provider:  config.LLMProviderClaude,
+			modelName: "claude-3-5-sonnet",
+			messages: []model.Message{
+				{Role: model.RoleUser, Content: "Hello"},
+			},
+			systemPrompt: "System",
+			want:         false,
+		},
+		{
+			name:      "Should NOT apply: Empty system prompt",
+			provider:  config.LLMProviderClaude,
+			modelName: "google/gemma-3n-e2b-it:free",
+			messages: []model.Message{
+				{Role: model.RoleUser, Content: "Hello"},
+			},
+			systemPrompt: "",
+			want:         false,
+		},
+		{
+			name:         "Should NOT apply: Empty messages",
+			provider:     config.LLMProviderClaude,
+			modelName:    "google/gemma-3n-e2b-it:free",
+			messages:     []model.Message{},
+			systemPrompt: "System",
+			want:         false,
+		},
+		{
+			name:      "Should NOT apply: First message not User",
+			provider:  config.LLMProviderClaude,
+			modelName: "google/gemma-3n-e2b-it:free",
+			messages: []model.Message{
+				{Role: model.RoleAssistant, Content: "Hi"},
+			},
+			systemPrompt: "System",
+			want:         false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				LLMProvider:    tt.provider,
+				AnthropicModel: tt.modelName,
+			}
+			client := &Client{config: cfg}
+
+			got := client.shouldApplyGemmaWorkaround(tt.messages, tt.systemPrompt)
+			if got != tt.want {
+				t.Errorf("shouldApplyGemmaWorkaround() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

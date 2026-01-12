@@ -16,6 +16,8 @@ import (
 const (
 	// TemperatureSystem is the temperature used for system tasks requiring accuracy
 	TemperatureSystem = 0.0
+	// ModelKeywordGemma identifies Gemma models
+	ModelKeywordGemma = "gemma"
 )
 
 type Client struct {
@@ -71,7 +73,8 @@ func (c *Client) GenerateText(ctx context.Context, messages []model.Message, sys
 	}
 
 	content, err := c.executeWithRetry(ctx, func() (string, error) {
-		return c.provider.GenerateContent(ctx, messages, systemPrompt, maxTokens, currentImages, temperature)
+		msgs, sysPrompt := c.adjustForGemma(messages, systemPrompt)
+		return c.provider.GenerateContent(ctx, msgs, sysPrompt, maxTokens, currentImages, temperature)
 	})
 
 	if err != nil {
@@ -117,6 +120,36 @@ func (c *Client) executeWithRetry(ctx context.Context, operation func() (string,
 		}
 	}
 	return "", err
+}
+
+func (c *Client) adjustForGemma(messages []model.Message, systemPrompt string) ([]model.Message, string) {
+	if !c.shouldApplyGemmaWorkaround(messages, systemPrompt) {
+		return messages, systemPrompt
+	}
+
+	newMessages := make([]model.Message, len(messages))
+	copy(newMessages, messages)
+	newMessages[0].Content = BuildGemmaWrapperPrompt(systemPrompt, messages[0].Content)
+	return newMessages, ""
+}
+
+func (c *Client) shouldApplyGemmaWorkaround(messages []model.Message, systemPrompt string) bool {
+	if c.config.LLMProvider != config.LLMProviderClaude {
+		return false
+	}
+	if !strings.Contains(strings.ToLower(c.config.AnthropicModel), ModelKeywordGemma) {
+		return false
+	}
+	if systemPrompt == "" {
+		return false
+	}
+	if len(messages) == 0 {
+		return false
+	}
+	if messages[0].Role != model.RoleUser && messages[0].Role != "" {
+		return false
+	}
+	return true
 }
 
 func ExtractJSON(s string) string {
