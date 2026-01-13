@@ -426,6 +426,9 @@ func TestHelpers(t *testing.T) {
 		if got := repairDoubleArray(`[[{"a":1}]]`); got != `[{"a":1}]` {
 			t.Errorf("got %q", got)
 		}
+		if got := repairDoubleArray("[\n  [{\"a\":1}] ]"); got != `[{"a":1}]` {
+			t.Errorf("repairDoubleArray failed on whitespace. got %q", got)
+		}
 	})
 
 	t.Run("maskStrings", func(t *testing.T) {

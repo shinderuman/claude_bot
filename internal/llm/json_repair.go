@@ -205,8 +205,12 @@ func fixTrailingCommas(s string) string {
 }
 
 func repairDoubleArray(s string) string {
-	if strings.HasPrefix(s, "[[") && strings.HasSuffix(s, "]]") {
-		return s[1 : len(s)-1]
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]") {
+		inner := strings.TrimSpace(s[1 : len(s)-1])
+		if strings.HasPrefix(inner, "[") && strings.HasSuffix(inner, "]") {
+			return inner
+		}
 	}
 	return s
 }
