@@ -49,12 +49,7 @@ func NewFactStore(storage FactStorage, slackClient *slack.Client, filePath strin
 	}
 }
 
-// AddFact はFactを保存します
 func (s *FactStore) AddFact(fact model.Fact) {
-	if !isValidTarget(fact.Target) {
-		return
-	}
-
 	err := s.storage.Add(context.Background(), fact)
 	if err != nil {
 		log.Printf("Error adding fact: %v", err)
@@ -63,7 +58,7 @@ func (s *FactStore) AddFact(fact model.Fact) {
 	}
 }
 
-func isValidTarget(target string) bool {
+func IsValidTarget(target string) bool {
 	switch target {
 	case "", model.UnknownTarget, model.RoleUser, model.RoleAssistant:
 		return false

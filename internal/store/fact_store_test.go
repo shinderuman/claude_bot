@@ -7,11 +7,11 @@ import (
 	"time"
 )
 
-func TestFactStore_AddFact_RejectsInvalidTarget(t *testing.T) {
+func TestIsValidTarget(t *testing.T) {
 	tests := []struct {
-		name         string
-		target       string
-		expectStored bool
+		name   string
+		target string
+		want   bool
 	}{
 		{"valid target", "user123", true},
 		{"unknown target", model.UnknownTarget, false},
@@ -23,25 +23,8 @@ func TestFactStore_AddFact_RejectsInvalidTarget(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockStorage := &mockFactStorage{
-				facts: make(map[string][]model.Fact),
-			}
-			fs := NewFactStore(mockStorage, nil, "")
-
-			fact := model.Fact{
-				Target:    tt.target,
-				Key:       "test_key",
-				Value:     "test_value",
-				Timestamp: time.Now(),
-			}
-
-			fs.AddFact(fact)
-
-			allFacts, _ := mockStorage.GetAllFacts(context.Background())
-			stored := len(allFacts) > 0
-
-			if stored != tt.expectStored {
-				t.Errorf("target=%q: stored=%v, want=%v", tt.target, stored, tt.expectStored)
+			if got := IsValidTarget(tt.target); got != tt.want {
+				t.Errorf("IsValidTarget(%q) = %v, want %v", tt.target, got, tt.want)
 			}
 		})
 	}
