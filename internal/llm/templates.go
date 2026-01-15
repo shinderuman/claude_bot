@@ -73,7 +73,8 @@ var Templates = struct {
 
 targetについて:
 - 発言者自身のことなら、targetは "%s" としてください
-- 他のユーザーのことなら、そのユーザーのID(Acct)を指定してください（分かる場合）
+- 他のユーザーのことなら、そのユーザーのID(Acct)を指定してください
+- **誰の情報か特定できない場合（主語が不明瞭な場合など）は、絶対に抽出しないでください（unknown等の値を生成しないでください）**
 
 ` + Messages.Instruction.EmptyArray,
 
