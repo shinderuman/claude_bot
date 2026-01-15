@@ -73,7 +73,7 @@ var Messages = struct {
 	}{
 		CompactJSON: `出力形式:
 **重要**: インデントや改行を含めず、1行のコンパクトなJSON配列として出力してください。
-例: [{"target":"user_id","target_username":"username","key":"項目名","value":"値"}]`,
+例: [{"target":"__general__","key":"news","value":"要約"}, {"target":"(ユーザーID)","target_username":"username","key":"hobby","value":"値"}]`,
 		CompactJSONObject: `出力形式:
 **重要**: インデントや改行を含めず、1行のコンパクトなJSONオブジェクトとして出力してください。
 例: {"target_candidates":["ID1","ID2"],"keys":["key1","key2"]}`,
