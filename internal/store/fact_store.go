@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"time"
 
 	"claude_bot/internal/config"
 	"claude_bot/internal/model"
@@ -50,28 +49,26 @@ func NewFactStore(storage FactStorage, slackClient *slack.Client, filePath strin
 	}
 }
 
-// AddFact は引数からFact構造体を生成して追加するヘルパーメソッドです
-func (s *FactStore) AddFact(target, targetUserName, author, authorUserName, key string, value interface{}) {
-	s.AddFactWithSource(model.Fact{
-		Target:         target,
-		TargetUserName: targetUserName,
-		Author:         author,
-		AuthorUserName: authorUserName,
-		Key:            key,
-		Value:          value,
-		Timestamp:      time.Now(),
-		SourceType:     model.SourceTypeMention, // デフォルトはメンション
-	})
-}
+// AddFact はFactを保存します
+func (s *FactStore) AddFact(fact model.Fact) {
+	if !isValidTarget(fact.Target) {
+		return
+	}
 
-// AddFactWithSource はソース情報を含むFactを保存します
-func (s *FactStore) AddFactWithSource(fact model.Fact) {
 	err := s.storage.Add(context.Background(), fact)
 	if err != nil {
 		log.Printf("Error adding fact: %v", err)
 	} else {
 		go s.saveAsync()
 	}
+}
+
+func isValidTarget(target string) bool {
+	switch target {
+	case "", model.UnknownTarget, model.RoleUser, model.RoleAssistant:
+		return false
+	}
+	return true
 }
 
 func (s *FactStore) saveAsync() {

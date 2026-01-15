@@ -7,6 +7,95 @@ import (
 	"time"
 )
 
+func TestFactStore_AddFact_RejectsInvalidTarget(t *testing.T) {
+	tests := []struct {
+		name         string
+		target       string
+		expectStored bool
+	}{
+		{"valid target", "user123", true},
+		{"unknown target", model.UnknownTarget, false},
+		{"user target", model.RoleUser, false},
+		{"assistant target", model.RoleAssistant, false},
+		{"empty target", "", false},
+		{"general target", model.GeneralTarget, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockStorage := &mockFactStorage{
+				facts: make(map[string][]model.Fact),
+			}
+			fs := NewFactStore(mockStorage, nil, "")
+
+			fact := model.Fact{
+				Target:    tt.target,
+				Key:       "test_key",
+				Value:     "test_value",
+				Timestamp: time.Now(),
+			}
+
+			fs.AddFact(fact)
+
+			allFacts, _ := mockStorage.GetAllFacts(context.Background())
+			stored := len(allFacts) > 0
+
+			if stored != tt.expectStored {
+				t.Errorf("target=%q: stored=%v, want=%v", tt.target, stored, tt.expectStored)
+			}
+		})
+	}
+}
+
+type mockFactStorage struct {
+	facts map[string][]model.Fact
+}
+
+func (m *mockFactStorage) Add(ctx context.Context, fact model.Fact) error {
+	m.facts[fact.Target] = append(m.facts[fact.Target], fact)
+	return nil
+}
+
+func (m *mockFactStorage) GetByTarget(ctx context.Context, target string) ([]model.Fact, error) {
+	return m.facts[target], nil
+}
+
+func (m *mockFactStorage) GetAllFacts(ctx context.Context) ([]model.Fact, error) {
+	var all []model.Fact
+	for _, facts := range m.facts {
+		all = append(all, facts...)
+	}
+	return all, nil
+}
+
+func (m *mockFactStorage) GetRecent(ctx context.Context, n int) ([]model.Fact, error) {
+	return nil, nil
+}
+
+func (m *mockFactStorage) SearchFuzzy(ctx context.Context, targets, keys []string) ([]model.Fact, error) {
+	return nil, nil
+}
+
+func (m *mockFactStorage) Remove(ctx context.Context, target string, match func(model.Fact) bool) (int, error) {
+	return 0, nil
+}
+
+func (m *mockFactStorage) Replace(ctx context.Context, target string, remove []model.Fact, add []model.Fact) error {
+	return nil
+}
+
+func (m *mockFactStorage) EnforceMaxFacts(ctx context.Context, maxFacts int) (int, error) {
+	return 0, nil
+}
+
+func (m *mockFactStorage) Backup(ctx context.Context, filename string) error {
+	return nil
+}
+
+func (m *mockFactStorage) Close() error {
+	return nil
+}
+
 func TestFactStore_SearchFuzzy_TargetUserName(t *testing.T) {
 	store := NewMemoryFactStore()
 

@@ -36,11 +36,7 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, sourceID, author,
 
 	log.Printf("事実抽出JSON: %d件抽出", len(extracted))
 	for _, item := range extracted {
-		target, targetUserName, ok := resolveFactTarget(item.Target, item.TargetUserName, author, authorUserName, false)
-		if !ok {
-			log.Printf("⚠️ 特定不能なターゲットのため保存スキップ: Key=%s, Value=%v", item.Key, item.Value)
-			continue
-		}
+		target, targetUserName := resolveFactTarget(item.Target, item.TargetUserName, author, authorUserName, false)
 
 		fact := model.Fact{
 			Target:             target,
@@ -61,7 +57,7 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, sourceID, author,
 			continue
 		}
 
-		s.factStore.AddFactWithSource(fact)
+		s.factStore.AddFact(fact)
 		LogFactSaved(fact)
 	}
 
@@ -111,7 +107,7 @@ func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, url
 			continue
 		}
 
-		s.factStore.AddFactWithSource(fact)
+		s.factStore.AddFact(fact)
 		LogFactSaved(fact)
 	}
 
@@ -142,11 +138,7 @@ func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summar
 	}
 
 	for _, item := range extracted {
-		target, targetUserName, ok := resolveFactTarget(item.Target, item.TargetUserName, userID, userID, true)
-		if !ok {
-			log.Printf("⚠️ 特定不能なターゲットのため保存スキップ(Summary): Key=%s, Value=%v", item.Key, item.Value)
-			continue
-		}
+		target, targetUserName := resolveFactTarget(item.Target, item.TargetUserName, userID, userID, true)
 
 		fact := model.Fact{
 			Target:             target,
@@ -166,7 +158,7 @@ func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summar
 			continue
 		}
 
-		s.factStore.AddFactWithSource(fact)
+		s.factStore.AddFact(fact)
 		LogFactSaved(fact)
 	}
 
@@ -195,13 +187,13 @@ func (s *FactService) SaveColleagueFact(ctx context.Context, targetUserName, dis
 		PostAuthorUserName: targetUserName,
 	}
 
-	s.factStore.AddFactWithSource(fact)
+	s.factStore.AddFact(fact)
 	return nil
 }
 
-// resolveFactTarget normalizes the target and username, and determines if the fact should be saved.
+// resolveFactTarget normalizes the target and username.
 // treatUnknownAsAuthor: for summary extraction, "unknown" target is often the conversation partner.
-func resolveFactTarget(target, targetUserName, authorID, authorName string, treatUnknownAsAuthor bool) (string, string, bool) {
+func resolveFactTarget(target, targetUserName, authorID, authorName string, treatUnknownAsAuthor bool) (string, string) {
 	if target == model.RoleUser || target == "" {
 		target = authorID
 	}
@@ -210,19 +202,9 @@ func resolveFactTarget(target, targetUserName, authorID, authorName string, trea
 		target = authorID
 	}
 
-	if target == authorID {
-		if isInvalidValue(targetUserName) {
-			targetUserName = authorName
-		}
+	if target == authorID && targetUserName == "" {
+		targetUserName = authorName
 	}
 
-	if isInvalidValue(target) || isInvalidValue(targetUserName) {
-		return "", "", false
-	}
-
-	return target, targetUserName, true
-}
-
-func isInvalidValue(value string) bool {
-	return value == model.UnknownTarget || value == model.RoleUser || value == ""
+	return target, targetUserName
 }

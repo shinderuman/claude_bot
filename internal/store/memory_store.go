@@ -29,7 +29,7 @@ func (s *MemoryFactStore) Add(ctx context.Context, fact model.Fact) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Logic matches FactStore.AddFactWithSource
+	// Logic matches FactStore.AddFact
 	for i, existing := range s.facts {
 		if existing.Target == fact.Target && existing.Key == fact.Key {
 			val1 := fmt.Sprintf("%v", existing.Value)
