@@ -32,7 +32,7 @@ func TestBot_runInWindowedLoop_Basic(t *testing.T) {
 
 	mockJitterZero := func(time.Duration) time.Duration { return 0 }
 
-	b.runInWindowedLoop(ctx, interval, "BasicTest", task, mockJitterZero)
+	b.runInWindowedLoop(ctx, interval, "BasicTest", task, mockJitterZero, false)
 
 	time.Sleep(120 * time.Millisecond)
 	cancel()
@@ -56,7 +56,7 @@ func TestBot_runInWindowedLoop_Cancellation(t *testing.T) {
 	b := newTestBot()
 	mockJitterZero := func(time.Duration) time.Duration { return 0 }
 
-	b.runInWindowedLoop(ctx, interval, "CancelTest", task, mockJitterZero)
+	b.runInWindowedLoop(ctx, interval, "CancelTest", task, mockJitterZero, false)
 
 	time.Sleep(10 * time.Millisecond)
 	cancel()
@@ -87,7 +87,7 @@ func TestBot_runInWindowedLoop_Overrun(t *testing.T) {
 
 	b := newTestBot()
 	mockJitterZero := func(time.Duration) time.Duration { return 0 }
-	b.runInWindowedLoop(ctx, interval, "OverrunTest", task, mockJitterZero)
+	b.runInWindowedLoop(ctx, interval, "OverrunTest", task, mockJitterZero, false)
 
 	time.Sleep(220 * time.Millisecond)
 	cancel()
@@ -120,7 +120,7 @@ func TestBot_runInWindowedLoop_PanicRecovery(t *testing.T) {
 	b := newTestBot()
 	mockJitterZero := func(time.Duration) time.Duration { return 0 }
 
-	b.runInWindowedLoop(ctx, interval, "PanicTest", task, mockJitterZero)
+	b.runInWindowedLoop(ctx, interval, "PanicTest", task, mockJitterZero, false)
 
 	done := make(chan struct{})
 	go func() {
@@ -153,7 +153,7 @@ func TestBot_runInWindowedLoop_CancelDuringRandomWait(t *testing.T) {
 	}
 
 	b := newTestBot()
-	b.runInWindowedLoop(ctx, interval, "RandomWaitCancel", task, mockJitterLarge)
+	b.runInWindowedLoop(ctx, interval, "RandomWaitCancel", task, mockJitterLarge, false)
 
 	time.Sleep(40 * time.Millisecond)
 	cancel()

@@ -33,7 +33,7 @@ func (b *Bot) startFactMaintenanceLoop(ctx context.Context) {
 			log.Println("Peer探索を実行中...")
 			b.factCollector.DiscoverAndCollectPeerFacts(ctx)
 		}
-	}, jitterFunc)
+	}, jitterFunc, true)
 }
 
 func (b *Bot) startAutoPostLoop(ctx context.Context) {
@@ -51,15 +51,15 @@ func (b *Bot) startAutoPostLoop(ctx context.Context) {
 		return 0
 	}
 
-	b.runInWindowedLoop(ctx, interval, "自動投稿", b.executeAutoPost, jitterFunc)
+	b.runInWindowedLoop(ctx, interval, "自動投稿", b.executeAutoPost, jitterFunc, false)
 }
 
 type jitterFunc func(interval time.Duration) time.Duration
 
-func (b *Bot) runInWindowedLoop(ctx context.Context, interval time.Duration, taskName string, task func(context.Context), getJitter jitterFunc) {
+func (b *Bot) runInWindowedLoop(ctx context.Context, interval time.Duration, taskName string, task func(context.Context), getJitter jitterFunc, notifySlack bool) {
 	log.Printf("%sループを開始しました (間隔: %v)", taskName, interval)
 
-	b.scheduleDelayedTask(ctx, interval, taskName, task, getJitter)
+	b.scheduleDelayedTask(ctx, interval, taskName, task, getJitter, notifySlack)
 
 	go func() {
 		ticker := time.NewTicker(interval)
@@ -70,13 +70,13 @@ func (b *Bot) runInWindowedLoop(ctx context.Context, interval time.Duration, tas
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				b.scheduleDelayedTask(ctx, interval, taskName, task, getJitter)
+				b.scheduleDelayedTask(ctx, interval, taskName, task, getJitter, notifySlack)
 			}
 		}
 	}()
 }
 
-func (b *Bot) scheduleDelayedTask(ctx context.Context, interval time.Duration, taskName string, task func(context.Context), getJitter jitterFunc) {
+func (b *Bot) scheduleDelayedTask(ctx context.Context, interval time.Duration, taskName string, task func(context.Context), getJitter jitterFunc, notifySlack bool) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -96,7 +96,9 @@ func (b *Bot) scheduleDelayedTask(ctx context.Context, interval time.Duration, t
 				execTime.Format(DateTimeFormat),
 			)
 			log.Println(msg)
-			_ = b.slackClient.PostMessage(ctx, msg)
+			if notifySlack {
+				_ = b.slackClient.PostMessage(ctx, msg)
+			}
 
 			select {
 			case <-ctx.Done():
