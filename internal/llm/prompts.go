@@ -383,9 +383,15 @@ func BuildSystemPrompt(cfg *config.Config, sessionSummary, relevantFacts, botPro
 		factWeight := int(math.Round((1.0 - priority) * 100))
 		charWeight := int(math.Round(priority * 100))
 
-		// 完全にアナログな指示（離散的なバケットを廃止）
-		// 数値そのものが優先度の強さを決定する
-		weightInstruction := fmt.Sprintf("BALANCE CONTROL: FACT ACCURACY (%d%%) vs CHARACTER PERSONA (%d%%).\nYou must linearly adjust your response style to match these exact percentages perfectly.\nIf Fact Accuracy is high, strict adherence to database facts is required.\nIf Character Persona is high, creative immersion and roleplay are prioritized.", factWeight, charWeight)
+		weightInstruction := fmt.Sprintf(`【応答バランス指示】
+あなたのキャラクター設定: %d%% / データベースの事実情報: %d%%
+
+この数値に応じて応答を調整してください：
+- キャラクター設定100%%の場合：下記のキャラクター設定を完全に優先。事実情報と矛盾してもキャラクターを崩さない。
+- 事実情報100%%の場合：下記「【重要：データベースの事実情報】」を完全に優先。キャラクターの口調より正確さを優先。
+- 中間値の場合：数値に比例して両者のバランスを取る。
+
+現在の設定では、キャラクター設定を%d%%の強さで維持してください。`, charWeight, factWeight, charWeight)
 
 		prompt.WriteString(weightInstruction + "\n\n")
 	}

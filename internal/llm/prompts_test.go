@@ -66,21 +66,21 @@ func TestBuildSystemPrompt_AnalogPriority(t *testing.T) {
 			name:                   "Priority 0.1 (Fact Focused)",
 			includeCharacterPrompt: true,
 			priority:               0.1,
-			wantEffect:             "FACT ACCURACY (90%) vs CHARACTER PERSONA (10%)",
+			wantEffect:             "あなたのキャラクター設定: 10% / データベースの事実情報: 90%",
 			wantOrdering:           true,
 		},
 		{
 			name:                   "Priority 0.9 (Character Focused)",
 			includeCharacterPrompt: true,
 			priority:               0.9,
-			wantEffect:             "FACT ACCURACY (10%) vs CHARACTER PERSONA (90%)",
+			wantEffect:             "あなたのキャラクター設定: 90% / データベースの事実情報: 10%",
 			wantOrdering:           true,
 		},
 		{
 			name:                   "Summary Mode (No Character Prompt)",
 			includeCharacterPrompt: false,
 			priority:               0.0, // Should be ignored
-			wantMissing:            "BALANCE CONTROL",
+			wantMissing:            "【応答バランス指示】",
 			wantOrdering:           false,
 		},
 	}
@@ -104,7 +104,8 @@ func TestBuildSystemPrompt_AnalogPriority(t *testing.T) {
 			// Verify Recency Bias Ordering
 			if tt.wantOrdering {
 				idxChar := strings.Index(prompt, "CharacterPrompt")
-				idxFact := strings.Index(prompt, "【重要：データベースの事実情報】") // Corresponds to factsPart header
+				// factsPart 固有のヘッダー（weightInstruction内の「データベースの事実情報」と区別するため完全一致）
+				idxFact := strings.Index(prompt, "以下はデータベースに保存されている確認済みの事実情報です")
 
 				// If Facts are present in the prompt (passed as "Facts" argument, so should be there if not empty)
 				// In this test setup, we pass "Facts" as relevantFacts so header should exist.
