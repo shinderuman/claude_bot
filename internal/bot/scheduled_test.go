@@ -1,72 +1,72 @@
 package bot
 
 import (
+	"claude_bot/internal/config"
+	"claude_bot/internal/slack"
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
+func newTestBot() *Bot {
+	return &Bot{
+		config:      &config.Config{Timezone: "UTC"},
+		slackClient: slack.NewClient("", "", "", ""),
+	}
+}
+
 func TestBot_runInWindowedLoop_Basic(t *testing.T) {
-	// Setup
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	executionCount := 0
-	// 50ms interval.
+	var executionCount int32
 	interval := 50 * time.Millisecond
 
 	task := func(ctx context.Context) {
-		executionCount++
+		atomic.AddInt32(&executionCount, 1)
 	}
 
-	b := &Bot{}
+	b := newTestBot()
 
-	// Mock jitter: usually 0 for predictable timing
 	mockJitterZero := func(time.Duration) time.Duration { return 0 }
 
-	// Run
 	b.runInWindowedLoop(ctx, interval, "BasicTest", task, mockJitterZero)
 
-	// Wait for approx 3 intervals (150ms) + buffer
-	time.Sleep(180 * time.Millisecond)
+	time.Sleep(120 * time.Millisecond)
 	cancel()
 
-	// Verify
-	if executionCount < 3 {
-		t.Errorf("Expected at least 3 executions, got %d", executionCount)
+	count := atomic.LoadInt32(&executionCount)
+	if count < 3 {
+		t.Errorf("Expected at least 3 executions (Immediate + 2 Ticks), got %d", count)
 	}
 }
 
 func TestBot_runInWindowedLoop_Cancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	executionCount := 0
-	interval := 50 * time.Millisecond // fast interval
+	var executionCount int32
+	interval := 50 * time.Millisecond
 
 	task := func(ctx context.Context) {
-		executionCount++
+		atomic.AddInt32(&executionCount, 1)
 	}
 
-	b := &Bot{}
+	b := newTestBot()
 	mockJitterZero := func(time.Duration) time.Duration { return 0 }
+
 	b.runInWindowedLoop(ctx, interval, "CancelTest", task, mockJitterZero)
 
-	// Cancel immediately (or very shortly)
 	time.Sleep(10 * time.Millisecond)
 	cancel()
 
-	// Wait a bit to ensure it doesn't run anymore
 	time.Sleep(100 * time.Millisecond)
 
-	// Should run at most once (if generic ticker fired immediately) or 0
-	// In our logic, it waits `randomMinutes` first. Since interval is small, random is 0.
-	// But it calls `windowStart.Add(...)`.
-	// If we cancel before the loop logic proceeds, it returns.
+	initialCount := atomic.LoadInt32(&executionCount)
 
-	// Just ensure it stopped. count shouldn't increase after cancellation.
-	initialCount := executionCount
 	time.Sleep(100 * time.Millisecond)
-	finalCount := executionCount
+	finalCount := atomic.LoadInt32(&executionCount)
 
 	if finalCount != initialCount {
 		t.Errorf("Loop continued after cancellation. Init: %d, Final: %d", initialCount, finalCount)
@@ -74,35 +74,27 @@ func TestBot_runInWindowedLoop_Cancellation(t *testing.T) {
 }
 
 func TestBot_runInWindowedLoop_Overrun(t *testing.T) {
-	// Task takes longer than interval
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	executionCount := 0
+	var executionCount int32
 	interval := 50 * time.Millisecond
 
 	task := func(ctx context.Context) {
-		executionCount++
-		// Sleep longer than interval to force overrun
-		time.Sleep(100 * time.Millisecond)
+		atomic.AddInt32(&executionCount, 1)
+		time.Sleep(90 * time.Millisecond)
 	}
 
-	b := &Bot{}
+	b := newTestBot()
 	mockJitterZero := func(time.Duration) time.Duration { return 0 }
 	b.runInWindowedLoop(ctx, interval, "OverrunTest", task, mockJitterZero)
 
-	// Wait for enough time for 2 executions (2 * 100ms = 200ms)
-	// Interval is 50ms.
-	// T0: Start task (takes 100ms). Ends at T100.
-	// Window1 (T50) passed. Window2 (T100) starts.
-	// Logic: windowStart adds 50ms -> T50. Now(T100) > T50. Proceed immediately.
-
-	time.Sleep(250 * time.Millisecond)
+	time.Sleep(220 * time.Millisecond)
 	cancel()
 
-	// Should have executed roughly 2 times.
-	if executionCount < 2 {
-		t.Errorf("Expected at least 2 executions (catch-up), got %d", executionCount)
+	count := atomic.LoadInt32(&executionCount)
+	if count < 4 {
+		t.Errorf("Expected at least 4 overlapping executions, got %d", count)
 	}
 }
 
@@ -110,58 +102,66 @@ func TestBot_runInWindowedLoop_PanicRecovery(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	executionCount := 0
+	var executionCount int32
 	interval := 50 * time.Millisecond
 
+	wg := sync.WaitGroup{}
+	wg.Add(3)
+
 	task := func(ctx context.Context) {
-		executionCount++
-		if executionCount == 2 {
+		current := atomic.AddInt32(&executionCount, 1)
+		wg.Done()
+
+		if current == 2 {
 			panic("simulated panic")
 		}
 	}
 
-	b := &Bot{}
+	b := newTestBot()
 	mockJitterZero := func(time.Duration) time.Duration { return 0 }
 
-	// Run
 	b.runInWindowedLoop(ctx, interval, "PanicTest", task, mockJitterZero)
 
-	// Allow enough time for 3 or 4 executions
-	// 1st: OK
-	// 2nd: Panic (Should recover)
-	// 3rd: OK (Should run even after panic)
-	time.Sleep(200 * time.Millisecond)
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
 
-	if executionCount < 3 {
-		t.Errorf("Loop died after panic? Count: %d (expected >= 3)", executionCount)
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Errorf("Timed out waiting for executions. Count: %d", atomic.LoadInt32(&executionCount))
+	}
+
+	count := atomic.LoadInt32(&executionCount)
+	if count < 3 {
+		t.Errorf("Loop died after panic? Count: %d", count)
 	}
 }
 
 func TestBot_runInWindowedLoop_CancelDuringRandomWait(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	executionCount := 0
+	var executionCount int32
 	interval := 100 * time.Millisecond
 
-	// Force a large jitter: 90ms.
-	// Scheduled time = windowStart + 90ms.
-	// If we cancel at 40ms, the task should NEVER run.
 	mockJitterLarge := func(time.Duration) time.Duration { return 90 * time.Millisecond }
 
 	task := func(ctx context.Context) {
-		executionCount++
+		atomic.AddInt32(&executionCount, 1)
 	}
 
-	b := &Bot{}
+	b := newTestBot()
 	b.runInWindowedLoop(ctx, interval, "RandomWaitCancel", task, mockJitterLarge)
 
 	time.Sleep(40 * time.Millisecond)
 	cancel()
 
-	// Wait past the scheduled time (90ms)
 	time.Sleep(100 * time.Millisecond)
 
-	if executionCount > 0 {
-		t.Errorf("Task ran despite cancellation during random wait! Count: %d", executionCount)
+	count := atomic.LoadInt32(&executionCount)
+	if count > 0 {
+		t.Errorf("Task ran despite cancellation during random wait! Count: %d", count)
 	}
 }

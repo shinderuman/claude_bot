@@ -4,6 +4,7 @@ import (
 	"claude_bot/internal/llm"
 	"claude_bot/internal/model"
 	"context"
+	"fmt"
 	"log"
 	"time"
 )
@@ -58,57 +59,58 @@ type jitterFunc func(interval time.Duration) time.Duration
 func (b *Bot) runInWindowedLoop(ctx context.Context, interval time.Duration, taskName string, task func(context.Context), getJitter jitterFunc) {
 	log.Printf("%sループを開始しました (間隔: %v)", taskName, interval)
 
-	// 起動時間を基準にする
-	windowStart := time.Now()
+	b.scheduleDelayedTask(ctx, interval, taskName, task, getJitter)
 
 	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
 		for {
-			// Panic Recovery for the loop
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						log.Printf("CRITICAL: %sループ内でパニックが発生しました (回復): %v", taskName, r)
-					}
-				}()
-
-				// Jitter計算 (テスト時は固定値を返すことで制御可能)
-				offset := getJitter(interval)
-
-				// ウィンドウ開始からoffset後に実行
-				scheduledTime := windowStart.Add(offset)
-
-				log.Printf("次回の%s予定: %s", taskName, scheduledTime.Format(DateTimeFormat))
-
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(time.Until(scheduledTime)):
-					// 実行
-					task(ctx)
-				}
-			}()
-
-			// コンテキストチェック（パニック回復後もここを通るため）
-			if ctx.Err() != nil {
+			select {
+			case <-ctx.Done():
 				return
-			}
-
-			// 次のウィンドウへ
-			windowStart = windowStart.Add(interval)
-
-			// Catch-up: もし現在時刻がすでに次のウィンドウを超えていても、
-			// 待機ロジック(Before check)がfalseになるだけなので即座に次へ進む
-
-			if time.Now().Before(windowStart) {
-				log.Printf("次の%sウィンドウ開始(%s)まで待機します", taskName, windowStart.Format(DateTimeFormat))
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(time.Until(windowStart)):
-					// 待機完了
-				}
+			case <-ticker.C:
+				b.scheduleDelayedTask(ctx, interval, taskName, task, getJitter)
 			}
 		}
+	}()
+}
+
+func (b *Bot) scheduleDelayedTask(ctx context.Context, interval time.Duration, taskName string, task func(context.Context), getJitter jitterFunc) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("CRITICAL: %sタスク実行中にパニック発生 (回復済み): %v", taskName, r)
+			}
+		}()
+
+		jitter := getJitter(interval)
+		if jitter > 0 {
+			execTime := time.Now().Add(jitter)
+			if loc, err := time.LoadLocation(b.config.Timezone); err == nil {
+				execTime = execTime.In(loc)
+			}
+
+			msg := fmt.Sprintf("📅 %s: %s に実行予定です",
+				taskName,
+				execTime.Format(DateTimeFormat),
+			)
+			log.Println(msg)
+			_ = b.slackClient.PostMessage(ctx, msg)
+
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(jitter):
+			}
+		}
+
+		if ctx.Err() != nil {
+			return
+		}
+
+		log.Printf("%s: 実行開始", taskName)
+		task(ctx)
 	}()
 }
 
