@@ -51,26 +51,23 @@ func (b *Bot) executeStartupTasks(ctx context.Context) {
 
 	// Schedule Light Tasks
 	lightDelay := time.Duration(instanceID) * StartupInitSlotDuration
-	log.Printf("[Startup] Light Tasks Scheduled: Instance %d, Delay %v", instanceID, lightDelay)
+	log.Printf("[Startup] 競合回避のため、Lightタスクの開始を %v 待機します (Instance: %d)", lightDelay, instanceID)
 	go runWithDelay(ctx, lightDelay, lightTasks)
 
 	// Schedule Heavy Tasks
 	heavyDelay := time.Duration(instanceID) * StartupMaintenanceSlotDuration
-	log.Printf("[Startup] Heavy Tasks Scheduled: Instance %d, Delay %v", instanceID, heavyDelay)
+	log.Printf("[Startup] 競合回避のため、Heavyタスクの開始を %v 待機します (Instance: %d)", heavyDelay, instanceID)
 	go runWithDelay(ctx, heavyDelay, heavyTasks)
 }
 
 // runWithDelay waits for the specified duration and then executes tasks sequentially.
 func runWithDelay(ctx context.Context, delay time.Duration, tasks []func(context.Context)) {
 	if delay > 0 {
-		log.Printf("競合回避のため、バックグラウンド処理の開始を %v 待機します...", delay)
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(delay):
 		}
-	} else {
-		log.Printf("待機時間なしでバックグラウンド処理を開始します...")
 	}
 
 	// Execute tasks sequentially
