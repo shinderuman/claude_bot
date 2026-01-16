@@ -12,12 +12,12 @@ import (
 )
 
 // ExtractAndSaveFacts extracts facts from a message and saves them to the store
-func (s *FactService) ExtractAndSaveFacts(ctx context.Context, sourceID, author, authorUserName, message, sourceType, sourceURL, postAuthor, postAuthorUserName string) {
+func (s *FactService) ExtractAndSaveFacts(ctx context.Context, message string, baseFact model.Fact) {
 	if !s.config.EnableFactStore {
 		return
 	}
 
-	prompt := llm.BuildFactExtractionPrompt(authorUserName, author, message)
+	prompt := llm.BuildFactExtractionPrompt(baseFact.AuthorUserName, baseFact.Author, message, s.config.BotUsername, baseFact.IsTrusted)
 	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 
 	response := s.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, s.config.MaxFactTokens, nil, llm.TemperatureSystem)
@@ -37,21 +37,22 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, sourceID, author,
 
 	log.Printf("事実抽出JSON: %d件抽出", len(extracted))
 	for _, item := range extracted {
-		target, targetUserName := resolveFactTarget(item.Target, item.TargetUserName, author, authorUserName, false)
+		target, targetUserName := resolveFactTarget(item.Target, item.TargetUserName, baseFact.Author, baseFact.AuthorUserName, false)
 
 		fact := model.Fact{
 			Target:             target,
 			TargetUserName:     targetUserName,
-			Author:             author,
-			AuthorUserName:     authorUserName,
+			Author:             baseFact.Author,
+			AuthorUserName:     baseFact.AuthorUserName,
 			Key:                item.Key,
 			Value:              item.Value,
 			Timestamp:          time.Now(),
-			SourceID:           sourceID,
-			SourceType:         sourceType,
-			SourceURL:          sourceURL,
-			PostAuthor:         postAuthor,
-			PostAuthorUserName: postAuthorUserName,
+			SourceID:           baseFact.SourceID,
+			SourceType:         baseFact.SourceType,
+			SourceURL:          baseFact.SourceURL,
+			PostAuthor:         baseFact.PostAuthor,
+			PostAuthorUserName: baseFact.PostAuthorUserName,
+			IsTrusted:          baseFact.IsTrusted,
 		}
 
 		if !s.shouldSaveFact(fact) {
@@ -67,7 +68,7 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, sourceID, author,
 }
 
 // ExtractAndSaveFactsFromURLContent extracts facts from url content and saves them to the store
-func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, urlContent, sourceType, sourceURL, postAuthor, postAuthorUserName string) {
+func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, urlContent string, baseFact model.Fact) {
 	if !s.config.EnableFactStore {
 		return
 	}
@@ -95,15 +96,15 @@ func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, url
 		fact := model.Fact{
 			Target:             item.Target,
 			TargetUserName:     item.TargetUserName,
-			Author:             postAuthor,
-			AuthorUserName:     postAuthorUserName,
+			Author:             baseFact.PostAuthor,
+			AuthorUserName:     baseFact.PostAuthorUserName,
 			Key:                item.Key,
 			Value:              item.Value,
 			Timestamp:          time.Now(),
-			SourceType:         sourceType,
-			SourceURL:          sourceURL,
-			PostAuthor:         postAuthor,
-			PostAuthorUserName: postAuthorUserName,
+			SourceType:         baseFact.SourceType,
+			SourceURL:          baseFact.SourceURL,
+			PostAuthor:         baseFact.PostAuthor,
+			PostAuthorUserName: baseFact.PostAuthorUserName,
 		}
 
 		if !s.shouldSaveFact(fact) {
@@ -119,12 +120,12 @@ func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, url
 }
 
 // ExtractAndSaveFactsFromSummary extracts facts from a conversation summary and saves them to the store
-func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summary, userID string) {
+func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summary string, baseFact model.Fact) {
 	if !s.config.EnableFactStore || summary == "" {
 		return
 	}
 
-	prompt := llm.BuildSummaryFactExtractionPrompt(summary, userID)
+	prompt := llm.BuildSummaryFactExtractionPrompt(summary, baseFact.Author)
 	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 
 	response := s.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, s.config.MaxFactTokens, nil, llm.TemperatureSystem)
@@ -143,13 +144,13 @@ func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summar
 	}
 
 	for _, item := range extracted {
-		target, targetUserName := resolveFactTarget(item.Target, item.TargetUserName, userID, userID, true)
+		target, targetUserName := resolveFactTarget(item.Target, item.TargetUserName, baseFact.Author, baseFact.Author, true)
 
 		fact := model.Fact{
 			Target:             target,
 			TargetUserName:     targetUserName,
-			Author:             userID,
-			AuthorUserName:     userID,
+			Author:             baseFact.Author,
+			AuthorUserName:     baseFact.Author,
 			Key:                item.Key,
 			Value:              item.Value,
 			Timestamp:          time.Now(),

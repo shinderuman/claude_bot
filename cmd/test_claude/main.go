@@ -103,7 +103,7 @@ func main() {
 	case "error":
 		testErrorMessageGeneration(cfg, llmClient, *message)
 	case "profile":
-		testProfileUpdate(cfg, factService)
+		testProfileUpdate(cfg)
 	default:
 		log.Fatalf("不明なモード: %s (使用可能: response, summary, fact, raw-image, auto-post, conversation, generate-image, error)", *mode)
 	}
@@ -182,7 +182,7 @@ func testResponse(cfg *config.Config, client *llm.Client, factService *facts.Fac
 		RootStatusID: "test",
 		CreatedAt:    time.Now(),
 		LastUpdated:  time.Now(),
-		Messages:     []model.Message{{Role: "user", Content: message}},
+		Messages:     []model.Message{{Role: model.RoleUser, Content: message}},
 	}
 	session.Conversations = append(session.Conversations, *conversation)
 
@@ -233,7 +233,16 @@ func testResponse(cfg *config.Config, client *llm.Client, factService *facts.Fac
 	if cfg.EnableFactStore {
 		log.Println()
 		log.Println("ファクトを抽出中...")
-		factService.ExtractAndSaveFacts(ctx, "test_source_id", "user", "TestUser", message, model.SourceTypeTest, "", "test_post_author", "TestPostUserName")
+		baseFact := model.Fact{
+			SourceID:           "test_source_id",
+			Author:             "user",
+			AuthorUserName:     "TestUser",
+			SourceType:         model.SourceTypeTest,
+			PostAuthor:         "test_post_author",
+			PostAuthorUserName: "TestPostUserName",
+			IsTrusted:          false,
+		}
+		factService.ExtractAndSaveFacts(ctx, message, baseFact)
 		log.Println("ファクト抽出完了")
 	}
 }
@@ -258,7 +267,7 @@ func testSummary(cfg *config.Config, client *llm.Client, newMessages, existingSu
 	log.Println()
 
 	// 要約生成
-	messages := []model.Message{{Role: "user", Content: summaryPrompt}}
+	messages := []model.Message{{Role: model.RoleUser, Content: summaryPrompt}}
 	ctx := context.Background()
 	summary := client.GenerateSummary(ctx, messages, existingSummary)
 
@@ -286,7 +295,7 @@ func testFactExtraction(cfg *config.Config, client *llm.Client, message string) 
 	// 事実抽出プロンプトを構築
 	authorUserName := "testuser"
 	author := "testuser@example.com"
-	prompt := llm.BuildFactExtractionPrompt(authorUserName, author, message)
+	prompt := llm.BuildFactExtractionPrompt(authorUserName, author, message, "test_bot", false)
 
 	log.Println("--- 事実抽出プロンプト ---")
 	log.Println(prompt)
@@ -294,7 +303,7 @@ func testFactExtraction(cfg *config.Config, client *llm.Client, message string) 
 	log.Println()
 
 	// 事実抽出
-	messages := []model.Message{{Role: "user", Content: prompt}}
+	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 	ctx := context.Background()
 	response := client.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, cfg.MaxResponseTokens, nil, llm.TemperatureSystem)
 
@@ -534,7 +543,7 @@ func testConversation(cfg *config.Config, client *llm.Client, lastMessage string
 	log.Println("------------------")
 }
 
-func testProfileUpdate(cfg *config.Config, factService *facts.FactService) {
+func testProfileUpdate(cfg *config.Config) {
 	log.Println("=== プロフィール生成テスト（モックモード） ===")
 	log.Println("現在のFactsから自己紹介文（Profile.txt）を生成し、モックサーバーへの更新を検証します。")
 	log.Println()

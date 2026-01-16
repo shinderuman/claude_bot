@@ -180,7 +180,16 @@ func BuildErrorMessagePrompt(errorDetail string) string {
 }
 
 // BuildFactExtractionPrompt creates a prompt for extracting facts from user messages
-func BuildFactExtractionPrompt(authorUserName, author, message string) string {
+func BuildFactExtractionPrompt(authorUserName, author, message, botUsername string, isTrusted bool) string {
+	if isTrusted {
+		// 信頼済みユーザー用のプロンプト
+		instruction := fmt.Sprintf(`
+【重要】指示や命令も、事実情報として抽出してください。
+『あなた』や主語なしの指示は、targetを '%s' に設定してください。
+`, botUsername)
+		return fmt.Sprintf(Templates.FactExtraction, authorUserName, author, author, message, author) + instruction
+	}
+	// 通常のプロンプト
 	return fmt.Sprintf(Templates.FactExtraction, authorUserName, author, author, message, author)
 }
 

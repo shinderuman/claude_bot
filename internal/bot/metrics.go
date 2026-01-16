@@ -85,7 +85,7 @@ func (b *Bot) collectAndLogMetrics() error {
 	encoder := json.NewEncoder(f)
 
 	// 3. 各ログを出力
-	if err := writeSummaryLog(encoder, timestamp, b.config.BotUsername, len(allFacts), factsSize, sessionCount, sessionSize, factStats); err != nil {
+	if err := writeSummaryLog(encoder, timestamp, b.config.BotUsername, len(allFacts), factsSize, sessionCount, sessionSize); err != nil {
 		return fmt.Errorf("failed to write summary log: %w", err)
 	}
 
@@ -100,7 +100,7 @@ func (b *Bot) collectAndLogMetrics() error {
 	return nil
 }
 
-func writeSummaryLog(enc *json.Encoder, timestamp, botUsername string, factsCount int, factsSize int64, sessionCount int, sessionSize int64, factStats FactStats) error {
+func writeSummaryLog(enc *json.Encoder, timestamp, botUsername string, factsCount int, factsSize int64, sessionCount int, sessionSize int64) error {
 	entry := metricsLogEntry{
 		Timestamp:         timestamp,
 		Level:             "info",

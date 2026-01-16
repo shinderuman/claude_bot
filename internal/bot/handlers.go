@@ -68,17 +68,17 @@ func (b *Bot) handleChatResponse(ctx context.Context, session *model.Session, co
 		if displayName == "" {
 			displayName = status.Account.Username
 		}
-		go b.factService.ExtractAndSaveFacts(
-			ctx,
-			string(status.ID),
-			status.Account.Acct,
-			displayName,
-			response,
-			model.SourceTypeSelf,
-			string(status.URL),
-			status.Account.Acct,
-			displayName,
-		)
+		baseFact := model.Fact{
+			SourceID:           string(status.ID),
+			Author:             status.Account.Acct,
+			AuthorUserName:     displayName,
+			SourceType:         model.SourceTypeSelf,
+			SourceURL:          string(status.URL),
+			PostAuthor:         status.Account.Acct,
+			PostAuthorUserName: displayName,
+			IsTrusted:          false,
+		}
+		go b.factService.ExtractAndSaveFacts(ctx, response, baseFact)
 	}
 
 	// 履歴に追加

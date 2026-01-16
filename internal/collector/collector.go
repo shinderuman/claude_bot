@@ -228,7 +228,7 @@ func (fc *FactCollector) extractFactsFromContent(ctx context.Context, status *go
 	defer func() { <-fc.semaphore }()
 
 	// LLMでファクト抽出
-	prompt := llm.BuildFactExtractionPrompt(postAuthorUserName, postAuthor, content)
+	prompt := llm.BuildFactExtractionPrompt(postAuthorUserName, postAuthor, content, fc.config.BotUsername, false)
 	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 
 	response := fc.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, fc.config.MaxFactTokens, nil, llm.TemperatureSystem)

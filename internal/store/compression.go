@@ -12,7 +12,7 @@ import (
 
 // FactExtractor interface for extracting facts from summaries
 type FactExtractor interface {
-	ExtractAndSaveFactsFromSummary(ctx context.Context, summary, userID string)
+	ExtractAndSaveFactsFromSummary(ctx context.Context, summary string, baseFact model.Fact)
 }
 
 // Conversation compression and summarization
@@ -44,7 +44,8 @@ func (h *ConversationHistory) compressConversationIfNeeded(ctx context.Context, 
 
 	// 要約から事実を抽出
 	if factExtractor != nil {
-		go factExtractor.ExtractAndSaveFactsFromSummary(ctx, summary, userID)
+		baseFact := model.Fact{Author: userID}
+		go factExtractor.ExtractAndSaveFactsFromSummary(ctx, summary, baseFact)
 	}
 
 	log.Printf("会話内圧縮完了: %d件のメッセージを削除、%d件を保持", compressCount, len(conversation.Messages))
@@ -72,7 +73,8 @@ func (h *ConversationHistory) compressOldConversations(ctx context.Context, sess
 
 	// 要約から事実を抽出
 	if factExtractor != nil {
-		go factExtractor.ExtractAndSaveFactsFromSummary(ctx, summary, userID)
+		baseFact := model.Fact{Author: userID}
+		go factExtractor.ExtractAndSaveFactsFromSummary(ctx, summary, baseFact)
 	}
 
 	log.Printf("履歴圧縮完了: %d件の会話を要約に移行", len(oldConversations))

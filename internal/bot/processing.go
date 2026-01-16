@@ -64,10 +64,30 @@ func (b *Bot) triggerFactExtraction(ctx context.Context, notification *gomastodo
 	}
 	sourceURL := string(notification.Status.URL)
 
-	// 1. メンション本文からのファクト抽出
-	go b.factService.ExtractAndSaveFacts(ctx, statusID, notification.Account.Acct, displayName, userMessage, model.SourceTypeMention, sourceURL, notification.Account.Acct, displayName)
+	isTrusted := false
+	if notification.Account.ID != "" {
+		isFollowing, err := b.mastodonClient.IsFollowing(ctx, string(notification.Account.ID))
+		if err != nil {
+			log.Printf("ユーザーフォロー状態確認エラー: %v", err)
+		} else {
+			if isFollowing && !notification.Account.Bot {
+				isTrusted = true
+			}
+		}
+	}
 
-	// 2. メンション内のURLからのファクト抽出
+	baseFact := model.Fact{
+		SourceID:           statusID,
+		Author:             notification.Account.Acct,
+		AuthorUserName:     displayName,
+		SourceType:         model.SourceTypeMention,
+		SourceURL:          sourceURL,
+		PostAuthor:         notification.Account.Acct,
+		PostAuthorUserName: displayName,
+		IsTrusted:          isTrusted,
+	}
+	go b.factService.ExtractAndSaveFacts(ctx, userMessage, baseFact)
+
 	b.extractFactsFromMentionURLs(ctx, notification, displayName)
 }
 
@@ -102,7 +122,13 @@ func (b *Bot) extractFactsFromMentionURLs(ctx context.Context, notification *gom
 			urlContent := fetcher.FormatPageContent(meta)
 
 			// URLコンテンツからファクト抽出（リダイレクト後の最終URLを使用）
-			b.factService.ExtractAndSaveFactsFromURLContent(ctx, urlContent, "mention_url", meta.URL, author, displayName)
+			baseFact := model.Fact{
+				SourceType:         model.SourceTypeMentionURL,
+				SourceURL:          meta.URL,
+				PostAuthor:         author,
+				PostAuthorUserName: displayName,
+			}
+			b.factService.ExtractAndSaveFactsFromURLContent(ctx, urlContent, baseFact)
 		}(u)
 	}
 }

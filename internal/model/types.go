@@ -84,6 +84,7 @@ type Fact struct {
 	SourceURL          string `json:"source_url,omitempty"`           // 投稿のURL
 	PostAuthor         string `json:"post_author,omitempty"`          // 投稿者のAcct
 	PostAuthorUserName string `json:"post_author_username,omitempty"` // 投稿者の表示名
+	IsTrusted          bool   `json:"is_trusted,omitempty"`           // 信頼できるユーザーからの情報かどうか
 }
 
 // ComputeUniqueKey returns a stable unique key for the fact based on its meaningful content
