@@ -72,34 +72,34 @@ func NewFactCollector(cfg *config.Config, factStore *store.FactStore, llmClient 
 	return fc
 }
 
-// cleanupCacheLoop は定期的に古いキャッシュを削除します
 func (fc *FactCollector) cleanupCacheLoop() {
 	ticker := time.NewTicker(CacheCleanupInterval)
 	defer ticker.Stop()
 
 	for range ticker.C {
 		now := time.Now()
-		fc.processedURLs.Range(func(key, value interface{}) bool {
-			if t, ok := value.(time.Time); ok {
-				// 期限切れのキャッシュは削除
-				if now.Sub(t) > CacheTTL {
-					fc.processedURLs.Delete(key)
-				}
-			}
-			return true
-		})
-
-		// Fediverseドメインキャッシュもクリーンアップ
-		fc.fediverseDomains.Range(func(key, value interface{}) bool {
-			if t, ok := value.(time.Time); ok {
-				// 期限切れのキャッシュは削除
-				if now.Sub(t) > CacheTTL {
-					fc.fediverseDomains.Delete(key)
-				}
-			}
-			return true
-		})
+		fc.cleanupExpiredSets(now)
 	}
+}
+
+func (fc *FactCollector) cleanupExpiredSets(now time.Time) {
+	fc.processedURLs.Range(func(key, value interface{}) bool {
+		if t, ok := value.(time.Time); ok {
+			if now.Sub(t) > CacheTTL {
+				fc.processedURLs.Delete(key)
+			}
+		}
+		return true
+	})
+
+	fc.fediverseDomains.Range(func(key, value interface{}) bool {
+		if t, ok := value.(time.Time); ok {
+			if now.Sub(t) > CacheTTL {
+				fc.fediverseDomains.Delete(key)
+			}
+		}
+		return true
+	})
 }
 
 // Start はストリーミング接続とファクト収集を開始します

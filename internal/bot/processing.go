@@ -15,45 +15,51 @@ import (
 
 // prepareConversation handles context enrichment (parent posts, URL data) and saves the user message
 func (b *Bot) prepareConversation(ctx context.Context, conversation *model.Conversation, notification *gomastodon.Notification, userMessage, statusID string) string {
-	// 親投稿がある場合、その内容を取得してコンテキストに追加
-	// ただし、会話履歴が既にある場合は不要（Botの応答が既に履歴に含まれているため）
-	if notification.Status.InReplyToID != nil && len(conversation.Messages) == 0 {
-		parentStatusID := fmt.Sprintf("%v", notification.Status.InReplyToID)
-		parentStatus, err := b.mastodonClient.GetStatus(ctx, parentStatusID)
-		if err == nil && parentStatus != nil {
-			parentContent, _, _ := b.mastodonClient.ExtractContentFromStatus(parentStatus)
-			if parentContent != "" {
-				// Acctを使用（一意性があり、変更されない）
-				parentAuthor := parentStatus.Account.Acct
-				// 親投稿の内容をコンテキストとして追加
-				var contextMessage string
-				// BotUsernameとの比較は、Acct(user@domain)とUsername(user)の両方をチェックして堅牢にする
-				if parentAuthor == b.config.BotUsername || parentStatus.Account.Username == b.config.BotUsername {
-					// 自分の発言（自動投稿含む）の場合は「私の発言」としてフォーマット
-					contextMessage = fmt.Sprintf(llm.Messages.System.SelfReferencePost, parentContent)
-				} else {
-					// 他人の発言の場合は「参照投稿」としてフォーマット
-					contextMessage = fmt.Sprintf(llm.Messages.System.ReferencePost, parentAuthor, parentContent)
-				}
-
-				// 会話履歴の直近にこのメッセージが含まれていないか確認してから追加
-				if len(conversation.Messages) == 0 || conversation.Messages[len(conversation.Messages)-1].Content != contextMessage {
-					userMessage = contextMessage + "\n\n" + userMessage
-				}
-			}
-		}
+	if updatedMsg, enriched := b.enrichContextWithParent(ctx, conversation, notification, userMessage); enriched {
+		userMessage = updatedMsg
 	}
 
-	// URLメタデータの取得と追加
 	if urlContext := b.extractURLContext(ctx, notification, userMessage); urlContext != "" {
 		userMessage += urlContext
 	}
 
-	// メッセージを保存
 	userStatusIDs := []string{statusID}
 	store.AddMessage(conversation, model.RoleUser, userMessage, userStatusIDs)
 
 	return userMessage
+}
+
+// enrichContextWithParent retrieves parent post content if available and updates the message
+func (b *Bot) enrichContextWithParent(ctx context.Context, conversation *model.Conversation, notification *gomastodon.Notification, userMessage string) (string, bool) {
+	if notification.Status.InReplyToID == nil || len(conversation.Messages) > 0 {
+		return userMessage, false
+	}
+
+	parentStatusID := fmt.Sprintf("%v", notification.Status.InReplyToID)
+	parentStatus, err := b.mastodonClient.GetStatus(ctx, parentStatusID)
+	if err != nil || parentStatus == nil {
+		return userMessage, false
+	}
+
+	parentContent, _, _ := b.mastodonClient.ExtractContentFromStatus(parentStatus)
+	if parentContent == "" {
+		return userMessage, false
+	}
+
+	parentAuthor := parentStatus.Account.Acct
+
+	var contextMessage string
+	if parentAuthor == b.config.BotUsername || parentStatus.Account.Username == b.config.BotUsername {
+		contextMessage = fmt.Sprintf(llm.Messages.System.SelfReferencePost, parentContent)
+	} else {
+		contextMessage = fmt.Sprintf(llm.Messages.System.ReferencePost, parentAuthor, parentContent)
+	}
+
+	if len(conversation.Messages) == 0 || conversation.Messages[len(conversation.Messages)-1].Content != contextMessage {
+		return contextMessage + "\n\n" + userMessage, true
+	}
+
+	return userMessage, false
 }
 
 // triggerFactExtraction initiates async fact extraction processes
