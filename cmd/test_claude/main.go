@@ -375,7 +375,7 @@ func testAutoPost(cfg *config.Config, client *llm.Client) {
 	log.Println()
 
 	// システムプロンプト（キャラクター設定のみ）
-	systemPrompt := llm.BuildSystemPrompt(cfg, "", "", "", true)
+	systemPrompt := llm.BuildSystemPrompt(cfg, "", "", "", true, cfg.CharacterPriority)
 
 	// API呼び出し
 	ctx := context.Background()
@@ -465,7 +465,7 @@ func testErrorMessageGeneration(cfg *config.Config, client *llm.Client, errorDet
 	log.Println()
 
 	// システムプロンプト（キャラクター設定のみ）
-	systemPrompt := llm.BuildSystemPrompt(cfg, "", "", "", true)
+	systemPrompt := llm.BuildSystemPrompt(cfg, "", "", "", true, cfg.CharacterPriority)
 
 	// API呼び出し
 	ctx := context.Background()
@@ -508,7 +508,7 @@ func testConversation(cfg *config.Config, client *llm.Client, lastMessage string
 	log.Println()
 
 	// システムプロンプト（キャラクター設定 + 要約なし）
-	systemPrompt := llm.BuildSystemPrompt(cfg, "", "", "", true)
+	systemPrompt := llm.BuildSystemPrompt(cfg, "", "", "", true, cfg.CharacterPriority)
 
 	// API呼び出し
 	ctx := context.Background()

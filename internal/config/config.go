@@ -26,10 +26,12 @@ type Config struct {
 	AnthropicBaseURL   string
 	AnthropicModel     string
 
-	BotUsername      string
-	CharacterPrompt  string
-	AllowRemoteUsers bool
-	EnableFactStore  bool
+	// キャラクター設定
+	BotUsername       string
+	CharacterPrompt   string
+	CharacterPriority float64
+	AllowRemoteUsers  bool
+	EnableFactStore   bool
 
 	// Slack Settings
 	SlackBotToken       string
@@ -151,10 +153,11 @@ func LoadConfig() *Config {
 		MastodonServer:      os.Getenv("MASTODON_SERVER"),
 		MastodonAccessToken: os.Getenv("MASTODON_ACCESS_TOKEN"),
 
-		BotUsername:      os.Getenv("BOT_USERNAME"),
-		CharacterPrompt:  os.Getenv("CHARACTER_PROMPT"),
-		AllowRemoteUsers: parseBool(os.Getenv("ALLOW_REMOTE_USERS")),
-		EnableFactStore:  parseBool(os.Getenv("ENABLE_FACT_STORE")),
+		BotUsername:       os.Getenv("BOT_USERNAME"),
+		CharacterPrompt:   os.Getenv("CHARACTER_PROMPT"),
+		CharacterPriority: parseFloat(os.Getenv("CHARACTER_PRIORITY")),
+		AllowRemoteUsers:  parseBool(os.Getenv("ALLOW_REMOTE_USERS")),
+		EnableFactStore:   parseBool(os.Getenv("ENABLE_FACT_STORE")),
 
 		// Slack Settings
 		SlackBotToken:       os.Getenv("SLACK_BOT_TOKEN"),

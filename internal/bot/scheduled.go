@@ -123,7 +123,7 @@ func (b *Bot) executeAutoPost(ctx context.Context) {
 	prompt := llm.BuildAutoPostPrompt(facts)
 	// システムプロンプトはキャラクター設定のみを使用（要約などは不要）
 	// AutoPostの場合はMaxPostChars制限を適用
-	systemPrompt := llm.BuildSystemPrompt(b.config, "", "", "", true)
+	systemPrompt := llm.BuildSystemPrompt(b.config, "", "", "", true, b.config.CharacterPriority)
 
 	// 画像なしで呼び出し
 	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: model.RoleUser, Content: prompt}}, systemPrompt, int64(b.config.MaxPostChars), nil, b.config.LLMTemperature)

@@ -4,6 +4,7 @@ import (
 	"claude_bot/internal/config"
 	"claude_bot/internal/model"
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 	"time"
@@ -365,7 +366,7 @@ func BuildSummaryPrompt(formattedMessages, existingSummary string) string {
 }
 
 // BuildSystemPrompt creates the system prompt for conversation responses
-func BuildSystemPrompt(cfg *config.Config, sessionSummary, relevantFacts, botProfile string, includeCharacterPrompt bool) string {
+func BuildSystemPrompt(cfg *config.Config, sessionSummary, relevantFacts, botProfile string, includeCharacterPrompt bool, priority float64) string {
 	var prompt strings.Builder
 	prompt.WriteString(Messages.System.Base)
 
@@ -374,29 +375,80 @@ func BuildSystemPrompt(cfg *config.Config, sessionSummary, relevantFacts, botPro
 		prompt.WriteString(fmt.Sprintf("\nあなたのMastodon IDは @%s です。\n\n", cfg.BotUsername))
 	}
 
+	// ---------------------------------------------------------
+	// Dynamic Weight Instruction Injection
+	// ---------------------------------------------------------
+	// priority (0.0-1.0) をパーセンテージ化して指示に含める
 	if includeCharacterPrompt {
-		prompt.WriteString(cfg.CharacterPrompt)
-		prompt.WriteString("\n\n")
+		factWeight := int(math.Round((1.0 - priority) * 100))
+		charWeight := int(math.Round(priority * 100))
+
+		// 完全にアナログな指示（離散的なバケットを廃止）
+		// 数値そのものが優先度の強さを決定する
+		weightInstruction := fmt.Sprintf("BALANCE CONTROL: FACT ACCURACY (%d%%) vs CHARACTER PERSONA (%d%%).\nYou must linearly adjust your response style to match these exact percentages perfectly.\nIf Fact Accuracy is high, strict adherence to database facts is required.\nIf Character Persona is high, creative immersion and roleplay are prioritized.", factWeight, charWeight)
+
+		prompt.WriteString(weightInstruction + "\n\n")
+	}
+
+	// ---------------------------------------------------------
+	// Component Construction
+	// ---------------------------------------------------------
+
+	// Components
+	characterPart := ""
+	if includeCharacterPrompt {
+		var sb strings.Builder
+		sb.WriteString(cfg.CharacterPrompt)
+		sb.WriteString("\n\n")
 
 		if botProfile != "" {
-			prompt.WriteString("【現在の自己認識（学習済みプロファイル）】\n")
-			prompt.WriteString(botProfile)
+			sb.WriteString("【現在の自己認識（学習済みプロファイル）】\n")
+			sb.WriteString(botProfile)
+			sb.WriteString("\n\n")
+		}
+		sb.WriteString(fmt.Sprintf(Messages.System.Constraint, cfg.MaxPostChars))
+		characterPart = sb.String()
+	}
+
+	factsPart := ""
+	if relevantFacts != "" {
+		factsPart = Messages.System.KnowledgeBase + relevantFacts + "\n\n"
+	}
+
+	sessionPart := ""
+	if sessionSummary != "" {
+		sessionPart = Messages.System.SessionSummary + sessionSummary + "\n\n"
+	}
+
+	// ---------------------------------------------------------
+	// Structural Assembly (Recency Bias)
+	// ---------------------------------------------------------
+
+	// 基本順序: [Session] -> [Part A] -> [Part B]
+	// 最後にあるものが最も重視される傾向がある (Recency Bias)
+
+	prompt.WriteString(sessionPart)
+
+	if priority < 0.5 {
+		// Fact重視モード: Character -> Facts (Factsを最後に)
+		if characterPart != "" {
+			prompt.WriteString(characterPart)
 			prompt.WriteString("\n\n")
 		}
-
-		prompt.WriteString(fmt.Sprintf(Messages.System.Constraint, cfg.MaxPostChars))
-	}
-
-	if sessionSummary != "" {
-		prompt.WriteString(Messages.System.SessionSummary)
-		prompt.WriteString(sessionSummary)
-		prompt.WriteString("\n\n")
-	}
-
-	if relevantFacts != "" {
-		prompt.WriteString(Messages.System.KnowledgeBase)
-		prompt.WriteString(relevantFacts)
-		prompt.WriteString("\n\n")
+		if factsPart != "" {
+			prompt.WriteString(factsPart)
+			prompt.WriteString("\n\n")
+		}
+	} else {
+		// Character重視モード: Facts -> Character (Characterを最後に)
+		if factsPart != "" {
+			prompt.WriteString(factsPart)
+			prompt.WriteString("\n\n")
+		}
+		if characterPart != "" {
+			prompt.WriteString(characterPart)
+			prompt.WriteString("\n\n")
+		}
 	}
 
 	return prompt.String()
