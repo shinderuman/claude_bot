@@ -408,8 +408,9 @@ func BuildSystemPrompt(cfg *config.Config, sessionSummary, relevantFacts, botPro
 		sb.WriteString("\n\n")
 
 		if botProfile != "" {
+			truncatedProfile := truncateFactsByPriority(botProfile, priority, includeCharacterPrompt)
 			sb.WriteString("【現在の自己認識（学習済みプロファイル）】\n")
-			sb.WriteString(botProfile)
+			sb.WriteString(truncatedProfile)
 			sb.WriteString("\n\n")
 		}
 		sb.WriteString(fmt.Sprintf(Messages.System.Constraint, cfg.MaxPostChars))

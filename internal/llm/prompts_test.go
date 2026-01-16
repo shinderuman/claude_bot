@@ -175,9 +175,10 @@ func TestBuildSystemPrompt_FactsTruncation(t *testing.T) {
 			// Note: The prompt contains other parts, but the variation comes from facts.
 
 			currentLen := len(prompt)
-			if tt.priority == 0.1 {
+			switch tt.priority {
+			case 0.1:
 				lenLowPriority = currentLen
-			} else if tt.priority == 0.9 {
+			case 0.9:
 				lenHighPriority = currentLen
 			}
 		})
@@ -191,4 +192,58 @@ func TestBuildSystemPrompt_FactsTruncation(t *testing.T) {
 	// Calculate ratio difference to ensure it's roughly correct
 	// Note: prompt includes base text, so exact ratio check on total length is hard.
 	// We just verified the direction (shorter).
+}
+
+func TestBuildSystemPrompt_ProfileTruncation(t *testing.T) {
+	cfg := &config.Config{
+		BotUsername:     "testbot",
+		CharacterPrompt: "CharacterPrompt",
+		MaxPostChars:    500,
+	}
+
+	// Create a long profile string (must be longer than MinFactsRetentionRatio threshold to see truncation)
+	longProfile := strings.Repeat("ProfileInfo ", 100) // 1200 chars approx
+
+	tests := []struct {
+		name     string
+		priority float64
+	}{
+		{
+			name:     "Priority 0.9 (Profile Truncated)",
+			priority: 0.9,
+		},
+		{
+			name:     "Priority 0.0 (Profile Retained)",
+			priority: 0.0,
+		},
+	}
+
+	var truncatedLen int
+	var fullLen int
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Only pass botProfile, no facts, no summary
+			prompt := BuildSystemPrompt(cfg, "", "", longProfile, true, tt.priority)
+
+			// Check for truncation marker if priority is high
+			isTruncated := strings.Contains(prompt, "... (truncated)")
+
+			if tt.priority == 0.9 {
+				truncatedLen = len(prompt)
+				if !isTruncated {
+					t.Errorf("Expected truncated profile at Priority 0.9, but marker not found")
+				}
+			} else {
+				fullLen = len(prompt)
+				if isTruncated {
+					t.Errorf("Expected full profile at Priority 0.1, but truncation marker found")
+				}
+			}
+		})
+	}
+
+	if truncatedLen >= fullLen {
+		t.Errorf("Expected truncated prompt (len=%d) to be shorter than full prompt (len=%d)", truncatedLen, fullLen)
+	}
 }

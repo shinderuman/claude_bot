@@ -208,7 +208,16 @@ func testResponse(cfg *config.Config, client *llm.Client, factService *facts.Fac
 		log.Println("関連する事実は見つかりませんでした")
 	}
 
-	response := client.GenerateResponse(ctx, session, conversation, relevantFacts, "", currentImages)
+	var botProfile string
+	if cfg.BotProfileFile != "" {
+		if content, err := os.ReadFile(cfg.BotProfileFile); err == nil {
+			botProfile = string(content)
+		} else {
+			log.Printf("Botプロファイル読み込み失敗（無視します）: %v", err)
+		}
+	}
+
+	response := client.GenerateResponse(ctx, session, conversation, relevantFacts, botProfile, currentImages)
 
 	if response == "" {
 		log.Fatal("エラー: Claudeからの応答がありません")
