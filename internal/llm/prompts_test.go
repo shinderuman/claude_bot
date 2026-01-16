@@ -131,3 +131,64 @@ func TestBuildSystemPrompt_AnalogPriority(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildSystemPrompt_FactsTruncation(t *testing.T) {
+	cfg := &config.Config{
+		BotUsername:     "testbot",
+		CharacterPrompt: "CharacterPrompt",
+		MaxPostChars:    500,
+	}
+
+	// Create a long facts string
+	longFacts := strings.Repeat("a", 1000)
+
+	tests := []struct {
+		name                   string
+		priority               float64
+		includeCharacterPrompt bool
+		wantLengthOrder        string // "shorter" or "longer" relative to other priority (concept check)
+		expectedRatio          float64
+	}{
+		{
+			name:                   "Priority 0.1 (Facts 90%) - High Retention",
+			priority:               0.1,
+			includeCharacterPrompt: true,
+			expectedRatio:          0.9,
+		},
+		{
+			name:                   "Priority 0.9 (Facts 10%) - Low Retention",
+			priority:               0.9,
+			includeCharacterPrompt: true,
+			expectedRatio:          0.1,
+		},
+	}
+
+	var lenLowPriority int
+	var lenHighPriority int
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prompt := BuildSystemPrompt(cfg, "", longFacts, "", tt.includeCharacterPrompt, tt.priority)
+
+			// Extract facts part length (approximate)
+			// KnowledgeBase header is constant, we look at the content length
+			// Note: The prompt contains other parts, but the variation comes from facts.
+
+			currentLen := len(prompt)
+			if tt.priority == 0.1 {
+				lenLowPriority = currentLen
+			} else if tt.priority == 0.9 {
+				lenHighPriority = currentLen
+			}
+		})
+	}
+
+	// Verify that High Priority (Character focused) results in SHORTER prompt due to facts truncation
+	if lenHighPriority >= lenLowPriority {
+		t.Errorf("Expected prompt with Priority 0.9 (Low Facts) to be shorter than Priority 0.1. Got P0.9=%d, P0.1=%d", lenHighPriority, lenLowPriority)
+	}
+
+	// Calculate ratio difference to ensure it's roughly correct
+	// Note: prompt includes base text, so exact ratio check on total length is hard.
+	// We just verified the direction (shorter).
+}

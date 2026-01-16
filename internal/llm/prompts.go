@@ -387,11 +387,11 @@ func BuildSystemPrompt(cfg *config.Config, sessionSummary, relevantFacts, botPro
 あなたのキャラクター設定: %d%% / データベースの事実情報: %d%%
 
 この数値に応じて応答を調整してください：
-- キャラクター設定100%%の場合：下記のキャラクター設定を完全に優先。事実情報と矛盾してもキャラクターを崩さない。
-- 事実情報100%%の場合：下記「【重要：データベースの事実情報】」を完全に優先。キャラクターの口調より正確さを優先。
-- 中間値の場合：数値に比例して両者のバランスを取る。
+- キャラクター設定100%%の場合：下記のキャラクター設定を完全に優先。事実情報（特に他者のプロファイルや経歴）を自分のものとして語らないこと。
+- 事実情報100%%の場合：下記「【重要：データベースの事実情報】」を完全に優先。正確さを最優先。
+- 中間値の場合：数値に比例してバランスを取るが、自己認識（一人称、名前、性格、経歴、能力）は常にキャラクター設定に従うこと。
 
-現在の設定では、キャラクター設定を%d%%の強さで維持してください。`, charWeight, factWeight, charWeight)
+現在の設定では、キャラクター設定を%d%%の強さで維持してください。事実情報に含まれる他者の経歴やスペックを自分と混同しないよう厳重に注意してください。`, charWeight, factWeight, charWeight)
 
 		prompt.WriteString(weightInstruction + "\n\n")
 	}
@@ -418,7 +418,8 @@ func BuildSystemPrompt(cfg *config.Config, sessionSummary, relevantFacts, botPro
 
 	factsPart := ""
 	if relevantFacts != "" {
-		factsPart = Messages.System.KnowledgeBase + relevantFacts + "\n\n"
+		factsContent := truncateFactsByPriority(relevantFacts, priority, includeCharacterPrompt)
+		factsPart = Messages.System.KnowledgeBase + factsContent + "\n\n"
 	}
 
 	sessionPart := ""
