@@ -111,7 +111,6 @@ func (b *Bot) scheduleDelayedTask(ctx context.Context, interval time.Duration, t
 			return
 		}
 
-		log.Printf("%s: 実行開始", taskName)
 		task(ctx)
 	}()
 }
