@@ -29,12 +29,12 @@ ensure_remote_dir() {
 
 build_bot() {
     echo "Linux向けバイナリ(Bot)をビルド中..."
-    GOOS=linux GOARCH=amd64 go build -o "${APP_NAME}" ./cmd/claude_bot
-    if [ ! -f "${APP_NAME}" ]; then
+    GOOS=linux GOARCH=amd64 go build -o "${APP_NAME}_bin" ./cmd/claude_bot
+    if [ ! -f "${APP_NAME}_bin" ]; then
         echo "エラー: ビルドに失敗しました"
         exit 1
     fi
-    chmod +x "${APP_NAME}"
+    chmod +x "${APP_NAME}_bin"
     echo "  ✓ Botビルド完了"
 }
 
@@ -50,10 +50,43 @@ build_migration() {
 }
 
 transfer_bot() {
-    echo "Botバイナリを転送中..."
-    scp -i "${SFTP_KEY_FILE}" "${APP_NAME}" "${SFTP_USER}@${REMOTE_HOST}:${REMOTE_DIR}/${APP_NAME}.new"
-    ssh -i "${SFTP_KEY_FILE}" "${SFTP_USER}@${REMOTE_HOST}" "mv '${REMOTE_DIR}/${APP_NAME}.new' '${REMOTE_DIR}/${APP_NAME}' && chmod +x '${REMOTE_DIR}/${APP_NAME}'"
-    rm "${APP_NAME}"
+    local wrapper_file="$1"
+    echo "Botバイナリと詳細を転送中..."
+    
+    # 1. バイナリの転送
+    scp -i "${SFTP_KEY_FILE}" "${APP_NAME}_bin" "${SFTP_USER}@${REMOTE_HOST}:${REMOTE_DIR}/${APP_NAME}_bin.new"
+    
+    # 2. ラッパーの転送
+    scp -i "${SFTP_KEY_FILE}" "$wrapper_file" "${SFTP_USER}@${REMOTE_HOST}:${REMOTE_DIR}/${APP_NAME}.wrapper.new"
+    
+    # 3. 配置（アトミックに近い形）
+    # - バイナリは claude_bot_bin に配置
+    # - ラッパーは claude_bot (実行ファイル名) に配置
+    ssh -i "${SFTP_KEY_FILE}" "${SFTP_USER}@${REMOTE_HOST}" "
+        mv '${REMOTE_DIR}/${APP_NAME}_bin.new' '${REMOTE_DIR}/${APP_NAME}_bin' && 
+        chmod +x '${REMOTE_DIR}/${APP_NAME}_bin' &&
+        mv '${REMOTE_DIR}/${APP_NAME}.wrapper.new' '${REMOTE_DIR}/${APP_NAME}' && 
+        chmod +x '${REMOTE_DIR}/${APP_NAME}'
+    "
+    
+    rm "${APP_NAME}_bin" "$wrapper_file"
+}
+
+create_wrapper_script() {
+    local run_maintenance="$1"
+    local filename="wrapper_${run_maintenance}.sh"
+    
+    # 安全のために絶対パスを再構築
+    local bin_path="/home/${SFTP_USER}/${APP_NAME}/${APP_NAME}_bin"
+    
+    cat << EOF > "$filename"
+#!/bin/bash
+# Generated Wrapper Script
+export RUN_MAINTENANCE=${run_maintenance}
+exec ${bin_path} "\$@"
+EOF
+    chmod +x "$filename"
+    echo "$filename"
 }
 
 transfer_migration() {
@@ -202,13 +235,62 @@ run_normal_deploy() {
     backup_remote_facts
     sync_data_dir
     build_bot
+    
+    # ラッパースクリプト生成 (メンテナンス無効)
+    wrapper=$(create_wrapper_script "false")
+    
     stop_services "${target_services[@]}"
-    transfer_bot
+    transfer_bot "$wrapper"
     start_services "${target_services[@]}"
     
     echo ""
     echo "=== デプロイ完了 ==="
     echo "ステータス確認: ssh -i ${SFTP_KEY_FILE} ${SFTP_USER}@${REMOTE_HOST} 'supervisorctl status ${target_services[*]}'"
+}
+
+run_maintenance_deploy() {
+    echo "  → メンテナンス実行デプロイ"
+    echo ""
+    echo "実行計画:"
+    echo "  1. メンテナンスモード(RUN_MAINTENANCE=true)で起動"
+    echo "  2. 起動直後に通常モード(RUN_MAINTENANCE=false)に戻す"
+    echo "     (次回以降の自動再起動でメンテナンスが走らないようにするため)"
+    echo ""
+    
+    # サービスの選択
+    local selected_str=$(multiselect_services)
+    IFS=' ' read -r -a target_services <<< "$selected_str"
+    if [ ${#target_services[@]} -eq 0 ]; then
+         echo "  ⚠ サービス未選択。中止します。"
+         exit 1
+    fi
+    echo "  → 対象サービス: ${target_services[*]}"
+    
+    ensure_remote_dir
+    backup_remote_facts
+    sync_data_dir
+    build_bot
+    
+    # 1. メンテナンス有効版ラッパー生成
+    wrapper_maint=$(create_wrapper_script "true")
+    
+    stop_services "${target_services[@]}"
+    transfer_bot "$wrapper_maint"
+    start_services "${target_services[@]}"
+    
+    echo "  ✓ メンテナンスモードでサービス再起動完了"
+    
+    # 2. 通常版ラッパーに戻す (自己修正)
+    echo "  → 通常モードのラッパーに戻しています..."
+    wrapper_normal=$(create_wrapper_script "false")
+    
+    scp -i "${SFTP_KEY_FILE}" "$wrapper_normal" "${SFTP_USER}@${REMOTE_HOST}:${REMOTE_DIR}/${APP_NAME}.wrapper.normal"
+    ssh -i "${SFTP_KEY_FILE}" "${SFTP_USER}@${REMOTE_HOST}" "mv '${REMOTE_DIR}/${APP_NAME}.wrapper.normal' '${REMOTE_DIR}/${APP_NAME}' && chmod +x '${REMOTE_DIR}/${APP_NAME}'"
+    rm "$wrapper_normal"
+    
+    echo "  ✓ 通常モードへ復帰完了"
+    echo ""
+    echo "=== メンテナンスデプロイ完了 ==="
 }
 
 run_migration_deploy() {
@@ -399,13 +481,14 @@ main() {
 
     # メインメニュー
     echo "実行モードを選択してください:"
-    local mode=$(select_menu "モード:" "同期のみ" "通常デプロイ (Bot本体)" "マイグレーションデプロイ (ツールのみ)" "強制ファクト更新モード")
+    local mode=$(select_menu "モード:" "同期のみ" "通常デプロイ (Bot本体)" "メンテナンス実行デプロイ" "マイグレーションデプロイ (ツールのみ)" "強制ファクト更新モード")
     
     case $mode in
         0) run_sync_only ;;
         1) run_normal_deploy ;;
-        2) run_migration_deploy ;;
-        3) run_force_facts_update ;;
+        2) run_maintenance_deploy ;;
+        3) run_migration_deploy ;;
+        4) run_force_facts_update ;;
     esac
 }
 

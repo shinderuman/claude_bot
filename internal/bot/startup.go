@@ -14,19 +14,25 @@ import (
 // 1. Lightweight: Reload, Load Profile, Discovery (Staggered by 1m)
 // 2. Heavy: Compression, Maintenance Loop (Staggered by 10m)
 func (b *Bot) executeStartupTasks(ctx context.Context) {
-	// Record start time to identify "new" facts collected during the delay
-	// bootTime := time.Now() (Unused)
-
-	// Calculate delay based on cluster position (Deterministic Slot)
 	instanceID, totalInstances, err := discovery.GetMyPosition(b.config.BotUsername)
 	if err != nil {
-		// クラスタ位置特定に失敗した場合は、起動順序が保証できないため起動を中止する
 		log.Fatalf("[Startup] Critical Error: Failed to get cluster position for delay: %v. Cannot proceed safely.", err)
 	}
 
 	log.Printf("[Startup] Cluster Size: %d instances. Position: %d", totalInstances, instanceID)
 
-	// 1. Lightweight Tasks
+	lightTasks, heavyTasks := b.prepareStartupTasks()
+
+	lightDelay := time.Duration(instanceID) * StartupInitSlotDuration
+	log.Printf("[Startup] 競合回避のため、Lightタスクの開始を %v 待機します (Instance: %d)", lightDelay, instanceID)
+	go runWithDelay(ctx, lightDelay, lightTasks)
+
+	heavyDelay := time.Duration(instanceID) * StartupMaintenanceSlotDuration
+	log.Printf("[Startup] 競合回避のため、Heavyタスクの開始を %v 待機します (Instance: %d)", heavyDelay, instanceID)
+	go runWithDelay(ctx, heavyDelay, heavyTasks)
+}
+
+func (b *Bot) prepareStartupTasks() ([]func(context.Context), []func(context.Context)) {
 	lightTasks := []func(context.Context){
 		func(ctx context.Context) {
 			if b.factCollector != nil {
@@ -46,18 +52,18 @@ func (b *Bot) executeStartupTasks(ctx context.Context) {
 		},
 	}
 
-	// 2. Heavy Tasks
 	heavyTasks := []func(context.Context){}
 
-	// Schedule Light Tasks
-	lightDelay := time.Duration(instanceID) * StartupInitSlotDuration
-	log.Printf("[Startup] 競合回避のため、Lightタスクの開始を %v 待機します (Instance: %d)", lightDelay, instanceID)
-	go runWithDelay(ctx, lightDelay, lightTasks)
+	if b.config.RunMaintenanceOnStartup {
+		heavyTasks = append(heavyTasks, func(ctx context.Context) {
+			log.Println("[Startup] メンテナンスモードが有効です。ファクトメンテナンスを実行します...")
+			if b.factService != nil {
+				b.factService.PerformMaintenance(ctx)
+			}
+		})
+	}
 
-	// Schedule Heavy Tasks
-	heavyDelay := time.Duration(instanceID) * StartupMaintenanceSlotDuration
-	log.Printf("[Startup] 競合回避のため、Heavyタスクの開始を %v 待機します (Instance: %d)", heavyDelay, instanceID)
-	go runWithDelay(ctx, heavyDelay, heavyTasks)
+	return lightTasks, heavyTasks
 }
 
 // runWithDelay waits for the specified duration and then executes tasks sequentially.

@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"claude_bot/internal/config"
 	"context"
 	"testing"
 	"time"
@@ -83,5 +84,27 @@ func TestRunWithDelay_ContextCancelBetweenTasks(t *testing.T) {
 
 	if executedCount != 1 {
 		t.Errorf("Expected only 1 task to be executed, got %d", executedCount)
+	}
+}
+
+func TestPrepareStartupTasks_Maintenance(t *testing.T) {
+	b1 := &Bot{
+		config: &config.Config{
+			RunMaintenanceOnStartup: false,
+		},
+	}
+	_, heavyTasks1 := b1.prepareStartupTasks()
+	if len(heavyTasks1) != 0 {
+		t.Errorf("Expected 0 heavy tasks when maintenance is disabled, got %d", len(heavyTasks1))
+	}
+
+	b2 := &Bot{
+		config: &config.Config{
+			RunMaintenanceOnStartup: true,
+		},
+	}
+	_, heavyTasks2 := b2.prepareStartupTasks()
+	if len(heavyTasks2) != 1 {
+		t.Errorf("Expected 1 heavy task when maintenance is enabled, got %d", len(heavyTasks2))
 	}
 }

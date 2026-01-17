@@ -39,6 +39,9 @@ func main() {
 	}
 
 	// 環境変数の読み込み（共通設定ファイル .env の読み込みも含む）
+	if os.Getenv("RUN_MAINTENANCE") == "" {
+		os.Setenv("RUN_MAINTENANCE", "false")
+	}
 	config.LoadEnvironment(envPath)
 	if envPath != "" {
 		log.Printf("設定ファイルを読み込みました: %s", envPath)
