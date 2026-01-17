@@ -8,7 +8,6 @@ import (
 
 	"claude_bot/internal/llm"
 	"claude_bot/internal/model"
-	"claude_bot/internal/store"
 )
 
 // ExtractAndSaveFacts extracts facts from a message and saves them to the store
@@ -55,14 +54,7 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, message string, b
 			IsTrusted:          baseFact.IsTrusted,
 		}
 
-		if !s.shouldSaveFact(fact) {
-			continue
-		}
-
-		if store.IsValidTarget(fact.Target) {
-			s.factStore.AddFact(fact)
-			LogFactSaved(fact)
-		}
+		s.AddFact(fact)
 	}
 
 }
@@ -107,14 +99,7 @@ func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, url
 			PostAuthorUserName: baseFact.PostAuthorUserName,
 		}
 
-		if !s.shouldSaveFact(fact) {
-			continue
-		}
-
-		if store.IsValidTarget(fact.Target) {
-			s.factStore.AddFact(fact)
-			LogFactSaved(fact)
-		}
+		s.AddFact(fact)
 	}
 
 }
@@ -160,14 +145,7 @@ func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summar
 			PostAuthorUserName: "",
 		}
 
-		if !s.shouldSaveFact(fact) {
-			continue
-		}
-
-		if store.IsValidTarget(fact.Target) {
-			s.factStore.AddFact(fact)
-			LogFactSaved(fact)
-		}
+		s.AddFact(fact)
 	}
 
 }
@@ -195,9 +173,7 @@ func (s *FactService) SaveColleagueFact(ctx context.Context, targetUserName, dis
 		PostAuthorUserName: targetUserName,
 	}
 
-	if store.IsValidTarget(fact.Target) {
-		s.factStore.AddFact(fact)
-	}
+	s.AddFact(fact)
 	return nil
 }
 

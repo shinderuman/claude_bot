@@ -1,6 +1,7 @@
 package facts
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"claude_bot/internal/config"
 	"claude_bot/internal/mastodon"
 	"claude_bot/internal/model"
+	"claude_bot/internal/store"
 
 	gomastodon "github.com/mattn/go-mastodon"
 )
@@ -374,4 +376,116 @@ func makeFacts(count int, ts time.Time) []model.Fact {
 		})
 	}
 	return facts
+}
+
+func TestFactService_isValidFact(t *testing.T) {
+	mockLLM := &MockLLMClient{}
+
+	tests := []struct {
+		name string
+		fact model.Fact
+		want bool
+	}{
+		// 1. Target Validation
+		{
+			name: "Empty Target",
+			fact: model.Fact{Target: "", Key: "k", Value: "v"},
+			want: false,
+		},
+		{
+			name: "Unknown Target",
+			fact: model.Fact{Target: model.UnknownTarget, Key: "k", Value: "v"},
+			want: false,
+		},
+		{
+			name: "Role User Target",
+			fact: model.Fact{Target: model.RoleUser, Key: "k", Value: "v"},
+			want: false,
+		},
+		{
+			name: "Role Assistant Target",
+			fact: model.Fact{Target: model.RoleAssistant, Key: "k", Value: "v"},
+			want: false,
+		},
+
+		// 2. Content Validation
+		{
+			name: "Nil Value",
+			fact: model.Fact{Target: "valid_target", Key: "k", Value: nil},
+			want: false,
+		},
+		{
+			name: "Empty Key",
+			fact: model.Fact{Target: "valid_target", Key: "", Value: "v"},
+			want: false,
+		},
+		{
+			name: "Whitespace Key",
+			fact: model.Fact{Target: "valid_target", Key: "  ", Value: "v"},
+			want: false,
+		},
+		{
+			name: "Empty Value String",
+			fact: model.Fact{Target: "valid_target", Key: "k", Value: ""},
+			want: false,
+		},
+		{
+			name: "Whitespace Value String",
+			fact: model.Fact{Target: "valid_target", Key: "k", Value: "  "},
+			want: false,
+		},
+
+		// 3. Bot Filtering
+		{
+			name: "Known Bot with 'bot' keyword",
+			fact: model.Fact{Target: "known_bot", Key: "desc", Value: "I am a bot"},
+			want: false,
+		},
+		{
+			name: "Known Bot without 'bot' keyword",
+			fact: model.Fact{Target: "known_bot", Key: "status", Value: "Online"},
+			want: true,
+		},
+
+		// 4. Normal Case
+		{
+			name: "Valid User Fact",
+			fact: model.Fact{Target: "valid_target", Key: "k", Value: "v"},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			factStore := store.NewFactStore(&MockFactStorage{}, nil, "")
+
+			// Setup service with known bots
+			knownBots := map[string]struct{}{"known_bot": {}}
+			service := NewFactService(&config.Config{}, factStore, mockLLM, nil, nil, knownBots)
+
+			if got := service.isValidFact(tt.fact); got != tt.want {
+				t.Errorf("isValidFact() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFactService_AddFact_Save(t *testing.T) {
+	mockLLM := &MockLLMClient{}
+	var saved bool
+	mockStorage := &MockFactStorage{
+		AddFunc: func(ctx context.Context, fact model.Fact) error {
+			saved = true
+			return nil
+		},
+	}
+	factStore := store.NewFactStore(mockStorage, nil, "")
+	service := NewFactService(&config.Config{}, factStore, mockLLM, nil, nil, nil)
+
+	validFact := model.Fact{Target: "valid", Key: "k", Value: "v"}
+	service.AddFact(validFact)
+
+	if !saved {
+		t.Error("AddFact should save valid fact")
+	}
 }

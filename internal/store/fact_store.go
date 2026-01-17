@@ -58,14 +58,6 @@ func (s *FactStore) AddFact(fact model.Fact) {
 	}
 }
 
-func IsValidTarget(target string) bool {
-	switch target {
-	case "", model.UnknownTarget, model.RoleUser, model.RoleAssistant:
-		return false
-	}
-	return true
-}
-
 func (s *FactStore) saveAsync() {
 	s.mu.Lock()
 	defer s.mu.Unlock()

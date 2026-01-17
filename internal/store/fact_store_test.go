@@ -7,29 +7,6 @@ import (
 	"time"
 )
 
-func TestIsValidTarget(t *testing.T) {
-	tests := []struct {
-		name   string
-		target string
-		want   bool
-	}{
-		{"valid target", "user123", true},
-		{"unknown target", model.UnknownTarget, false},
-		{"user target", model.RoleUser, false},
-		{"assistant target", model.RoleAssistant, false},
-		{"empty target", "", false},
-		{"general target", model.GeneralTarget, true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := IsValidTarget(tt.target); got != tt.want {
-				t.Errorf("IsValidTarget(%q) = %v, want %v", tt.target, got, tt.want)
-			}
-		})
-	}
-}
-
 type mockFactStorage struct {
 	facts map[string][]model.Fact
 }

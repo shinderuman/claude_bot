@@ -269,10 +269,7 @@ func (fc *FactCollector) extractFactsFromContent(ctx context.Context, status *go
 			PostAuthorUserName: postAuthorUserName,
 		}
 
-		if store.IsValidTarget(fact.Target) {
-			fc.factStore.AddFact(fact)
-			facts.LogFactSaved(fact)
-		}
+		fc.factService.AddFact(fact)
 	}
 
 }
@@ -385,10 +382,7 @@ func (fc *FactCollector) processURL(ctx context.Context, urlStr, urlDomain, sour
 			PostAuthorUserName: postAuthorUserName,
 		}
 
-		if store.IsValidTarget(fact.Target) {
-			fc.factStore.AddFact(fact)
-			facts.LogFactSaved(fact)
-		}
+		fc.factService.AddFact(fact)
 	}
 
 }

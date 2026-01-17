@@ -58,26 +58,6 @@ func NewFactService(cfg *config.Config, store *store.FactStore, llm LLMClient, m
 	}
 }
 
-// LogFactSaved outputs a standardized log message for saved facts
-func LogFactSaved(fact model.Fact) {
-	parts := []string{
-		formatTarget(fact),
-		fmt.Sprintf("Key=%s", fact.Key),
-		fmt.Sprintf("Value=%v", fact.Value),
-		fmt.Sprintf("Source=%s", fact.SourceType),
-	}
-
-	if fact.SourceURL != "" {
-		parts = append(parts, fmt.Sprintf("URL=%s", fact.SourceURL))
-	}
-
-	if authorInfo := formatAuthor(fact); authorInfo != "" {
-		parts = append(parts, authorInfo)
-	}
-
-	log.Printf("✅ ファクト保存: %s", strings.Join(parts, ", "))
-}
-
 // formatTarget formats the Target field with optional TargetUserName
 func formatTarget(fact model.Fact) string {
 	if fact.TargetUserName != "" {
@@ -107,11 +87,57 @@ func formatAuthor(fact model.Fact) string {
 	return ""
 }
 
-func (s *FactService) shouldSaveFact(fact model.Fact) bool {
-	if _, isBot := s.knownBots[fact.Target]; !isBot {
-		return true
+func (s *FactService) AddFact(fact model.Fact) {
+	if !s.isValidFact(fact) {
+		return
 	}
 
+	s.factStore.AddFact(fact)
+	s.logFactSaved(fact)
+}
+
+func (s *FactService) isValidFact(fact model.Fact) bool {
+	switch fact.Target {
+	case "", model.UnknownTarget, model.RoleUser, model.RoleAssistant:
+		return false
+	}
+
+	if fact.Value == nil {
+		return false
+	}
 	valStr := fmt.Sprint(fact.Value)
-	return !strings.Contains(strings.ToLower(valStr), BlockedBotFactKeyword)
+	if strings.TrimSpace(valStr) == "" {
+		return false
+	}
+
+	if strings.TrimSpace(fact.Key) == "" {
+		return false
+	}
+
+	if _, isBot := s.knownBots[fact.Target]; isBot {
+		if strings.Contains(strings.ToLower(valStr), BlockedBotFactKeyword) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (s *FactService) logFactSaved(fact model.Fact) {
+	parts := []string{
+		formatTarget(fact),
+		fmt.Sprintf("Key=%s", fact.Key),
+		fmt.Sprintf("Value=%v", fact.Value),
+		fmt.Sprintf("Source=%s", fact.SourceType),
+	}
+
+	if fact.SourceURL != "" {
+		parts = append(parts, fmt.Sprintf("URL=%s", fact.SourceURL))
+	}
+
+	if authorInfo := formatAuthor(fact); authorInfo != "" {
+		parts = append(parts, authorInfo)
+	}
+
+	log.Printf("✅ ファクト保存: %s", strings.Join(parts, ", "))
 }
