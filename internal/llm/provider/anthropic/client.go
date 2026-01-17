@@ -20,7 +20,9 @@ type Client struct {
 }
 
 func NewClient(cfg *config.Config) provider.Provider {
-	opts := []option.RequestOption{option.WithAPIKey(cfg.AnthropicAuthToken)}
+	opts := []option.RequestOption{
+		option.WithHeader("Authorization", "Bearer "+cfg.AnthropicAuthToken),
+	}
 	if cfg.AnthropicBaseURL != "" {
 		opts = append(opts, option.WithBaseURL(cfg.AnthropicBaseURL))
 	}
