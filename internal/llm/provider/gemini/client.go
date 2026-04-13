@@ -38,7 +38,10 @@ type Client struct {
 
 func NewClient(cfg *config.Config) provider.Provider {
 	ctx := context.Background()
-	client, err := genai.NewClient(ctx, option.WithAPIKey(cfg.GeminiAPIKey))
+
+	client, err := genai.NewClient(ctx,
+		option.WithAPIKey(cfg.GeminiAPIKey),
+	)
 	if err != nil {
 		log.Fatalf("Geminiクライアント作成エラー: %v", err)
 	}
@@ -54,12 +57,12 @@ func NewClient(cfg *config.Config) provider.Provider {
 	}
 }
 
-func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image, temperature float64) (string, error) {
+func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image, temperature float64) (string, string, error) {
 	c.configureModel(systemPrompt, maxTokens, temperature)
 
 	parts, err := c.buildCurrentMessageParts(messages, images)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	history := c.buildHistory(messages)
@@ -75,16 +78,16 @@ func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, 
 		resp, err := cs.SendMessage(ctx, parts...)
 		if err != nil {
 			log.Printf("Gemini API呼び出しエラー: %v", err)
-			return "", err
+			return "", "", err
 		}
 
 		responseText, err := c.validateResponse(ctx, resp)
 		if err == nil {
-			return responseText, nil
+			return responseText, "", nil
 		}
 	}
 
-	return "", fmt.Errorf("Gemini 生成応答が短すぎます (最大リトライ回数超過)")
+	return "", "", fmt.Errorf("Gemini 生成応答が短すぎます (最大リトライ回数超過)")
 }
 
 func (c *Client) configureModel(systemPrompt string, maxTokens int64, temperature float64) {
@@ -208,6 +211,13 @@ func (c *Client) validateResponse(ctx context.Context, resp *genai.GenerateConte
 func (c *Client) IsRetryable(err error) bool {
 	if gerr, ok := err.(*googleapi.Error); ok {
 		return gerr.Code == http.StatusTooManyRequests || gerr.Code >= http.StatusInternalServerError
+	}
+	return false
+}
+
+func (c *Client) IsBadRequest(err error) bool {
+	if gerr, ok := err.(*googleapi.Error); ok {
+		return gerr.Code == http.StatusBadRequest
 	}
 	return false
 }

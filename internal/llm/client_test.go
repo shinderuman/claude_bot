@@ -24,20 +24,28 @@ func (e *TestError) Error() string {
 
 // MockProvider for testing
 type MockProvider struct {
-	GenerateContentFunc func(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image, temperature float64) (string, error)
+	GenerateContentFunc func(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image, temperature float64) (string, string, error)
 }
 
-func (m *MockProvider) GenerateContent(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image, temperature float64) (string, error) {
+func (m *MockProvider) GenerateContent(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image, temperature float64) (string, string, error) {
 	if m.GenerateContentFunc != nil {
 		return m.GenerateContentFunc(ctx, messages, systemPrompt, maxTokens, images, temperature)
 	}
-	return "mock response", nil
+	return "mock response", "{}", nil
 }
 
 func (m *MockProvider) IsRetryable(err error) bool {
 	var te *TestError
 	if errors.As(err, &te) {
 		return te.StatusCode == http.StatusTooManyRequests || te.StatusCode >= http.StatusInternalServerError
+	}
+	return false
+}
+
+func (m *MockProvider) IsBadRequest(err error) bool {
+	var te *TestError
+	if errors.As(err, &te) {
+		return te.StatusCode == http.StatusBadRequest
 	}
 	return false
 }
@@ -63,7 +71,7 @@ func TestClient_ConcurrencyLimit(t *testing.T) {
 
 	// Identify calls using a sleep to simulate duration
 	mockP := &MockProvider{
-		GenerateContentFunc: func(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image, temperature float64) (string, error) {
+		GenerateContentFunc: func(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image, temperature float64) (string, string, error) {
 			current := atomic.AddInt32(&activeCalls, 1)
 
 			// Record peak concurrency
@@ -76,7 +84,7 @@ func TestClient_ConcurrencyLimit(t *testing.T) {
 			time.Sleep(100 * time.Millisecond)
 
 			atomic.AddInt32(&activeCalls, -1)
-			return "response", nil
+			return "response", "payload", nil
 		},
 	}
 	client.provider = mockP
@@ -111,14 +119,12 @@ func TestClient_RetryLogic(t *testing.T) {
 
 	callCount := 0
 	mockP := &MockProvider{
-		GenerateContentFunc: func(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image, temperature float64) (string, error) {
+		GenerateContentFunc: func(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image, temperature float64) (string, string, error) {
 			callCount++
 			if callCount <= 2 {
-				if callCount <= 2 {
-					return "", &TestError{StatusCode: http.StatusTooManyRequests, Message: "Too Many Requests"}
-				}
+				return "", "{}", &TestError{StatusCode: http.StatusTooManyRequests, Message: "Too Many Requests"}
 			}
-			return "success", nil
+			return "success", "{}", nil
 		},
 	}
 	client.provider = mockP

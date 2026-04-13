@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -72,39 +73,48 @@ func (c *Client) GenerateText(ctx context.Context, messages []model.Message, sys
 		return ""
 	}
 
-	content, err := c.executeWithRetry(ctx, func() (string, error) {
+	content, payload, err := c.executeWithRetry(ctx, func() (string, string, error) {
 		msgs, sysPrompt := c.adjustForGemma(messages, systemPrompt)
 		return c.provider.GenerateContent(ctx, msgs, sysPrompt, maxTokens, currentImages, temperature)
 	})
 
 	if err != nil {
 		log.Printf("LLM生成エラー (最終): %v", err)
+		details := err.Error()
+
+		if c.provider.IsBadRequest(err) {
+			log.Printf("リクエスト詳細 [Request Payload]:\n%s", payload)
+			details = fmt.Sprintf("%s\n\n[Request Payload]\n%s", details, payload)
+		}
+
 		if errorNotifier != nil {
-			go errorNotifier("LLM生成エラー", err.Error())
+			go errorNotifier("LLM生成エラー", details)
 		}
 		return ""
 	}
 	return content
 }
 
+
 // executeWithRetry executes the given operation with exponential backoff retry logic
-func (c *Client) executeWithRetry(ctx context.Context, operation func() (string, error)) (string, error) {
+func (c *Client) executeWithRetry(ctx context.Context, operation func() (string, string, error)) (string, string, error) {
 	var content string
+	var payload string
 	var err error
 	maxRetries := c.config.LLMMaxRetries
 	baseDelay := 1 * time.Second
 
 	for i := 0; i <= maxRetries; i++ {
-		content, err = operation()
+		content, payload, err = operation()
 		if err == nil {
-			return content, nil
+			return content, payload, nil
 		}
 
 		// Check if error is retryable
 		isRetryable := c.provider.IsRetryable(err)
 
 		if !isRetryable {
-			return "", err
+			return "", payload, err
 		}
 
 		if i < maxRetries {
@@ -115,11 +125,11 @@ func (c *Client) executeWithRetry(ctx context.Context, operation func() (string,
 			case <-time.After(delay):
 				continue
 			case <-ctx.Done():
-				return "", ctx.Err()
+				return "", payload, ctx.Err()
 			}
 		}
 	}
-	return "", err
+	return "", payload, err
 }
 
 func (c *Client) adjustForGemma(messages []model.Message, systemPrompt string) ([]model.Message, string) {

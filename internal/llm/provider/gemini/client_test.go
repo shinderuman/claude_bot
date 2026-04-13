@@ -112,7 +112,7 @@ func TestGenerateContent_RetryLogic(t *testing.T) {
 	// Enable profiling context to trigger retry logic
 	ctx = context.WithValue(ctx, model.ContextKeyIsProfileGeneration, true)
 
-	respText, err := client.GenerateContent(ctx, messages, "", 100, nil, 0.0)
+	respText, _, err := client.GenerateContent(ctx, messages, "", 100, nil, 0.0)
 	if err != nil {
 		t.Fatalf("GenerateContent failed: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestGenerateContent_MaxRetriesExceeded(t *testing.T) {
 	// Enable profiling context to trigger retry logic
 	ctx = context.WithValue(ctx, model.ContextKeyIsProfileGeneration, true)
 
-	_, err = client.GenerateContent(ctx, messages, "", 100, nil, 0.0)
+	_, _, err = client.GenerateContent(ctx, messages, "", 100, nil, 0.0)
 	if err == nil {
 		t.Fatal("Expected error due to max retries exceeded, got nil")
 	}
@@ -221,7 +221,7 @@ func TestGenerateContent_ShortResponseAllowed(t *testing.T) {
 	}
 
 	// Without profiler context, short response should be accepted
-	respText, err := client.GenerateContent(ctx, messages, "", 100, nil, 0.0)
+	respText, _, err := client.GenerateContent(ctx, messages, "", 100, nil, 0.0)
 	if err != nil {
 		t.Fatalf("GenerateContent failed: %v", err)
 	}
