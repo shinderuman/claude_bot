@@ -210,7 +210,8 @@ func (c *Client) validateResponse(ctx context.Context, resp *genai.GenerateConte
 
 func (c *Client) IsRetryable(err error) bool {
 	if gerr, ok := err.(*googleapi.Error); ok {
-		return gerr.Code == http.StatusTooManyRequests || gerr.Code >= http.StatusInternalServerError
+		// 429はリトライせず即座に失敗扱い（別途 IsRateLimited で判定）
+		return gerr.Code >= http.StatusInternalServerError
 	}
 	return false
 }

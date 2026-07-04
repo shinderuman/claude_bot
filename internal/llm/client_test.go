@@ -37,7 +37,8 @@ func (m *MockProvider) GenerateContent(ctx context.Context, messages []model.Mes
 func (m *MockProvider) IsRetryable(err error) bool {
 	var te *TestError
 	if errors.As(err, &te) {
-		return te.StatusCode == http.StatusTooManyRequests || te.StatusCode >= http.StatusInternalServerError
+		// 429はリトライせず即座に失敗扱い
+		return te.StatusCode >= http.StatusInternalServerError
 	}
 	return false
 }
@@ -130,7 +131,7 @@ func TestClient_RetryLogic(t *testing.T) {
 		GenerateContentFunc: func(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image, temperature float64) (string, string, error) {
 			callCount++
 			if callCount <= 2 {
-				return "", "{}", &TestError{StatusCode: http.StatusTooManyRequests, Message: "Too Many Requests"}
+				return "", "{}", &TestError{StatusCode: http.StatusInternalServerError, Message: "Internal Server Error"}
 			}
 			return "success", "{}", nil
 		},
@@ -152,6 +153,44 @@ func TestClient_RetryLogic(t *testing.T) {
 	// Expect delay: 1s + 2s = 3s minimum
 	if elapsed < 3*time.Second {
 		t.Errorf("Expected delay >= 3s, got %v", elapsed)
+	}
+}
+
+func TestClient_RateLimitNoRetry(t *testing.T) {
+	cfg := &config.Config{
+		LLMMaxConcurrency:             1,
+		LLMMaxRetries:                 5,
+		RateLimitNotifyIntervalMinutes: 60,
+	}
+
+	client := &Client{
+		config:    cfg,
+		semaphore: make(chan struct{}, 1),
+	}
+
+	callCount := 0
+	mockP := &MockProvider{
+		GenerateContentFunc: func(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image, temperature float64) (string, string, error) {
+			callCount++
+			return "", "{}", &TestError{StatusCode: http.StatusTooManyRequests, Message: "Too Many Requests"}
+		},
+	}
+	client.provider = mockP
+
+	start := time.Now()
+	resp := client.GenerateText(context.Background(), nil, "", 100, nil, 0.0)
+	elapsed := time.Since(start)
+
+	// 429はリトライされず1回のみの呼び出しで即座に失敗
+	if resp != "" {
+		t.Errorf("Expected empty response on 429, got %q", resp)
+	}
+	if callCount != 1 {
+		t.Errorf("Expected 1 call (no retry on 429), got %d", callCount)
+	}
+	// バックオフ待機なし（即座に失敗）
+	if elapsed >= 1*time.Second {
+		t.Errorf("Expected no backoff delay on 429, got %v", elapsed)
 	}
 }
 

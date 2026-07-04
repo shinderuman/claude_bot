@@ -156,7 +156,7 @@ func (c *Client) executeWithRetry(ctx context.Context, operation func() (string,
 
 		if i < maxRetries {
 			delay := baseDelay * (1 << i)
-			log.Printf("LLM生成エラー (429/5xx) - リトライ %d/%d 待機: %v. エラー: %v", i+1, maxRetries, delay, err)
+			log.Printf("LLM生成エラー (5xx) - リトライ %d/%d 待機: %v. エラー: %v", i+1, maxRetries, delay, err)
 
 			select {
 			case <-time.After(delay):

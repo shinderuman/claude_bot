@@ -73,7 +73,8 @@ func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, 
 func (c *Client) IsRetryable(err error) bool {
 	var aerr *anthropic.Error
 	if errors.As(err, &aerr) {
-		return aerr.StatusCode == http.StatusTooManyRequests || aerr.StatusCode >= http.StatusInternalServerError
+		// 429はリトライせず即座に失敗扱い（別途 IsRateLimited で判定）
+		return aerr.StatusCode >= http.StatusInternalServerError
 	}
 	return false
 }
