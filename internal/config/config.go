@@ -94,6 +94,9 @@ type Config struct {
 	// Metrics Settings
 	MetricsLogFile            string
 	MetricsLogIntervalMinutes int
+
+	// 通知設定
+	RateLimitNotifyIntervalMinutes int
 }
 
 // IsGlobalCollectionEnabled は全体（他人含む）のファクト収集が有効かどうかを返します
@@ -209,6 +212,8 @@ func LoadConfig() *Config {
 
 		MetricsLogFile:            parseString(os.Getenv("METRICS_LOG_FILE")),
 		MetricsLogIntervalMinutes: parseInt(os.Getenv("METRICS_LOG_INTERVAL_MINUTES")),
+
+		RateLimitNotifyIntervalMinutes: parseInt(os.Getenv("RATE_LIMIT_NOTIFY_INTERVAL_MINUTES")),
 	}
 
 	// プロバイダー固有のバリデーション

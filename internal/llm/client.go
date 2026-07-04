@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"claude_bot/internal/config"
@@ -25,6 +26,10 @@ type Client struct {
 	provider  provider.Provider
 	config    *config.Config
 	semaphore chan struct{}
+
+	// 429通知の間引き状態（最終通知時刻）
+	rateLimitMu        sync.Mutex
+	lastRateLimitNotif time.Time
 }
 
 func NewClient(cfg *config.Config) *Client {
@@ -88,11 +93,43 @@ func (c *Client) GenerateText(ctx context.Context, messages []model.Message, sys
 		}
 
 		if errorNotifier != nil {
-			go errorNotifier("LLM生成エラー", details)
+			if c.shouldNotifyRateLimit(err) {
+				go errorNotifier("LLM生成エラー", details)
+			} else {
+				log.Printf("LLM生成エラー (429) - 通知間引済み（前回通知から間隔内）")
+			}
 		}
 		return ""
 	}
 	return content
+}
+
+// shouldNotifyRateLimit は429エラー時のSlack通知を間引くかを判定する。
+// 429以外は常に通知。429の場合は設定間隔（RateLimitNotifyIntervalMinutes）を
+// 経過している場合のみ通知し、lastRateLimitNotif を更新する。
+// errorNotifier が非同期 goroutine で呼ばれるため、競合回避でロックする。
+func (c *Client) shouldNotifyRateLimit(err error) bool {
+	if !c.provider.IsRateLimited(err) {
+		return true
+	}
+
+	interval := time.Duration(c.config.RateLimitNotifyIntervalMinutes) * time.Minute
+
+	c.rateLimitMu.Lock()
+	defer c.rateLimitMu.Unlock()
+
+	// 間隔が0以下の場合は毎回通知
+	if interval <= 0 {
+		c.lastRateLimitNotif = time.Now()
+		return true
+	}
+
+	if time.Since(c.lastRateLimitNotif) < interval {
+		return false
+	}
+
+	c.lastRateLimitNotif = time.Now()
+	return true
 }
 
 

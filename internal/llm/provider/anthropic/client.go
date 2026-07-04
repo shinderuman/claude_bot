@@ -86,6 +86,15 @@ func (c *Client) IsBadRequest(err error) bool {
 	return false
 }
 
+// IsRateLimited はエラーが429 Too Many Requestsかを判定する
+func (c *Client) IsRateLimited(err error) bool {
+	var aerr *anthropic.Error
+	if errors.As(err, &aerr) {
+		return aerr.StatusCode == http.StatusTooManyRequests
+	}
+	return false
+}
+
 func extractResponseText(msg *anthropic.Message) string {
 	if len(msg.Content) > 0 {
 		return msg.Content[0].Text

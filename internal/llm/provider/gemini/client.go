@@ -222,6 +222,14 @@ func (c *Client) IsBadRequest(err error) bool {
 	return false
 }
 
+// IsRateLimited はエラーが429 Too Many Requestsかを判定する
+func (c *Client) IsRateLimited(err error) bool {
+	if gerr, ok := err.(*googleapi.Error); ok {
+		return gerr.Code == http.StatusTooManyRequests
+	}
+	return false
+}
+
 func extractResponseText(resp *genai.GenerateContentResponse) string {
 	if len(resp.Candidates) > 0 {
 		var result strings.Builder

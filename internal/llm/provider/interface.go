@@ -11,4 +11,5 @@ type Provider interface {
 
 	IsRetryable(err error) bool
 	IsBadRequest(err error) bool
+	IsRateLimited(err error) bool
 }

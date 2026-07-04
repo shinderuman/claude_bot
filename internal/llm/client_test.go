@@ -50,6 +50,14 @@ func (m *MockProvider) IsBadRequest(err error) bool {
 	return false
 }
 
+func (m *MockProvider) IsRateLimited(err error) bool {
+	var te *TestError
+	if errors.As(err, &te) {
+		return te.StatusCode == http.StatusTooManyRequests
+	}
+	return false
+}
+
 func TestClient_ConcurrencyLimit(t *testing.T) {
 	// Configure max concurrency = 2
 	cfg := &config.Config{
