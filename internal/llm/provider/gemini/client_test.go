@@ -78,8 +78,7 @@ func TestGenerateContent_RetryLogic(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		// Wrap in array as genai seems to expect it (possibly due to streaming endpoint or batch)
-		json.NewEncoder(w).Encode([]geminiResponse{resp})
+		json.NewEncoder(w).Encode(resp)
 	}))
 	defer ts.Close()
 
@@ -147,7 +146,7 @@ func TestGenerateContent_MaxRetriesExceeded(t *testing.T) {
 			},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]geminiResponse{resp})
+		json.NewEncoder(w).Encode(resp)
 	}))
 	defer ts.Close()
 
@@ -198,7 +197,7 @@ func TestGenerateContent_ShortResponseAllowed(t *testing.T) {
 			},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]geminiResponse{resp})
+		json.NewEncoder(w).Encode(resp)
 	}))
 	defer ts.Close()
 

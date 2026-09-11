@@ -60,22 +60,19 @@ func NewClient(cfg *config.Config) provider.Provider {
 func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image, temperature float64) (string, string, error) {
 	c.configureModel(systemPrompt, maxTokens, temperature)
 
-	parts, err := c.buildCurrentMessageParts(messages, images)
+	parts, err := c.buildRequestParts(messages, images)
 	if err != nil {
 		return "", "", err
 	}
 
-	history := c.buildHistory(messages)
 	for i := 0; i <= MaxRetries; i++ {
-		cs := c.buildChatSession(history)
-
 		if i > 0 {
 			delay := retryBaseDelay * time.Duration(1<<(i-1))
 			log.Printf("Gemini リトライ実行 %d/%d (待機: %v)", i, MaxRetries, delay)
 			time.Sleep(delay)
 		}
 
-		resp, err := cs.SendMessage(ctx, parts...)
+		resp, err := c.model.GenerateContent(ctx, parts...)
 		if err != nil {
 			log.Printf("Gemini API呼び出しエラー: %v", err)
 			return "", "", err
@@ -88,6 +85,37 @@ func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, 
 	}
 
 	return "", "", fmt.Errorf("Gemini 生成応答が短すぎます (最大リトライ回数超過)")
+}
+
+// ChatSession(SendMessage)は内部でストリーミングAPIを使用し、
+// 現行モデルではレスポンスのパースに失敗するため使用しない。
+// 履歴はプロンプトへの埋め込みで送信する。
+func (c *Client) buildRequestParts(messages []model.Message, images []model.Image) ([]genai.Part, error) {
+	parts, err := c.buildCurrentMessageParts(messages, images)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(messages) <= 1 {
+		return parts, nil
+	}
+
+	historyPrompt := buildHistoryPrompt(messages)
+	return append([]genai.Part{genai.Text(historyPrompt)}, parts...), nil
+}
+
+func buildHistoryPrompt(messages []model.Message) string {
+	var b strings.Builder
+	b.WriteString("【過去の会話履歴】\n")
+	for i := 0; i < len(messages)-1; i++ {
+		role := "ユーザー"
+		if messages[i].Role == model.RoleAssistant {
+			role = "アシスタント"
+		}
+		fmt.Fprintf(&b, "%s: %s\n", role, messages[i].Content)
+	}
+	b.WriteString("【会話履歴終了】\n\n上記の会話履歴を踏まえて、ユーザーの最新の発言に応答してください。\n\n")
+	return b.String()
 }
 
 func (c *Client) configureModel(systemPrompt string, maxTokens int64, temperature float64) {
@@ -125,35 +153,6 @@ func (c *Client) configureModel(systemPrompt string, maxTokens int64, temperatur
 			Threshold: genai.HarmBlockNone,
 		},
 	}
-}
-
-func (c *Client) buildChatSession(history []*genai.Content) *genai.ChatSession {
-	// チャットセッションの開始
-	cs := c.model.StartChat()
-	cs.History = history
-	return cs
-}
-
-func (c *Client) buildHistory(messages []model.Message) []*genai.Content {
-	// GeminiのHistoryは、最新のメッセージを含まない過去のやり取り
-	var history []*genai.Content
-
-	// 最後のメッセージ（ユーザーの新規発言）を除外したものを履歴とする
-	if len(messages) > 1 {
-		for i := 0; i < len(messages)-1; i++ {
-			msg := messages[i]
-			role := model.RoleUser
-			if msg.Role == model.RoleAssistant {
-				role = model.RoleModel
-			}
-
-			history = append(history, &genai.Content{
-				Role:  role,
-				Parts: []genai.Part{genai.Text(msg.Content)},
-			})
-		}
-	}
-	return history
 }
 
 func (c *Client) buildCurrentMessageParts(messages []model.Message, images []model.Image) ([]genai.Part, error) {
@@ -205,7 +204,7 @@ func (c *Client) validateResponse(ctx context.Context, resp *genai.GenerateConte
 	msg := fmt.Sprintf("⚠️ [生成異常] Geminiが短い応答を返しました (%d文字, Reason: %s)\n```\n%s\n```\nリトライします...", runeCount, finishReason, responseText)
 	c.slackClient.PostErrorMessageAsync(ctx, msg)
 
-	return "", fmt.Errorf("response too short")
+	return "", fmt.Errorf("response too short (%d chars)", runeCount)
 }
 
 func (c *Client) IsRetryable(err error) bool {

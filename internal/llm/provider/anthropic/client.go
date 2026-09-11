@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"time"
 
 	"claude_bot/internal/config"
 	"claude_bot/internal/llm/provider"
@@ -24,6 +25,7 @@ func NewClient(cfg *config.Config) provider.Provider {
 		Transport: &provider.PayloadCaptureTransport{
 			Base: http.DefaultTransport,
 		},
+		Timeout: 60 * time.Second,
 	}
 
 	opts := []option.RequestOption{
@@ -97,8 +99,10 @@ func (c *Client) IsRateLimited(err error) bool {
 }
 
 func extractResponseText(msg *anthropic.Message) string {
-	if len(msg.Content) > 0 {
-		return msg.Content[0].Text
+	for _, content := range msg.Content {
+		if content.Text != "" {
+			return content.Text
+		}
 	}
 	return ""
 }
