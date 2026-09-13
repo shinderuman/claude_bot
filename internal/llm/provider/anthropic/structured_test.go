@@ -74,15 +74,6 @@ func TestGenerateStructuredContentFallsBackWhenToolsAreRejected(t *testing.T) {
 		AnthropicModel:     "test-model",
 	}).(*Client)
 
-	schema := &provider.StructuredSchema{
-		Type: "object",
-		Properties: map[string]*provider.StructuredSchema{
-			"target_candidates": {Type: "array", Items: &provider.StructuredSchema{Type: "string"}},
-			"keys":              {Type: "array", Items: &provider.StructuredSchema{Type: "string"}},
-		},
-		Required: []string{"target_candidates", "keys"},
-	}
-
 	got, _, err := client.GenerateStructuredContent(
 		context.Background(),
 		[]model.Message{{Role: model.RoleUser, Content: "query"}},
@@ -90,7 +81,7 @@ func TestGenerateStructuredContentFallsBackWhenToolsAreRejected(t *testing.T) {
 		100,
 		nil,
 		0,
-		schema,
+		querySchema(),
 	)
 	if err != nil {
 		t.Fatalf("GenerateStructuredContent() error = %v", err)
@@ -100,6 +91,50 @@ func TestGenerateStructuredContentFallsBackWhenToolsAreRejected(t *testing.T) {
 	}
 	if requestCount != 2 {
 		t.Fatalf("request count = %d, want 2", requestCount)
+	}
+}
+
+func TestGenerateStructuredContentDoesNotFallbackOnUnrelatedBadRequest(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"sensitive request"}}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(&config.Config{
+		AnthropicAuthToken: "test-token",
+		AnthropicBaseURL:   server.URL,
+		AnthropicModel:     "test-model",
+	}).(*Client)
+
+	_, _, err := client.GenerateStructuredContent(
+		context.Background(),
+		[]model.Message{{Role: model.RoleUser, Content: "query"}},
+		"system",
+		100,
+		nil,
+		0,
+		querySchema(),
+	)
+	if err == nil {
+		t.Fatal("GenerateStructuredContent() accepted unrelated bad request")
+	}
+	if requestCount != 1 {
+		t.Fatalf("request count = %d, want 1", requestCount)
+	}
+}
+
+func querySchema() *provider.StructuredSchema {
+	return &provider.StructuredSchema{
+		Type: "object",
+		Properties: map[string]*provider.StructuredSchema{
+			"target_candidates": {Type: "array", Items: &provider.StructuredSchema{Type: "string"}},
+			"keys":              {Type: "array", Items: &provider.StructuredSchema{Type: "string"}},
+		},
+		Required: []string{"target_candidates", "keys"},
 	}
 }
 
