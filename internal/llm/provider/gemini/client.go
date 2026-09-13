@@ -58,7 +58,7 @@ func NewClient(cfg *config.Config) provider.Provider {
 }
 
 func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image, temperature float64) (string, string, error) {
-	c.configureModel(systemPrompt, maxTokens, temperature)
+	requestModel := c.requestModel(systemPrompt, maxTokens, temperature)
 
 	parts, err := c.buildRequestParts(messages, images)
 	if err != nil {
@@ -72,7 +72,7 @@ func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, 
 			time.Sleep(delay)
 		}
 
-		resp, err := c.model.GenerateContent(ctx, parts...)
+		resp, err := requestModel.GenerateContent(ctx, parts...)
 		if err != nil {
 			log.Printf("Gemini API呼び出しエラー: %v", err)
 			return "", "", err
@@ -85,6 +85,12 @@ func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, 
 	}
 
 	return "", "", fmt.Errorf("Gemini 生成応答が短すぎます (最大リトライ回数超過)")
+}
+
+func (c *Client) requestModel(systemPrompt string, maxTokens int64, temperature float64) *genai.GenerativeModel {
+	requestModel := *c.model
+	configureModel(&requestModel, systemPrompt, maxTokens, temperature)
+	return &requestModel
 }
 
 // ChatSession(SendMessage)は内部でストリーミングAPIを使用し、
@@ -118,24 +124,24 @@ func buildHistoryPrompt(messages []model.Message) string {
 	return b.String()
 }
 
-func (c *Client) configureModel(systemPrompt string, maxTokens int64, temperature float64) {
+func configureModel(requestModel *genai.GenerativeModel, systemPrompt string, maxTokens int64, temperature float64) {
 	// システムプロンプトの設定
 	if systemPrompt != "" {
-		c.model.SystemInstruction = &genai.Content{
+		requestModel.SystemInstruction = &genai.Content{
 			Parts: []genai.Part{genai.Text(systemPrompt)},
 		}
 	} else {
-		c.model.SystemInstruction = nil
+		requestModel.SystemInstruction = nil
 	}
 
 	// トークン上限の設定
 	if maxTokens > 0 {
-		c.model.SetMaxOutputTokens(int32(maxTokens))
+		requestModel.SetMaxOutputTokens(int32(maxTokens))
 	}
 	// Temperatureの設定
-	c.model.SetTemperature(float32(temperature))
+	requestModel.SetTemperature(float32(temperature))
 
-	c.model.SafetySettings = []*genai.SafetySetting{
+	requestModel.SafetySettings = []*genai.SafetySetting{
 		{
 			Category:  genai.HarmCategoryHarassment,
 			Threshold: genai.HarmBlockNone,

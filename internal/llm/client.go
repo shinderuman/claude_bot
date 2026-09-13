@@ -2,7 +2,6 @@ package llm
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -80,93 +79,17 @@ func (c *Client) GenerateText(ctx context.Context, messages []model.Message, sys
 
 	content, payload, err := c.executeWithRetry(ctx, func() (string, string, error) {
 		msgs, sysPrompt := c.adjustForGemma(messages, systemPrompt)
+		if schema := structuredOutputSchema(systemPrompt); schema != nil {
+			return c.provider.GenerateStructuredContent(ctx, msgs, sysPrompt, maxTokens, currentImages, temperature, schema)
+		}
 		return c.provider.GenerateContent(ctx, msgs, sysPrompt, maxTokens, currentImages, temperature)
 	})
 
 	if err != nil {
-		log.Printf("LLM生成エラー (最終): %v", err)
-		details := err.Error()
-
-		if c.provider.IsBadRequest(err) {
-			log.Printf("リクエスト詳細 [Request Payload]:\n%s", payload)
-			details = fmt.Sprintf("%s\n\n[Request Payload]\n%s", details, payload)
-		}
-
-		if errorNotifier != nil {
-			if c.shouldNotifyRateLimit(err) {
-				go errorNotifier("LLM生成エラー", details)
-			} else {
-				log.Printf("LLM生成エラー (429) - 通知間引済み（前回通知から間隔内）")
-			}
-		}
+		c.reportGenerationError(err, payload)
 		return ""
 	}
 	return content
-}
-
-// shouldNotifyRateLimit は429エラー時のSlack通知を間引くかを判定する。
-// 429以外は常に通知。429の場合は設定間隔（RateLimitNotifyIntervalMinutes）を
-// 経過している場合のみ通知し、lastRateLimitNotif を更新する。
-// errorNotifier が非同期 goroutine で呼ばれるため、競合回避でロックする。
-func (c *Client) shouldNotifyRateLimit(err error) bool {
-	if !c.provider.IsRateLimited(err) {
-		return true
-	}
-
-	interval := time.Duration(c.config.RateLimitNotifyIntervalMinutes) * time.Minute
-
-	c.rateLimitMu.Lock()
-	defer c.rateLimitMu.Unlock()
-
-	// 間隔が0以下の場合は毎回通知
-	if interval <= 0 {
-		c.lastRateLimitNotif = time.Now()
-		return true
-	}
-
-	if time.Since(c.lastRateLimitNotif) < interval {
-		return false
-	}
-
-	c.lastRateLimitNotif = time.Now()
-	return true
-}
-
-
-// executeWithRetry executes the given operation with exponential backoff retry logic
-func (c *Client) executeWithRetry(ctx context.Context, operation func() (string, string, error)) (string, string, error) {
-	var content string
-	var payload string
-	var err error
-	maxRetries := c.config.LLMMaxRetries
-	baseDelay := 1 * time.Second
-
-	for i := 0; i <= maxRetries; i++ {
-		content, payload, err = operation()
-		if err == nil {
-			return content, payload, nil
-		}
-
-		// Check if error is retryable
-		isRetryable := c.provider.IsRetryable(err)
-
-		if !isRetryable {
-			return "", payload, err
-		}
-
-		if i < maxRetries {
-			delay := baseDelay * (1 << i)
-			log.Printf("LLM生成エラー (5xx) - リトライ %d/%d 待機: %v. エラー: %v", i+1, maxRetries, delay, err)
-
-			select {
-			case <-time.After(delay):
-				continue
-			case <-ctx.Done():
-				return "", payload, ctx.Err()
-			}
-		}
-	}
-	return "", payload, err
 }
 
 func (c *Client) adjustForGemma(messages []model.Message, systemPrompt string) ([]model.Message, string) {
@@ -197,45 +120,4 @@ func (c *Client) shouldApplyGemmaWorkaround(messages []model.Message, systemProm
 		return false
 	}
 	return true
-}
-
-func ExtractJSON(s string) string {
-	// コードブロックの削除
-	s = strings.ReplaceAll(s, "```json", "")
-	s = strings.ReplaceAll(s, "```", "")
-
-	// 最初に見つかった { または [ から、最後に見つかった } または ] までを抽出
-	startObj := strings.Index(s, "{")
-	startArr := strings.Index(s, "[")
-
-	start := -1
-	if startObj != -1 && startArr != -1 {
-		start = min(startObj, startArr)
-	} else if startObj != -1 {
-		start = startObj
-	} else if startArr != -1 {
-		start = startArr
-	}
-
-	if start == -1 {
-		return "{}" // デフォルトは空オブジェクト
-	}
-
-	endObj := strings.LastIndex(s, "}")
-	endArr := strings.LastIndex(s, "]")
-
-	end := -1
-	if endObj != -1 && endArr != -1 {
-		end = max(endObj, endArr)
-	} else if endObj != -1 {
-		end = endObj
-	} else if endArr != -1 {
-		end = endArr
-	}
-
-	if end == -1 || start > end {
-		return "{}"
-	}
-
-	return s[start : end+1]
 }
