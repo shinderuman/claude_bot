@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"claude_bot/internal/llm/provider"
 	"claude_bot/internal/model"
@@ -17,7 +18,7 @@ const structuredResultToolName = "submit_json_result"
 const zAIAnthropicBaseURL = "https://api.z.ai/api/anthropic"
 
 func (c *Client) supportsToolCalling() bool {
-	return c.config.AnthropicBaseURL != zAIAnthropicBaseURL
+	return strings.TrimRight(c.config.AnthropicBaseURL, "/") != zAIAnthropicBaseURL
 }
 
 func (c *Client) GenerateStructuredContent(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image, temperature float64, schema *provider.StructuredSchema) (string, string, error) {
