@@ -23,7 +23,7 @@ func (c *Client) supportsToolCalling() bool {
 
 func (c *Client) GenerateStructuredContent(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image, temperature float64, schema *provider.StructuredSchema) (string, string, error) {
 	if !c.supportsToolCalling() {
-		return c.GenerateContent(ctx, messages, systemPrompt, maxTokens, images, temperature)
+		return "", "", fmt.Errorf("structured output is not supported by this Anthropic endpoint")
 	}
 
 	params := anthropic.MessageNewParams{
