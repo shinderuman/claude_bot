@@ -44,7 +44,17 @@ func TestExtractStructuredResultRejectsMissingResult(t *testing.T) {
 	}
 }
 
-func TestGenerateStructuredContentFallsBackWhenToolsAreRejected(t *testing.T) {
+func TestExtractStructuredResultRejectsTextOnlyResponse(t *testing.T) {
+	msg := &anthropic.Message{
+		Content: []anthropic.ContentBlockUnion{{Text: `{"intent":"chat"}`}},
+	}
+
+	if _, err := extractStructuredResult(msg); err == nil {
+		t.Fatal("extractStructuredResult() accepted text response")
+	}
+}
+
+func TestGenerateStructuredContentDoesNotFallbackOnAPIError(t *testing.T) {
 	requestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestCount++
@@ -56,51 +66,13 @@ func TestGenerateStructuredContentFallsBackWhenToolsAreRejected(t *testing.T) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		if len(request.Tools) > 0 {
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"tools unsupported"}}`))
-			return
+		if len(request.Tools) == 0 {
+			t.Error("structured request did not include tools")
 		}
 
-		_, _ = w.Write([]byte(`{"id":"msg_test","type":"message","role":"assistant","model":"test-model","content":[{"type":"text","text":"{\"target_candidates\":[],\"keys\":[]}"}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}`))
-	}))
-	defer server.Close()
-
-	client := NewClient(&config.Config{
-		AnthropicAuthToken: "test-token",
-		AnthropicBaseURL:   server.URL,
-		AnthropicModel:     "test-model",
-	}).(*Client)
-
-	got, _, err := client.GenerateStructuredContent(
-		context.Background(),
-		[]model.Message{{Role: model.RoleUser, Content: "query"}},
-		"system",
-		100,
-		nil,
-		0,
-		querySchema(),
-	)
-	if err != nil {
-		t.Fatalf("GenerateStructuredContent() error = %v", err)
-	}
-	if got != `{"target_candidates":[],"keys":[]}` {
-		t.Fatalf("GenerateStructuredContent() = %s", got)
-	}
-	if requestCount != 2 {
-		t.Fatalf("request count = %d, want 2", requestCount)
-	}
-}
-
-func TestGenerateStructuredContentDoesNotFallbackOnUnrelatedBadRequest(t *testing.T) {
-	requestCount := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"sensitive request"}}`))
+		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"tools unsupported"}}`))
 	}))
 	defer server.Close()
 
@@ -120,7 +92,7 @@ func TestGenerateStructuredContentDoesNotFallbackOnUnrelatedBadRequest(t *testin
 		querySchema(),
 	)
 	if err == nil {
-		t.Fatal("GenerateStructuredContent() accepted unrelated bad request")
+		t.Fatal("GenerateStructuredContent() accepted API error")
 	}
 	if requestCount != 1 {
 		t.Fatalf("request count = %d, want 1", requestCount)
