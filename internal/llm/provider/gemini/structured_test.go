@@ -6,7 +6,6 @@ import (
 	"claude_bot/internal/llm/provider"
 
 	"github.com/google/generative-ai-go/genai"
-	"google.golang.org/api/googleapi"
 )
 
 func TestExtractStructuredResult(t *testing.T) {
@@ -44,16 +43,15 @@ func TestExtractStructuredResultRejectsMissingResult(t *testing.T) {
 	}
 }
 
-func TestStructuredOutputUnsupported(t *testing.T) {
-	client := &Client{}
-	if !client.isStructuredOutputUnsupported(&googleapi.Error{Code: 400, Message: "function calling unsupported"}) {
-		t.Fatal("function calling rejection was not detected")
+func TestExtractStructuredResultRejectsTextOnlyResponse(t *testing.T) {
+	resp := &genai.GenerateContentResponse{
+		Candidates: []*genai.Candidate{{
+			Content: &genai.Content{Parts: []genai.Part{genai.Text(`{"intent":"chat"}`)}},
+		}},
 	}
-	if client.isStructuredOutputUnsupported(&googleapi.Error{Code: 400, Message: "sensitive request"}) {
-		t.Fatal("unrelated bad request was treated as unsupported")
-	}
-	if client.isStructuredOutputUnsupported(&googleapi.Error{Code: 500, Message: "function calling failed"}) {
-		t.Fatal("server error was treated as unsupported")
+
+	if _, err := extractStructuredResult(resp); err == nil {
+		t.Fatal("extractStructuredResult() accepted text response")
 	}
 }
 
