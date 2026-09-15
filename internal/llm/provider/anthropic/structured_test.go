@@ -54,6 +54,26 @@ func TestExtractStructuredResultRejectsTextOnlyResponse(t *testing.T) {
 	}
 }
 
+func TestSupportsToolCalling(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		baseURL string
+		want    bool
+	}{
+		{name: "z.ai", baseURL: zAIAnthropicBaseURL, want: false},
+		{name: "z.ai trailing slash", baseURL: zAIAnthropicBaseURL + "/", want: false},
+		{name: "OpenRouter", baseURL: "https://openrouter.ai/api", want: true},
+		{name: "Anthropic default", baseURL: "", want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &Client{config: &config.Config{AnthropicBaseURL: tc.baseURL}}
+			if got := client.supportsToolCalling(); got != tc.want {
+				t.Fatalf("supportsToolCalling() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestGenerateStructuredContentDoesNotFallbackOnAPIError(t *testing.T) {
 	requestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
