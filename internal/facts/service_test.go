@@ -478,6 +478,9 @@ func TestFactService_AddFact_Save(t *testing.T) {
 			saved = true
 			return nil
 		},
+		GetAllFactsFunc: func(ctx context.Context) ([]model.Fact, error) {
+			return nil, nil
+		},
 	}
 	factStore := store.NewFactStore(mockStorage, nil, "")
 	service := NewFactService(&config.Config{}, factStore, mockLLM, nil, nil, nil)
