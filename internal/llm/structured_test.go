@@ -36,12 +36,47 @@ func (m *structuredProviderMock) IsRetryable(error) bool   { return false }
 func (m *structuredProviderMock) IsBadRequest(error) bool  { return false }
 func (m *structuredProviderMock) IsRateLimited(error) bool { return false }
 
+type retryBoundaryProvider struct {
+	structuredCalls int
+	contentCalls    int
+	structuredErr   error
+	contentErr      error
+	content         string
+	retryableErr    error
+}
+
+func (m *retryBoundaryProvider) GenerateContent(context.Context, []model.Message, string, int64, []model.Image, float64) (string, string, error) {
+	m.contentCalls++
+	if m.contentErr != nil {
+		err := m.contentErr
+		m.contentErr = nil
+		return "", "{}", err
+	}
+	return m.content, "{}", nil
+}
+
+func (m *retryBoundaryProvider) GenerateStructuredContent(context.Context, []model.Message, string, int64, []model.Image, float64, *provider.StructuredSchema) (string, string, error) {
+	m.structuredCalls++
+	return "", "{}", m.structuredErr
+}
+
+func (m *retryBoundaryProvider) IsRetryable(err error) bool {
+	return errors.Is(err, m.retryableErr)
+}
+
+func (m *retryBoundaryProvider) IsBadRequest(error) bool  { return false }
+func (m *retryBoundaryProvider) IsRateLimited(error) bool { return false }
+
 func structuredTestClient(p provider.Provider) *Client {
+	return structuredTestClientWithRetries(p, 0)
+}
+
+func structuredTestClientWithRetries(p provider.Provider, retries int) *Client {
 	return &Client{
 		provider: p,
 		config: &config.Config{
 			LLMMaxConcurrency: 1,
-			LLMMaxRetries:     0,
+			LLMMaxRetries:     retries,
 		},
 		semaphore: make(chan struct{}, 1),
 	}
@@ -76,6 +111,44 @@ func TestGenerateTextFallbacksAfterStructuredError(t *testing.T) {
 	}
 	if p.structuredCalls != 1 || p.contentCalls != 1 {
 		t.Fatalf("calls = structured:%d content:%d, want 1/1 (with fallback)", p.structuredCalls, p.contentCalls)
+	}
+}
+
+func TestGenerateTextRetriesStructuredBeforeFallback(t *testing.T) {
+	retryableErr := errors.New("retryable structured error")
+	p := &retryBoundaryProvider{
+		structuredErr: retryableErr,
+		content:       `{"target_candidates":[],"keys":[]}`,
+		retryableErr:  retryableErr,
+	}
+	client := structuredTestClientWithRetries(p, 1)
+
+	got := client.GenerateText(context.Background(), []model.Message{{Role: model.RoleUser, Content: "query"}}, Messages.System.FactQuery, 100, nil, TemperatureSystem)
+	if got != p.content {
+		t.Fatalf("GenerateText() = %q, want %q", got, p.content)
+	}
+	if p.structuredCalls != 2 || p.contentCalls != 1 {
+		t.Fatalf("calls = structured:%d content:%d, want 2/1", p.structuredCalls, p.contentCalls)
+	}
+}
+
+func TestGenerateTextFallbackRetryDoesNotReenterStructured(t *testing.T) {
+	structuredErr := errors.New("tool call missing")
+	retryableErr := errors.New("retryable content error")
+	p := &retryBoundaryProvider{
+		structuredErr: structuredErr,
+		contentErr:    retryableErr,
+		content:       `{"target_candidates":[],"keys":[]}`,
+		retryableErr:  retryableErr,
+	}
+	client := structuredTestClientWithRetries(p, 1)
+
+	got := client.GenerateText(context.Background(), []model.Message{{Role: model.RoleUser, Content: "query"}}, Messages.System.FactQuery, 100, nil, TemperatureSystem)
+	if got != p.content {
+		t.Fatalf("GenerateText() = %q, want %q", got, p.content)
+	}
+	if p.structuredCalls != 1 || p.contentCalls != 2 {
+		t.Fatalf("calls = structured:%d content:%d, want 1/2", p.structuredCalls, p.contentCalls)
 	}
 }
 
