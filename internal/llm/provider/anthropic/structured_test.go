@@ -74,6 +74,23 @@ func TestSupportsToolCalling(t *testing.T) {
 	}
 }
 
+func TestGenerateStructuredContentSkipsZAI(t *testing.T) {
+	client := &Client{config: &config.Config{AnthropicBaseURL: zAIAnthropicBaseURL}}
+
+	_, _, err := client.GenerateStructuredContent(
+		context.Background(),
+		[]model.Message{{Role: model.RoleUser, Content: "query"}},
+		"system",
+		100,
+		nil,
+		0,
+		querySchema(),
+	)
+	if err == nil {
+		t.Fatal("GenerateStructuredContent() attempted structured output for z.ai")
+	}
+}
+
 func TestGenerateStructuredContentDoesNotFallbackOnAPIError(t *testing.T) {
 	requestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
