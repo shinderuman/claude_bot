@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"claude_bot/internal/llm/provider"
 	"claude_bot/internal/model"
@@ -46,28 +45,14 @@ func (c *Client) GenerateStructuredContent(ctx context.Context, messages []model
 
 	resp, err := requestModel.GenerateContent(ctx, parts...)
 	if err != nil {
-		if c.isStructuredOutputUnsupported(err) {
-			return c.GenerateContent(ctx, messages, systemPrompt, maxTokens, images, temperature)
-		}
 		return "", "", err
 	}
 
-	result, structuredErr := extractStructuredResult(resp)
-	if structuredErr == nil {
-		return result, "", nil
+	result, err := extractStructuredResult(resp)
+	if err != nil {
+		return "", "", err
 	}
-	if text := extractResponseText(resp); text != "" {
-		return text, "", nil
-	}
-	return "", "", structuredErr
-}
-
-func (c *Client) isStructuredOutputUnsupported(err error) bool {
-	if !c.IsBadRequest(err) {
-		return false
-	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "tool") || strings.Contains(message, "function")
+	return result, "", nil
 }
 
 func toGeminiSchema(schema *provider.StructuredSchema) *genai.Schema {
