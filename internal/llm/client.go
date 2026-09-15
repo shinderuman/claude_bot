@@ -77,18 +77,24 @@ func (c *Client) GenerateText(ctx context.Context, messages []model.Message, sys
 		return ""
 	}
 
-	content, payload, err := c.executeWithRetry(ctx, func() (string, string, error) {
-		msgs, sysPrompt := c.adjustForGemma(messages, systemPrompt)
-		if schema := structuredOutputSchema(systemPrompt); schema != nil {
-			structuredContent, structuredPayload, structuredErr := c.provider.GenerateStructuredContent(ctx, msgs, sysPrompt, maxTokens, currentImages, temperature, schema)
-			if structuredErr == nil {
-				return structuredContent, structuredPayload, nil
-			}
-			log.Printf("Function Call失敗、通常呼び出しにフォールバック: %v", structuredErr)
-			return c.provider.GenerateContent(ctx, msgs, sysPrompt, maxTokens, currentImages, temperature)
-		}
+	msgs, sysPrompt := c.adjustForGemma(messages, systemPrompt)
+	generateContent := func() (string, string, error) {
 		return c.provider.GenerateContent(ctx, msgs, sysPrompt, maxTokens, currentImages, temperature)
-	})
+	}
+
+	var content, payload string
+	var err error
+	if schema := structuredOutputSchema(systemPrompt); schema != nil {
+		content, payload, err = c.executeWithRetry(ctx, func() (string, string, error) {
+			return c.provider.GenerateStructuredContent(ctx, msgs, sysPrompt, maxTokens, currentImages, temperature, schema)
+		})
+		if err != nil {
+			log.Printf("Function Call失敗、通常呼び出しにフォールバック: %v", err)
+			content, payload, err = c.executeWithRetry(ctx, generateContent)
+		}
+	} else {
+		content, payload, err = c.executeWithRetry(ctx, generateContent)
+	}
 
 	if err != nil {
 		c.reportGenerationError(err, payload)
