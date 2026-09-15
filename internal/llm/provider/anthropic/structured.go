@@ -4,10 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"net/http"
-	"strings"
 
 	"claude_bot/internal/llm/provider"
 	"claude_bot/internal/model"
@@ -48,20 +45,14 @@ func (c *Client) GenerateStructuredContent(ctx context.Context, messages []model
 	msg, err := c.client.Messages.New(ctx, params)
 	payload := string(pc.Body)
 	if err != nil {
-		if isStructuredOutputUnsupported(err) {
-			return c.GenerateContent(ctx, messages, systemPrompt, maxTokens, images, temperature)
-		}
 		return "", payload, err
 	}
 
-	result, structuredErr := extractStructuredResult(msg)
-	if structuredErr == nil {
-		return result, payload, nil
+	result, err := extractStructuredResult(msg)
+	if err != nil {
+		return "", payload, err
 	}
-	if text := extractResponseText(msg); text != "" {
-		return text, payload, nil
-	}
-	return "", payload, structuredErr
+	return result, payload, nil
 }
 
 func extractStructuredResult(msg *anthropic.Message) (string, error) {
@@ -82,13 +73,4 @@ func extractStructuredResult(msg *anthropic.Message) (string, error) {
 		return string(input.Result), nil
 	}
 	return "", fmt.Errorf("structured tool call was not returned")
-}
-
-func isStructuredOutputUnsupported(err error) bool {
-	var apiErr *anthropic.Error
-	if !errors.As(err, &apiErr) || (apiErr.StatusCode != http.StatusBadRequest && apiErr.StatusCode != http.StatusNotFound) {
-		return false
-	}
-	message := strings.ToLower(apiErr.Error())
-	return strings.Contains(message, "tool") || strings.Contains(message, "function")
 }
