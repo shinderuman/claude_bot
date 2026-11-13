@@ -5,6 +5,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"claude_bot/internal/config"
@@ -25,6 +26,9 @@ type Client struct {
 	provider  provider.Provider
 	config    *config.Config
 	semaphore chan struct{}
+
+	toolUseCheck    sync.Once
+	toolUseDisabled atomic.Bool
 
 	// 429通知の間引き状態（最終通知時刻）
 	rateLimitMu        sync.Mutex
@@ -79,13 +83,24 @@ func (c *Client) GenerateText(ctx context.Context, messages []model.Message, sys
 
 	content, payload, err := c.executeWithRetry(ctx, func() (string, string, error) {
 		msgs, sysPrompt := c.adjustForGemma(messages, systemPrompt)
-		if schema := structuredOutputSchema(systemPrompt); schema != nil {
-			structuredContent, structuredPayload, structuredErr := c.provider.GenerateStructuredContent(ctx, msgs, sysPrompt, maxTokens, currentImages, temperature, schema)
-			if structuredErr == nil {
+		if schema := structuredOutputSchema(systemPrompt); schema != nil && !c.toolUseDisabled.Load() {
+			var structuredContent, structuredPayload string
+			var structuredErr error
+			attempted := false
+			generateStructured := func() {
+				attempted = true
+				structuredContent, structuredPayload, structuredErr = c.provider.GenerateStructuredContent(ctx, msgs, sysPrompt, maxTokens, currentImages, temperature, schema)
+				if structuredErr != nil && c.toolUseDisabled.CompareAndSwap(false, true) {
+					log.Printf("Function Call利用不可、以降は通常呼び出しを使用: %v", structuredErr)
+				}
+			}
+			c.toolUseCheck.Do(generateStructured)
+			if !attempted && !c.toolUseDisabled.Load() {
+				generateStructured()
+			}
+			if attempted && structuredErr == nil {
 				return structuredContent, structuredPayload, nil
 			}
-			log.Printf("Function Call失敗、通常呼び出しにフォールバック: %v", structuredErr)
-			return c.provider.GenerateContent(ctx, msgs, sysPrompt, maxTokens, currentImages, temperature)
 		}
 		return c.provider.GenerateContent(ctx, msgs, sysPrompt, maxTokens, currentImages, temperature)
 	})
