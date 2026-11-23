@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -290,10 +291,10 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 	conversation := b.history.GetOrCreateConversation(session, rootStatusID)
 
 	// 会話コンテキストの準備とユーザーメッセージの保存
-	userMessage = b.prepareConversation(ctx, conversation, notification, userMessage, statusID)
+	conversationMessage := b.prepareConversation(ctx, conversation, notification, userMessage, statusID)
 
 	// 事実の抽出（非同期）
-	b.triggerFactExtraction(ctx, notification, userMessage, statusID)
+	b.triggerFactExtraction(ctx, notification, conversationMessage, statusID)
 
 	// 画像の取得（保存はせず、今回の応答生成にのみ使用）
 	var images []model.Image
@@ -307,24 +308,19 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 	}
 
 	// 意図判定（Intent Classification）
-	intent, imagePrompt, analysisURLs, targetDate := b.classifyIntent(ctx, userMessage)
+	urlCandidates := analysisURLCandidates(notification.Status.Content)
+	intent, imagePrompt, analysisURLs, targetDate := b.classifyIntent(ctx, userMessage, urlCandidates)
 
 	switch intent {
 	case model.IntentFollowRequest:
 		return b.handleFollowRequest(ctx, conversation, notification, statusID, mention, visibility)
 	case model.IntentAnalysis:
 		// 分析機能
-		if len(analysisURLs) >= 2 {
-			// メンション情報など必要なパラメータを渡す
-			mention := b.mastodonClient.BuildMention(notification.Account.Acct)
-			statusID := string(notification.Status.ID)
-			visibility := string(notification.Status.Visibility)
+		if len(analysisURLs) == 2 && slices.Contains(urlCandidates, analysisURLs[0]) && slices.Contains(urlCandidates, analysisURLs[1]) {
+			startID := analysisStatusID(analysisURLs[0])
+			endID := analysisStatusID(analysisURLs[1])
 
-			// URLからIDを抽出（classifyIntentで抽出されたURLを使用）
-			startID := util.ExtractIDFromURL(analysisURLs[0])
-			endID := util.ExtractIDFromURL(analysisURLs[1])
-
-			if startID != "" && endID != "" {
+			if startID != endID {
 				success := b.handleAssistantRequest(ctx, session, conversation, startID, endID, userMessage, statusID, mention, visibility)
 				if success {
 					if err := b.history.Save(); err != nil {
@@ -350,7 +346,7 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 	}
 
 	// 通常の会話処理（chat または フォールバック）
-	return b.handleChatResponse(ctx, session, conversation, notification, userMessage, images, statusID, mention, visibility)
+	return b.handleChatResponse(ctx, session, conversation, notification, conversationMessage, images, statusID, mention, visibility)
 }
 
 // postErrorMessage generates and posts an error message using LLM with character voice

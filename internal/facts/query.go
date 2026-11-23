@@ -68,14 +68,19 @@ func (s *FactService) QueryRelevantFacts(ctx context.Context, author, authorUser
 		}
 
 		if len(facts) > 0 {
-			builder.WriteString("【関連する事実情報】\n")
 			for _, f := range facts {
-				// ソース情報がある場合は付記
-				sourceInfo := ""
-				if f.SourceType != "" {
-					sourceInfo = fmt.Sprintf(" (source: %s)", f.SourceType)
+				target := f.Target
+				if f.TargetUserName != "" && f.TargetUserName != f.Target {
+					target = fmt.Sprintf("%s (対象ID: %s)", f.TargetUserName, f.Target)
 				}
-				builder.WriteString(fmt.Sprintf("- %s についての %s: %v%s\n", f.TargetUserName, f.Key, f.Value, sourceInfo))
+				fmt.Fprintf(&builder, "- %s についての %s: %v", target, f.Key, f.Value)
+				if f.SourceType != "" {
+					fmt.Fprintf(&builder, " (source: %s)", f.SourceType)
+				}
+				if f.Author != "" {
+					fmt.Fprintf(&builder, " (情報提供者ID: %s)", f.Author)
+				}
+				builder.WriteByte('\n')
 			}
 			return builder.String()
 		}

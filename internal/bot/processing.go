@@ -9,9 +9,67 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/url"
+	"path"
+	"slices"
+	"strings"
 
 	gomastodon "github.com/mattn/go-mastodon"
+	"golang.org/x/net/html"
 )
+
+// analysisURLCandidates collects full links from the current post, including links displayed in shortened form.
+func analysisURLCandidates(content string) []string {
+	doc, err := html.Parse(strings.NewReader(content))
+	if err != nil {
+		return nil
+	}
+
+	var links []string
+	for node := range doc.Descendants() {
+		switch {
+		case node.Type == html.ElementNode && node.Data == "a":
+			for _, attr := range node.Attr {
+				if attr.Key == "href" {
+					links = append(links, attr.Val)
+				}
+			}
+		case node.Type == html.TextNode:
+			insideLink := false
+			for parent := range node.Ancestors() {
+				if parent.Data == "a" {
+					insideLink = true
+					break
+				}
+			}
+			if !insideLink {
+				links = append(links, urlRegex.FindAllString(node.Data, -1)...)
+			}
+		}
+	}
+
+	var candidates []string
+	for _, link := range links {
+		if analysisStatusID(link) != "" && !fetcher.IsNoiseURL(link) && !slices.Contains(candidates, link) {
+			candidates = append(candidates, link)
+		}
+	}
+	return candidates
+}
+
+func analysisStatusID(link string) string {
+	parsed, err := url.Parse(link)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+		return ""
+	}
+	statusPath := strings.TrimSuffix(parsed.Path, "/")
+	parent := path.Dir(statusPath)
+	isAccountPost := strings.HasPrefix(parent, "/@") && strings.Count(parent, "/") == 1
+	if !isAccountPost && path.Base(parent) != "statuses" {
+		return ""
+	}
+	return util.ExtractIDFromURL(statusPath)
+}
 
 // prepareConversation handles context enrichment (parent posts, URL data) and saves the user message
 func (b *Bot) prepareConversation(ctx context.Context, conversation *model.Conversation, notification *gomastodon.Notification, userMessage, statusID string) string {

@@ -145,14 +145,14 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 }
 
 // classifyIntent classifies the user's intent using LLM
-func (b *Bot) classifyIntent(ctx context.Context, message string) (model.IntentType, string, []string, string) {
+func (b *Bot) classifyIntent(ctx context.Context, message string, urlCandidates []string) (model.IntentType, string, []string, string) {
 	// JSTの現在時刻を取得（タイムゾーンロード失敗時はUTC）
 	now := time.Now()
 	if loc, err := time.LoadLocation(b.config.Timezone); err == nil {
 		now = now.In(loc)
 	}
 
-	prompt := llm.BuildIntentClassificationPrompt(message, now)
+	prompt := llm.BuildIntentClassificationPrompt(message, now, urlCandidates...)
 	// システムプロンプトはシンプルに
 	systemPrompt := llm.Messages.System.IntentClassification
 
@@ -315,33 +315,24 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 
 	// 対象日を計算
 	now := time.Now().In(loc)
-	var targetDay time.Time
-
-	// targetDateはLLMによって既にYYYY-MM-DD形式に変換されている前提
-	parsedDate, err := time.Parse(DateFormatYMD, targetDate)
+	targetDay, err := time.ParseInLocation(DateFormatYMD, targetDate, loc)
 	if err != nil {
 		log.Printf("日付パース失敗: %s", targetDate)
 		b.postErrorMessage(ctx, statusID, mention, visibility, fmt.Sprintf(llm.Messages.Error.DateParse, targetDate))
 		return true
 	}
-	targetDay = parsedDate.In(loc)
-
 	// 3日前より過去かどうかチェック
-	// 今日の0時を基準にする
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
-	daysDiff := todayStart.Sub(time.Date(targetDay.Year(), targetDay.Month(), targetDay.Day(), 0, 0, 0, 0, loc)).Hours() / 24
-
-	if daysDiff > DailySummaryDaysLimit {
+	if targetDay.Before(todayStart.AddDate(0, 0, -DailySummaryDaysLimit)) {
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.DateLimit)
 		return true
 	}
 
-	startTime := time.Date(targetDay.Year(), targetDay.Month(), targetDay.Day(), 0, 0, 0, 0, loc)
-	endTime := startTime.Add(24 * time.Hour)
+	endTime := targetDay.AddDate(0, 0, 1)
 	targetDateStr := targetDay.Format(DateFormatYMDSlash)
 
 	// 発言を取得
-	statuses, err := b.mastodonClient.GetStatusesByDateRange(ctx, accountID, startTime, endTime)
+	statuses, err := b.mastodonClient.GetStatusesByDateRange(ctx, accountID, targetDay, endTime)
 	if err != nil {
 		log.Printf("発言取得失敗: %v", err)
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.DataFetch)
