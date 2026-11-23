@@ -48,7 +48,7 @@ func Open(cfg *config.Config) (*History, error) {
 		}
 		return nil, fmt.Errorf("会話履歴を読み込めません (%s): %w", sessionsPath, err)
 	}
-	log.Printf("履歴読み込み成功: %d件のセッション (ファイル: %s)", len(history.sessions), sessionsPath)
+	log.Printf("会話履歴読込: %dセッション、%s", len(history.sessions), sessionsPath)
 	return history, nil
 }
 

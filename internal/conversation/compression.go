@@ -39,7 +39,7 @@ func compressConversationIfNeeded(ctx context.Context, session *model.Session, c
 
 	summary := generateSummary(ctx, messagesToCompress, session.Summary, summarizer)
 	if summary == "" {
-		log.Printf("会話内要約生成エラー: 応答が空です")
+		log.Printf("会話内要約失敗: 応答なし")
 		return
 	}
 
@@ -51,7 +51,7 @@ func compressConversationIfNeeded(ctx context.Context, session *model.Session, c
 		go factExtractor.ExtractAndSaveFactsFromSummary(ctx, summary, baseFact)
 	}
 
-	log.Printf("会話内圧縮完了: %d件のメッセージを削除、%d件を保持", compressCount, len(conversation.Messages))
+	log.Printf("会話内圧縮: %d件削除、%d件保持", compressCount, len(conversation.Messages))
 }
 
 func compressOldConversations(ctx context.Context, session *model.Session, userID string, cfg *config.Config, summarizer summaryGenerator, factExtractor summaryFactExtractor) {
@@ -67,7 +67,7 @@ func compressOldConversations(ctx context.Context, session *model.Session, userI
 
 	summary := generateSummary(ctx, allMessages, session.Summary, summarizer)
 	if summary == "" {
-		log.Printf("要約生成エラー: 応答が空です")
+		log.Printf("会話履歴要約失敗: 応答なし")
 		return
 	}
 
@@ -78,7 +78,7 @@ func compressOldConversations(ctx context.Context, session *model.Session, userI
 		go factExtractor.ExtractAndSaveFactsFromSummary(ctx, summary, baseFact)
 	}
 
-	log.Printf("履歴圧縮完了: %d件の会話を要約に移行", len(oldConversations))
+	log.Printf("会話履歴圧縮: %d件要約", len(oldConversations))
 }
 
 func generateSummary(ctx context.Context, messages []model.Message, existingSummary string, summarizer summaryGenerator) string {

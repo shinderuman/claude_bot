@@ -46,7 +46,7 @@ func (b *Bot) startMetricsLogger(ctx context.Context) {
 	defer ticker.Stop()
 
 	if err := b.collectAndLogMetrics(ctx); err != nil {
-		log.Printf("メトリクスログ出力失敗: %v", err)
+		log.Printf("メトリクス出力失敗: %v", err)
 	}
 
 	for {
@@ -55,7 +55,7 @@ func (b *Bot) startMetricsLogger(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if err := b.collectAndLogMetrics(ctx); err != nil {
-				log.Printf("メトリクスログ出力失敗: %v", err)
+				log.Printf("メトリクス出力失敗: %v", err)
 			}
 		}
 	}
@@ -72,7 +72,7 @@ func (b *Bot) collectAndLogMetrics(ctx context.Context) error {
 	}
 	botUsernames, err := config.GetKnownBotUsernames(dataDir)
 	if err != nil {
-		log.Printf("Warning: failed to get known bot usernames for metrics: %v", err)
+		log.Printf("メトリクス用Botユーザー一覧読込失敗: %v", err)
 	}
 
 	factStats := calculateFactStats(allFacts, botUsernames)

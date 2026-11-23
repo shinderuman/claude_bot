@@ -38,7 +38,7 @@ func (b *Bot) handleChatResponse(ctx context.Context, session *model.Session, co
 
 	postedStatuses, err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
 	if err != nil {
-		log.Printf("応答の投稿に失敗: %v", err)
+		log.Printf("返信の投稿失敗: %v", err)
 
 		b.postErrorMessage(ctx, statusID, mention, visibility, prompts.Messages.Error.ResponsePost)
 		return false

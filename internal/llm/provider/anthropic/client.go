@@ -3,7 +3,6 @@ package anthropic
 import (
 	"context"
 	"errors"
-	"log"
 	"net/http"
 	"time"
 
@@ -64,7 +63,6 @@ func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, 
 	payload := string(pc.Body)
 
 	if err != nil {
-		log.Printf("Anthropic API呼び出しエラー: %v", err)
 		return "", payload, err
 	}
 

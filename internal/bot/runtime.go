@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
 	"time"
 
 	"claude_bot/internal/config"
@@ -20,7 +19,6 @@ import (
 func (b *Bot) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	log.Println("Botを起動しています...")
 
 	blacklist, err := config.InitializeURLBlacklist(ctx, os.Getenv("URL_BLACKLIST"))
 	if err != nil {
@@ -36,9 +34,7 @@ func (b *Bot) Run(ctx context.Context) error {
 		mastodon.SetErrorNotifier(notifier)
 	}
 
-	b.logStartupInfo()
-
-	instanceID, totalInstances, err := discovery.GetMyPosition(ctx, b.config.BotUsername)
+	instanceID, _, err := discovery.GetMyPosition(ctx, b.config.BotUsername)
 	if err != nil {
 		return fmt.Errorf("クラスタ登録エラー: %w", err)
 	}
@@ -50,7 +46,7 @@ func (b *Bot) Run(ctx context.Context) error {
 	if b.config.EnableFactStore {
 		discovery.StartHeartbeatLoop(ctx, b.config.BotUsername)
 	}
-	b.executeStartupTasks(ctx, instanceID, totalInstances)
+	b.executeStartupTasks(ctx, instanceID)
 
 	go b.startMetricsLogger(ctx)
 
@@ -58,7 +54,7 @@ func (b *Bot) Run(ctx context.Context) error {
 		b.factCollector.Start(ctx)
 	}
 
-	log.Println("メンションの監視を開始しました")
+	log.Println("Bot監視開始")
 
 	go b.startAutoPostLoop(ctx)
 
@@ -94,35 +90,9 @@ func (b *Bot) consumeUserStream(ctx context.Context, events <-chan gomastodon.Ev
 			}
 		case *gomastodon.ErrorEvent:
 			if time.Since(lastError) >= time.Minute {
-				log.Printf("ユーザーストリーミングエラー: %v", e.Err)
+				log.Printf("ユーザーストリームエラー: %v", e.Err)
 				lastError = time.Now()
 			}
 		}
 	}
-}
-
-func (b *Bot) logStartupInfo() {
-	log.Printf("=== Mastodon Bot 起動 ===")
-
-	var modelInfo string
-	if b.config.LLMProvider == config.LLMProviderGemini {
-		modelInfo = fmt.Sprintf("Gemini: %s", b.config.GeminiModel)
-	} else {
-		modelInfo = fmt.Sprintf("Claude: %s (%s)", b.config.AnthropicModel, b.config.AnthropicBaseURL)
-	}
-	log.Printf("Bot: @%s @ %s | Mode: %s | %s",
-		b.config.BotUsername, b.config.MastodonServer, strings.ToUpper(b.config.LLMProvider), modelInfo)
-
-	log.Printf("機能: リモートユーザー=%t, 事実ストア=%t, 画像認識=%t, ファクト収集(全体/自己/連合)=%t/%t/%t",
-		b.config.AllowRemoteUsers, b.config.EnableFactStore, b.config.EnableImageRecognition,
-		b.config.IsGlobalCollectionEnabled(), b.config.IsSelfLearningEnabled(), b.config.FactCollectionFederated)
-
-	log.Printf("会話管理: 圧縮=%d件, 保持=%d件, 保持時間=%dh, 最小保持=%d件, アイドル時間=%dh",
-		b.config.ConversationMessageCompressThreshold, b.config.ConversationMessageKeepCount,
-		b.config.ConversationRetentionHours, b.config.ConversationMinKeepCount, b.config.ConversationIdleHours)
-
-	log.Printf("LLM設定: 応答=%dtok, 要約=%dtok, ファクト=%dtok, 画像生成=%dtok, 投稿=%d文字",
-		b.config.MaxResponseTokens, b.config.MaxSummaryTokens, b.config.MaxFactTokens, b.config.MaxImageTokens, b.config.MaxPostChars)
-
-	log.Printf("=== 起動完了 ===")
 }

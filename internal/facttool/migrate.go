@@ -38,12 +38,10 @@ func Migrate(args []string) error {
 		return errors.New("-facts flag is required.")
 	}
 
-	log.Printf("Loading facts from %s...", *factsFile)
 	facts, err := util.ReadJSONArray[model.Fact](*factsFile)
 	if err != nil {
 		return err
 	}
-	log.Printf("Loaded %d facts from JSON.", len(facts))
 
 	redisStore, err := store.NewRedisFactStore(redisURL, prefix)
 	if err != nil {
@@ -51,11 +49,10 @@ func Migrate(args []string) error {
 	}
 	defer redisStore.Close()
 
-	log.Printf("Migrating facts to Redis (prefix: %s)...", prefix)
 	start := time.Now()
 	if err := redisStore.ReplaceAllFacts(context.Background(), facts); err != nil {
 		return err
 	}
-	log.Printf("Migration completed in %v. Success: %d/%d.", time.Since(start), len(facts), len(facts))
+	log.Printf("Redisへのファクト移行完了: %s、キー接頭辞 %s、%d件、%v", *factsFile, prefix, len(facts), time.Since(start))
 	return nil
 }

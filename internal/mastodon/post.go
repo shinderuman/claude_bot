@@ -35,7 +35,7 @@ func (c *Client) PostResponseWithSplit(ctx context.Context, inReplyToID, mention
 		content := mention + part
 		status, err := c.postReply(ctx, currentReplyID, content, visibility)
 		if err != nil {
-			log.Printf("分割投稿失敗 (%d/%d): %v", i+1, len(parts), err)
+			log.Printf("分割投稿失敗: %d/%d件目、%v", i+1, len(parts), err)
 			if errorNotifier != nil {
 				go errorNotifier("分割投稿失敗", err.Error())
 			}
@@ -51,7 +51,7 @@ func (c *Client) PostResponseWithSplit(ctx context.Context, inReplyToID, mention
 func (c *Client) PostResponseWithMedia(ctx context.Context, inReplyToID, mention, response, visibility, mediaPath string) (string, error) {
 	attachment, err := c.client.UploadMedia(ctx, mediaPath)
 	if err != nil {
-		log.Printf("メディアアップロードエラー: %v", err)
+		log.Printf("メディアアップロード失敗: %v", err)
 		if errorNotifier != nil {
 			go errorNotifier("メディアアップロードエラー", err.Error())
 		}
@@ -112,17 +112,16 @@ func (c *Client) PostStatus(ctx context.Context, content, visibility string) (*g
 }
 
 func (c *Client) handlePostError(err error, contextType, content string) {
-	log.Printf("投稿エラー (%s): %v", contextType, err)
-
 	var apiErr *gomastodon.APIError
 	if errors.As(err, &apiErr) && apiErr.StatusCode == 422 {
-		log.Printf("⚠️ 422 Error detected (%s). Content length: %d", contextType, len([]rune(content)))
+		log.Printf("投稿失敗: %s、本文%d文字、%v", contextType, len([]rune(content)), err)
 		if errorNotifier != nil {
 			go errorNotifier(fmt.Sprintf("投稿エラー (%s/422)", contextType), fmt.Sprintf("Error: %v\nContent: %s", err, content))
 		}
 		return
 	}
 
+	log.Printf("投稿失敗: %s、%v", contextType, err)
 	if errorNotifier != nil {
 		go errorNotifier(fmt.Sprintf("投稿エラー (%s)", contextType), err.Error())
 	}

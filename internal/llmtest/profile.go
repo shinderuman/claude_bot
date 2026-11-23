@@ -48,7 +48,7 @@ func runProfileUpdate(cfg *config.Config) error {
 	}
 
 	log.Println()
-	log.Println("成功: モックへのプロフィール更新と投稿が完了しました")
+	log.Println("モックへのプロフィール更新・投稿完了")
 	return nil
 }
 

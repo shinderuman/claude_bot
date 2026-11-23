@@ -45,7 +45,7 @@ func runRawImage(cfg *config.Config, client *llm.Client, message, imagePath stri
 		return errEmptyClaudeReply
 	}
 
-	log.Println("成功: Claudeから応答を受信しました")
+	log.Println("Claude応答受信")
 	log.Println()
 	log.Println("--- Claude応答 ---")
 	log.Println(response)
@@ -88,15 +88,15 @@ func runGenerateImage(imageGen *image.ImageGenerator, prompt string) error {
 		return fmt.Errorf("ファイル保存エラー: %w", err)
 	}
 
-	log.Printf("成功: 画像を保存しました: %s", filename)
+	log.Printf("画像保存: %s", filename)
 	log.Printf("ファイルサイズ: %d bytes", len(svg))
 
 	encoded := base64.StdEncoding.EncodeToString([]byte(svg))
 	base64Filename := fmt.Sprintf("generated_image_%d.base64.txt", time.Now().Unix())
 	if err := os.WriteFile(base64Filename, []byte(encoded), 0644); err != nil {
-		log.Printf("Base64ファイル保存エラー: %v", err)
+		log.Printf("Base64ファイル保存失敗: %v", err)
 	} else {
-		log.Printf("Base64版も保存しました: %s", base64Filename)
+		log.Printf("Base64版保存: %s", base64Filename)
 	}
 	return nil
 }

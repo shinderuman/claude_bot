@@ -27,7 +27,7 @@ func (s *FactService) QueryRelevantFacts(ctx context.Context, author, authorUser
 
 	var q model.SearchQuery
 	if err := json.Unmarshal([]byte(response), &q); err != nil {
-		log.Printf("検索クエリパースエラー: %v", err)
+		log.Printf("検索クエリ解析失敗: %v", err)
 		return ""
 	}
 
@@ -44,12 +44,12 @@ func (s *FactService) QueryRelevantFacts(ctx context.Context, author, authorUser
 
 	facts, err := s.factStore.SearchFuzzy(ctx, q.TargetCandidates, q.Keys)
 	if err != nil {
-		log.Printf("関連ファクト検索エラー: %v", err)
+		log.Printf("関連ファクト検索失敗: %v", err)
 		return ""
 	}
 	recent, err := s.factStore.GetRecentFacts(ctx, RecentFactsCount)
 	if err != nil {
-		log.Printf("最近のファクト取得エラー: %v", err)
+		log.Printf("最近のファクト取得失敗: %v", err)
 	}
 	type targetKey struct{ target, key string }
 	seen := make(map[targetKey]bool, len(facts))

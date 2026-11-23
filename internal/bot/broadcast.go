@@ -35,7 +35,7 @@ func (b *Bot) isBroadcastCommand(content string) bool {
 }
 
 func (b *Bot) handleBroadcastCommand(ctx context.Context, status *gomastodon.Status, prevStatusID string) {
-	log.Printf("ブロードキャストコマンドを受信: %s (by %s)", status.Content, status.Account.Acct)
+	log.Printf("ブロードキャストコマンド受信: %s、送信元 %s", status.Content, status.Account.Acct)
 
 	statusCopy := *status
 

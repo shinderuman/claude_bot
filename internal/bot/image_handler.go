@@ -16,7 +16,7 @@ import (
 func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session, conversation *model.Conversation, imagePrompt, statusID, mention, visibility string) bool {
 	svg, err := b.imageGenerator.GenerateSVG(ctx, imagePrompt)
 	if err != nil {
-		log.Printf("画像生成エラー: %v", err)
+		log.Printf("画像生成失敗: %v", err)
 
 		b.postErrorMessage(ctx, statusID, mention, visibility, prompts.Messages.Error.ImageGeneration)
 		return false
@@ -24,7 +24,7 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 
 	tempDir, err := os.MkdirTemp("", "claude-bot-image-")
 	if err != nil {
-		log.Printf("画像の一時ディレクトリを作成できません: %v", err)
+		log.Printf("画像用一時ディレクトリ作成失敗: %v", err)
 		b.postErrorMessage(ctx, statusID, mention, visibility, prompts.Messages.Error.Internal)
 		return false
 	}
@@ -32,14 +32,14 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 
 	svgPath := filepath.Join(tempDir, "image.svg")
 	if err := os.WriteFile(svgPath, []byte(svg), 0644); err != nil {
-		log.Printf("SVG保存エラー: %v", err)
+		log.Printf("SVG保存失敗: %v", err)
 
 		b.postErrorMessage(ctx, statusID, mention, visibility, prompts.Messages.Error.Internal)
 		return false
 	}
 	pngPath := filepath.Join(tempDir, "image.png")
 	if err := image.ConvertSVGToPNG(svgPath, pngPath); err != nil {
-		log.Printf("PNG変換エラー: %v", err)
+		log.Printf("PNG変換失敗: %v", err)
 		b.postErrorMessage(ctx, statusID, mention, visibility, prompts.Messages.Error.ImageGeneration)
 		return false
 	}
@@ -54,7 +54,7 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 
 	postedID, err := b.mastodonClient.PostResponseWithMedia(ctx, statusID, mention, response, visibility, pngPath)
 	if err != nil {
-		log.Printf("メディア投稿エラー: %v", err)
+		log.Printf("画像返信失敗: %v", err)
 
 		b.postErrorMessage(ctx, statusID, mention, visibility, prompts.Messages.Error.ImagePost)
 		return false

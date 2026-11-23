@@ -30,7 +30,7 @@ func InitializeFactStore(cfg *config.Config) (*FactStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Redis初期化エラー: %w", err)
 	}
-	log.Printf("Redis FactStore initialized (KeyPrefix: %s)", cfg.RedisFactsKey)
+	log.Printf("Redisファクトストア初期化: キー接頭辞 %s", cfg.RedisFactsKey)
 	return NewFactStore(storage, path), nil
 }
 
@@ -80,7 +80,7 @@ func (s *FactStore) backupLoop() {
 func (s *FactStore) writeBackup() {
 	facts, err := s.storage.GetAllFacts(context.Background())
 	if err != nil {
-		log.Printf("Backup failed: could not fetch facts: %v", err)
+		log.Printf("バックアップ用ファクト取得失敗: %v", err)
 		return
 	}
 
@@ -89,12 +89,12 @@ func (s *FactStore) writeBackup() {
 	}
 	data, err := json.MarshalIndent(facts, "", "  ")
 	if err != nil {
-		log.Printf("Backup failed: marshal error: %v", err)
+		log.Printf("ファクトバックアップ変換失敗: %v", err)
 		return
 	}
 
 	if err := util.WriteFileAtomically(s.saveFilePath, data); err != nil {
-		log.Printf("Backup failed: %v", err)
+		log.Printf("バックアップ保存失敗: %v", err)
 	}
 }
 

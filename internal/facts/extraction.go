@@ -22,7 +22,7 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, message string, b
 	if len(extracted) == 0 {
 		return
 	}
-	log.Printf("事実抽出JSON: %d件抽出", len(extracted))
+	log.Printf("ファクト抽出: %d件", len(extracted))
 	for _, item := range extracted {
 		target, targetUserName := resolveFactTarget(item.Target, item.TargetUserName, baseFact.Author, baseFact.AuthorUserName, false)
 
@@ -90,7 +90,7 @@ func (s *FactService) extractFacts(ctx context.Context, prompt, operation string
 	}
 	var extracted []model.Fact
 	if err := json.Unmarshal([]byte(response), &extracted); err != nil {
-		log.Printf("%sのJSONを解析できませんでした: %v", operation, err)
+		log.Printf("%sのJSON解析失敗: %v", operation, err)
 		return nil
 	}
 	return extracted

@@ -95,7 +95,7 @@ func (c *Client) BuildProfileFields(cfg *config.Config, currentFields []gomastod
 	loc, err := time.LoadLocation(cfg.Timezone)
 	if err != nil {
 		loc = time.UTC
-		log.Printf("タイムゾーン読み込みエラー (%s): %v. UTCを使用します。", cfg.Timezone, err)
+		log.Printf("タイムゾーン読込失敗、UTCを使用: %s、%v", cfg.Timezone, err)
 	}
 	now := time.Now().In(loc)
 	lastUpdated := now.Format("2006/01/02 15:04")

@@ -88,7 +88,7 @@ func (s *FactService) AddFact(fact model.Fact) {
 	}
 
 	if err := s.factStore.AddFact(fact); err != nil {
-		log.Printf("ファクト保存エラー: %v", err)
+		log.Printf("ファクト保存失敗: %v", err)
 		return
 	}
 	s.logFactSaved(fact)
@@ -133,5 +133,5 @@ func (s *FactService) logFactSaved(fact model.Fact) {
 		parts = append(parts, authorInfo)
 	}
 
-	log.Printf("✅ ファクト保存: %s", strings.Join(parts, ", "))
+	log.Printf("ファクト保存: %s", strings.Join(parts, ", "))
 }

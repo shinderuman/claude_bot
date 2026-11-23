@@ -44,7 +44,7 @@ func StartHeartbeatLoop(ctx context.Context, username string) {
 				return
 			case <-ticker.C:
 				if _, _, err := GetMyPosition(ctx, username); err != nil {
-					log.Printf("[Discovery] Heartbeat failed: %v", err)
+					log.Printf("クラスタのハートビート更新失敗: %v", err)
 				}
 			}
 		}
@@ -113,7 +113,7 @@ func refreshNodes(previous []Node, username string, now time.Time) []Node {
 	byName := make(map[string]Node, len(previous)+1)
 	for _, node := range previous {
 		if node.Username != username && !node.LastUpdated.After(threshold) {
-			log.Printf("[Discovery] Dropping expired node: %s (Last seen: %s)", node.Username, node.LastUpdated)
+			log.Printf("期限切れBotをクラスタから除外: %s、最終更新 %s", node.Username, node.LastUpdated)
 			continue
 		}
 		existing, exists := byName[node.Username]

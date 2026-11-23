@@ -22,16 +22,16 @@ func (b *Bot) handleNotification(ctx context.Context, notification *gomastodon.N
 	}
 
 	if notification.Account.Bot {
-		log.Printf("Botからのメンションを無視しました: %s", notification.Account.Acct)
+		log.Printf("Botのメンションを無視: %s", notification.Account.Acct)
 		return
 	}
 
 	if !b.config.AllowRemoteUsers && notification.Account.Acct != notification.Account.Username {
-		log.Printf("外部ユーザーからのメンションを無視しました: %s", notification.Account.Acct)
+		log.Printf("外部ユーザーのメンションを無視: %s", notification.Account.Acct)
 		return
 	}
 
-	log.Printf("メンションを受信: %s (ID: %s)", notification.Account.Acct, notification.Status.ID)
+	log.Printf("メンション受信: %s、投稿 %s", notification.Account.Acct, notification.Status.ID)
 
 	userMessage := mastodon.ExtractStatusText(notification.Status)
 	if userMessage == "" {
@@ -39,7 +39,7 @@ func (b *Bot) handleNotification(ctx context.Context, notification *gomastodon.N
 	}
 
 	if b.isBroadcastCommand(userMessage) {
-		log.Printf("リプライ内ブロードキャストコマンドを検出: %s", userMessage)
+		log.Printf("返信内のブロードキャストコマンド検出: %s", userMessage)
 		userMessage = strings.Replace(userMessage, b.config.BroadcastCommand, "", 1)
 		userMessage = strings.TrimSpace(userMessage)
 	}
@@ -54,7 +54,7 @@ func (b *Bot) handleNotification(ctx context.Context, notification *gomastodon.N
 			var err error
 			rootStatusID, err = b.mastodonClient.GetRootStatusID(ctx, notification.Status)
 			if err != nil {
-				log.Printf("会話の起点取得エラー: %v", err)
+				log.Printf("会話の起点取得失敗: %v", err)
 				b.postErrorMessage(ctx, string(notification.Status.ID), b.mastodonClient.BuildMention(userID),
 					string(notification.Status.Visibility), prompts.Messages.Error.DataFetch)
 				return false
@@ -66,7 +66,7 @@ func (b *Bot) handleNotification(ctx context.Context, notification *gomastodon.N
 		chat.CompressHistoryIfNeeded(ctx, session, userID, b.config, b.llmClient, b.factService)
 		return true
 	}); err != nil {
-		log.Printf("会話履歴保存エラー: %v", err)
+		log.Printf("会話履歴保存失敗: %v", err)
 	}
 }
 
@@ -79,7 +79,7 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 	urlCandidates := analysisURLCandidates(pages.links)
 	result, err := b.classifyIntent(ctx, userMessage, urlCandidates)
 	if err != nil {
-		log.Printf("意図判定エラー: %v", err)
+		log.Printf("意図判定失敗: %v", err)
 		b.postErrorMessage(ctx, statusID, mention, visibility, prompts.Messages.Error.ResponseGeneration)
 		return false
 	}
@@ -124,10 +124,9 @@ func (b *Bot) processResponse(ctx context.Context, session *model.Session, notif
 }
 
 func (b *Bot) postErrorMessage(ctx context.Context, statusID, mention, visibility, errorDetail string) {
-	log.Printf("応答生成失敗: エラーメッセージを投稿します (詳細: %s)", errorDetail)
-
 	if _, err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, errorDetail, visibility); err != nil {
-		log.Printf("エラーメッセージ投稿失敗: %v", err)
+		log.Printf("案内返信失敗: %s、%v", errorDetail, err)
+		return
 	}
-
+	log.Printf("エラー案内を返信: %s", errorDetail)
 }

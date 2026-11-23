@@ -80,7 +80,7 @@ func NewBot(cfg *config.Config) (*Bot, error) {
 	}
 	knownBots, err := config.GetKnownBotUsernamesMap(dataDir)
 	if err != nil {
-		log.Printf("Botユーザー一覧の読み込みエラー: %v", err)
+		log.Printf("Botユーザー一覧読込失敗: %v", err)
 	}
 
 	factService := facts.NewFactService(cfg, factStore, llmClient, mastodonClient, slackClient, knownBots)

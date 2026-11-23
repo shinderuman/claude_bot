@@ -29,7 +29,7 @@ func (pd *PeerDiscoverer) IsPeer(account *gomastodon.Account) bool {
 
 	authKey, err := GetPeerAuthKey()
 	if err != nil {
-		log.Printf("Peer認証キー生成エラー: %v", err)
+		log.Printf("Peer認証キー生成失敗: %v", err)
 		return false
 	}
 
@@ -62,12 +62,12 @@ func (pd *PeerDiscoverer) DiscoverPeersFromRegistry(ctx context.Context, onPeerF
 
 		account, err := pd.mastodonClient.GetAccountByUsername(ctx, username)
 		if err != nil {
-			log.Printf("Peer探索: ユーザー %s の取得失敗: %v", username, err)
+			log.Printf("Peerアカウント取得失敗: %s、%v", username, err)
 			continue
 		}
 
 		if !pd.IsPeer(account) {
-			log.Printf("Peer探索: ユーザー %s は正規のPeerではありません (Hash不一致)", username)
+			log.Printf("Peer認証失敗: %s、ハッシュ不一致", username)
 			continue
 		}
 
@@ -77,14 +77,14 @@ func (pd *PeerDiscoverer) DiscoverPeersFromRegistry(ctx context.Context, onPeerF
 
 		isFollowing, err := pd.mastodonClient.IsFollowing(ctx, string(account.ID))
 		if err != nil {
-			log.Printf("Peer探索: フォロー状態確認失敗 (%s): %v", username, err)
+			log.Printf("Peerのフォロー確認失敗: %s、%v", username, err)
 			continue
 		}
 
 		if !isFollowing {
-			log.Printf("Peer探索: 新しいPeerを発見しました: %s -> 自動フォローを実行します", username)
+			log.Printf("新規Peer発見・自動フォロー開始: %s", username)
 			if err := pd.mastodonClient.FollowAccount(ctx, string(account.ID)); err != nil {
-				log.Printf("Peer探索: 自動フォロー失敗 (%s): %v", username, err)
+				log.Printf("Peer自動フォロー失敗: %s、%v", username, err)
 			}
 		}
 	}

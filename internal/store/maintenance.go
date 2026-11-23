@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
 	"claude_bot/internal/model"
@@ -50,9 +49,6 @@ func (s *FactStore) PerformMaintenance(ctx context.Context, retentionDays, maxFa
 
 	if deleted > 0 {
 		s.requestBackup()
-		if err == nil {
-			log.Printf("ファクトメンテナンス完了: %d件削除", deleted)
-		}
 	}
 	return deleted, err
 }

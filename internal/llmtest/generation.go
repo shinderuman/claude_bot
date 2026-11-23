@@ -37,7 +37,7 @@ func runSummary(cfg *config.Config, client *llm.Client, newMessages, existingSum
 		return errors.New("エラー: 要約生成に失敗しました")
 	}
 
-	log.Println("成功: 要約を生成しました")
+	log.Println("要約生成完了")
 	log.Println()
 	log.Println("--- 生成された要約 ---")
 	log.Println(summary)
@@ -72,7 +72,7 @@ func runFactExtraction(cfg *config.Config, client *llm.Client, message string) e
 		return errors.New("エラー: 事実抽出に失敗しました")
 	}
 
-	log.Println("成功: 事実を抽出しました")
+	log.Println("ファクト抽出完了")
 	log.Println()
 	log.Println("--- 抽出された事実 (JSON) ---")
 	log.Println(response)
@@ -125,7 +125,7 @@ func runAutoPost(cfg *config.Config, client *llm.Client) error {
 		return err
 	}
 
-	log.Println("成功: 自動投稿文を生成しました")
+	log.Println("自動投稿文生成完了")
 	log.Println()
 	log.Println("--- 生成された投稿文 ---")
 	log.Println(response)
@@ -155,7 +155,7 @@ func runErrorMessageGeneration(cfg *config.Config, client *llm.Client, errorDeta
 		return err
 	}
 
-	log.Println("成功: エラーメッセージを生成しました")
+	log.Println("エラーメッセージ生成完了")
 	log.Println()
 	log.Println("--- 生成されたメッセージ ---")
 	log.Println(response)

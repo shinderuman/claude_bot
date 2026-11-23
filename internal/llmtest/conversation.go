@@ -63,7 +63,7 @@ func runResponse(cfg *config.Config, client *llm.Client, factService *facts.Fact
 		if content, err := os.ReadFile(cfg.BotProfileFile); err == nil {
 			botProfile = string(content)
 		} else {
-			log.Printf("Botプロファイル読み込み失敗（無視します）: %v", err)
+			log.Printf("Botプロフィール読込失敗、続行: %v", err)
 		}
 	}
 
@@ -73,7 +73,7 @@ func runResponse(cfg *config.Config, client *llm.Client, factService *facts.Fact
 		return errEmptyClaudeReply
 	}
 
-	log.Println("成功: Claudeから応答を受信しました")
+	log.Println("Claude応答受信")
 	log.Println()
 	log.Println("--- Claude応答 ---")
 	log.Println(response)
@@ -119,7 +119,7 @@ func runConversation(cfg *config.Config, client *llm.Client, lastMessage string)
 		return err
 	}
 
-	log.Println("成功: 応答を受信しました")
+	log.Println("応答受信")
 	log.Println()
 	log.Println("--- 応答 ---")
 	log.Println(response)

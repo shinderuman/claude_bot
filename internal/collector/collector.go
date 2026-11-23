@@ -77,7 +77,7 @@ func (fc *FactCollector) cleanupExpiredSets(now time.Time) {
 func (fc *FactCollector) Start(ctx context.Context) {
 	go fc.cleanupCacheLoop(ctx)
 	if !fc.config.IsGlobalCollectionEnabled() {
-		log.Println("ファクト収集機能は無効です")
+		log.Println("ファクト収集無効")
 		return
 	}
 
@@ -87,7 +87,7 @@ func (fc *FactCollector) Start(ctx context.Context) {
 
 	events, err := fc.mastodonClient.StreamPublic(ctx)
 	if err != nil {
-		log.Printf("連合ストリーミング開始エラー: %v", err)
+		log.Printf("連合ストリーム開始失敗: %v", err)
 		return
 	}
 	go fc.processEvents(ctx, events)
@@ -95,7 +95,7 @@ func (fc *FactCollector) Start(ctx context.Context) {
 
 func (fc *FactCollector) DiscoverAndCollectPeerFacts(ctx context.Context) {
 	if err := fc.peerDiscoverer.DiscoverPeersFromRegistry(ctx, fc.CollectColleagueFact); err != nil {
-		log.Printf("Peer探索・ファクト収集エラー: %v", err)
+		log.Printf("Peer探索・ファクト収集失敗: %v", err)
 	}
 }
 
@@ -115,7 +115,7 @@ func (fc *FactCollector) processEvents(ctx context.Context, eventChan <-chan gom
 		}
 		if event, ok := event.(*gomastodon.ErrorEvent); ok {
 			if time.Since(lastError) >= time.Minute {
-				log.Printf("連合ストリーミングエラー: %v", event.Err)
+				log.Printf("連合ストリームエラー: %v", event.Err)
 				lastError = time.Now()
 			}
 			continue
@@ -230,6 +230,6 @@ func (fc *FactCollector) CollectColleagueFact(ctx context.Context, account *goma
 	postAuthorUserName := displayName
 
 	if err := fc.factService.SaveColleagueFact(ctx, postAuthorUserName, displayName, note); err != nil {
-		log.Printf("ColleagueFact保存エラー: %v", err)
+		log.Printf("同僚ファクト保存失敗: %v", err)
 	}
 }

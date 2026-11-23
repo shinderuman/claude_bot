@@ -77,7 +77,7 @@ func (c *Client) GenerateText(ctx context.Context, messages []model.Message, sys
 	case c.semaphore <- struct{}{}:
 		defer func() { <-c.semaphore }()
 	case <-ctx.Done():
-		log.Printf("LLM生成キャンセル (待機中): %v", ctx.Err())
+		log.Printf("待機中のLLMリクエスト取消: %v", ctx.Err())
 		return ""
 	}
 

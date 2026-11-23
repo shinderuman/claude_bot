@@ -35,10 +35,9 @@ func RunCommand(args []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	log.Println("Botを開始します...")
-	defer log.Println("Botを停止しました (Shutdown signal received)")
 	if err := bot.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("Bot停止エラー: %w", err)
 	}
+	log.Println("Bot停止")
 	return nil
 }

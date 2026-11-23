@@ -36,7 +36,7 @@ func (c *Client) DownloadStatusImages(ctx context.Context, status *gomastodon.St
 		if attachment.Type == "image" {
 			base64Image, mediaType, err := c.downloadImage(ctx, attachment.URL)
 			if err != nil {
-				log.Printf("画像ダウンロードエラー (%s): %v", attachment.URL, err)
+				log.Printf("投稿の添付画像取得失敗: %s、%v", attachment.URL, err)
 				continue
 			}
 			images = append(images, model.Image{

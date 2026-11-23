@@ -73,7 +73,7 @@ func (b *URLBlacklist) reload() error {
 	b.domains = domains
 	b.mu.Unlock()
 
-	log.Printf("URL Blacklist再読み込み完了: %d件 (ファイル: %s)", len(domains), b.filePath)
+	log.Printf("URLブラックリスト読込: %d件、%s", len(domains), b.filePath)
 	return nil
 }
 
@@ -93,7 +93,7 @@ func (b *URLBlacklist) StartWatching(ctx context.Context) error {
 	}
 
 	go b.watchLoop(ctx, watcher, path)
-	log.Printf("URL Blacklistファイル監視開始: %s", path)
+	log.Printf("URLブラックリスト監視開始: %s", path)
 	return nil
 }
 
@@ -109,14 +109,14 @@ func (b *URLBlacklist) watchLoop(ctx context.Context, watcher *fsnotify.Watcher,
 			}
 			if filepath.Clean(event.Name) == path && (event.Has(fsnotify.Write) || event.Has(fsnotify.Create)) {
 				if err := b.reload(); err != nil {
-					log.Printf("URL Blacklist再読み込みエラー: %v", err)
+					log.Printf("URLブラックリスト再読込失敗: %v", err)
 				}
 			}
 		case err, ok := <-watcher.Errors:
 			if !ok {
 				return
 			}
-			log.Printf("URL Blacklistファイル監視エラー: %v", err)
+			log.Printf("URLブラックリスト監視エラー: %v", err)
 		}
 	}
 }
@@ -153,7 +153,7 @@ func InitializeURLBlacklist(ctx context.Context, envValue string) (*URLBlacklist
 		return nil, err
 	}
 
-	log.Printf("url_blacklist.txtが見つかりません。環境変数URL_BLACKLISTを使用します")
+	log.Printf("url_blacklist.txtなし: 環境変数URL_BLACKLISTを使用")
 	domains := LoadBlacklistFromEnv(envValue)
 
 	blacklist := &URLBlacklist{
@@ -161,6 +161,6 @@ func InitializeURLBlacklist(ctx context.Context, envValue string) (*URLBlacklist
 		domains:  domains,
 	}
 
-	log.Printf("URL Blacklist読み込み完了: %d件 (環境変数)", len(domains))
+	log.Printf("URLブラックリスト読込: 環境変数から%d件", len(domains))
 	return blacklist, nil
 }

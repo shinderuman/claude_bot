@@ -19,11 +19,11 @@ func SetErrorNotifier(notifier ErrorNotifierFunc) {
 }
 
 func (c *Client) reportGenerationError(err error, payload string) {
-	log.Printf("LLM生成エラー (最終): %v", err)
+	log.Printf("LLM応答生成失敗: %v", err)
 	details := err.Error()
 
 	if c.provider.IsBadRequest(err) {
-		log.Printf("リクエスト詳細 [Request Payload]:\n%s", payload)
+		log.Printf("LLMリクエスト: %s", payload)
 		details = fmt.Sprintf("%s\n\n[Request Payload]\n%s", details, payload)
 	}
 
@@ -31,7 +31,7 @@ func (c *Client) reportGenerationError(err error, payload string) {
 		if c.shouldNotifyRateLimit(err) {
 			go errorNotifier("LLM生成エラー", details)
 		} else {
-			log.Printf("LLM生成エラー (429) - 通知間引済み（前回通知から間隔内）")
+			log.Printf("LLM 429通知省略: 通知間隔内")
 		}
 	}
 }
@@ -88,7 +88,7 @@ func (c *Client) executeWithRetry(ctx context.Context, operation func() (string,
 				delay = min(10*backoff, time.Minute)
 			}
 			backoff = min(2*backoff, time.Minute)
-			log.Printf("LLM生成エラー - リトライ %d/%d 待機: %v. エラー: %v", i+1, maxRetries, delay, err)
+			log.Printf("LLM再試行: %d/%d回目、%v後、%v", i+1, maxRetries, delay, err)
 
 			select {
 			case <-time.After(delay):

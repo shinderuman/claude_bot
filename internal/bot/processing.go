@@ -106,7 +106,7 @@ func (b *Bot) triggerFactExtraction(ctx context.Context, notification *gomastodo
 	if notification.Account.ID != "" {
 		isFollowing, err := b.mastodonClient.IsFollowing(ctx, string(notification.Account.ID))
 		if err != nil {
-			log.Printf("ユーザーフォロー状態確認エラー: %v", err)
+			log.Printf("ユーザーフォロー確認失敗: %v", err)
 		} else {
 			if isFollowing && !notification.Account.Bot {
 				isTrusted = true
@@ -159,7 +159,7 @@ func (p *mentionPages) reference(ctx context.Context, card *gomastodon.Card) str
 	p.referenceURL = p.links[0]
 	p.referencePage, p.referenceError = fetcher.FetchPageContent(ctx, p.referenceURL, nil)
 	if p.referenceError != nil {
-		log.Printf("ページコンテンツ取得失敗 (%s): %v", p.referenceURL, p.referenceError)
+		log.Printf("参照先ページ取得失敗: %s、%v", p.referenceURL, p.referenceError)
 		return fmt.Sprintf(prompts.Messages.Error.URLContentFetch, p.referenceURL, p.referenceError)
 	}
 	return prompts.BuildPageReference(p.referencePage.URL, p.referencePage.Title, p.referencePage.Description, p.referencePage.Content)

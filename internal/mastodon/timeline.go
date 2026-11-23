@@ -43,7 +43,7 @@ func (c *Client) fetchStatuses(ctx context.Context, accountID string, maxID goma
 
 	for {
 		if apiCalls >= MaxAPICallCount {
-			log.Printf("API呼び出し回数制限(%d)に到達しました", MaxAPICallCount)
+			log.Printf("投稿取得のAPI呼び出し上限: %d回", MaxAPICallCount)
 			break
 		}
 
@@ -90,7 +90,7 @@ func (c *Client) GetStatusesByRange(ctx context.Context, accountID string, start
 	if err == nil && endStatus != nil {
 		allStatuses = append(allStatuses, endStatus)
 	} else {
-		log.Printf("終了IDのステータス取得失敗（削除されている可能性があります）: %v", err)
+		log.Printf("範囲末尾の投稿取得失敗: %v", err)
 	}
 
 	err = c.fetchStatuses(ctx, accountID, gomastodon.ID(endID), func(statuses []*gomastodon.Status) (bool, error) {
@@ -157,7 +157,7 @@ func (c *Client) GetStatusesByDateRange(ctx context.Context, accountID string, s
 				allStatuses = append(allStatuses, status)
 				count++
 				if count >= MaxStatusCollectionCount {
-					log.Printf("最大取得件数(%d)に到達しました", MaxStatusCollectionCount)
+					log.Printf("投稿取得上限: %d件", MaxStatusCollectionCount)
 					return false, nil
 				}
 			}

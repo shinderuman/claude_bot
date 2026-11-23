@@ -70,7 +70,7 @@ func (s *FactService) ConsolidateBotFacts(ctx context.Context, target string, fa
 		return fmt.Errorf("ConsolidateBotFacts: ReplaceFacts failed: %v", err)
 	}
 
-	log.Printf("ConsolidateBotFacts: %s のファクトを統合しました (%d -> %d 件)", target, len(facts), len(consolidatedFacts))
+	log.Printf("ファクト統合: %s、%d件 → %d件", target, len(facts), len(consolidatedFacts))
 	return nil
 }
 
@@ -120,18 +120,16 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 	}
 
 	if _, err := s.mastodonClient.PostStatus(ctx, safeBody, s.config.AutoPostVisibility); err != nil {
-		log.Printf("プロフィール更新のトゥートに失敗しました: %v", err)
+		log.Printf("プロフィール更新通知の投稿失敗: %v", err)
 	}
 
-	log.Printf("自己プロファイルを更新しました: %s (%d文字)", s.config.BotProfileFile, len([]rune(profileText)))
+	log.Printf("Botプロフィール更新: %s、%d文字", s.config.BotProfileFile, len([]rune(profileText)))
 
 	if s.slackClient != nil {
 		message := fmt.Sprintf(`🤖 プロフィールを更新しました
 
 `+"```\n%s\n```", profileText)
-		if err := s.slackClient.PostMessage(ctx, message); err != nil {
-			log.Printf("Slack通知エラー: %v", err)
-		}
+		_ = s.slackClient.PostMessage(ctx, message)
 	}
 
 	return nil
@@ -151,6 +149,6 @@ func (s *FactService) LoadBotProfile(ctx context.Context) error {
 		return nil
 	}
 
-	log.Printf("自己プロファイル更新(起動時): %s (全 %d 件)", target, len(facts))
+	log.Printf("起動時のプロフィール更新開始: %s、全%d件", target, len(facts))
 	return s.GenerateAndSaveBotProfile(ctx, facts)
 }

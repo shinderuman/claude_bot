@@ -52,7 +52,7 @@ func (c *Client) PostErrorMessage(ctx context.Context, message string) error {
 
 func (c *Client) PostMessageToChannel(ctx context.Context, channelID, message string) error {
 	if !c.enabled {
-		log.Printf("Slack通知スキップ (未設定)")
+		log.Printf("Slack通知なし: 未設定")
 		return nil
 	}
 
@@ -64,7 +64,11 @@ func (c *Client) PostMessageToChannel(ctx context.Context, channelID, message st
 		message = fmt.Sprintf("[%s] %s", c.botUsername, message)
 	}
 
-	return c.postMessageWithRetry(ctx, channelID, message)
+	err := c.postMessageWithRetry(ctx, channelID, message)
+	if err != nil {
+		log.Printf("Slack通知失敗: %v", err)
+	}
+	return err
 }
 
 func (c *Client) postMessageWithRetry(ctx context.Context, channelID, message string) error {
@@ -79,7 +83,6 @@ func (c *Client) postMessageWithRetry(ctx context.Context, channelID, message st
 		}
 
 		if !isRateLimitedError(err) {
-			log.Printf("Slack投稿エラー: %v", err)
 			return err
 		}
 
@@ -122,9 +125,7 @@ func (c *Client) PostMessageAsync(ctx context.Context, message string) {
 		return
 	}
 	go func() {
-		if err := c.PostMessage(ctx, message); err != nil {
-			log.Printf("SlackAsyncPostError: %v", err)
-		}
+		_ = c.PostMessage(ctx, message)
 	}()
 }
 
@@ -133,8 +134,6 @@ func (c *Client) PostErrorMessageAsync(ctx context.Context, message string) {
 		return
 	}
 	go func() {
-		if err := c.PostErrorMessage(ctx, message); err != nil {
-			log.Printf("SlackAsyncErrorPostError: %v", err)
-		}
+		_ = c.PostErrorMessage(ctx, message)
 	}()
 }

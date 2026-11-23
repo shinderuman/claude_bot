@@ -52,7 +52,7 @@ func (s *RedisFactStore) ReplaceAllFacts(ctx context.Context, facts []model.Fact
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		if _, err := staging.deleteAllFacts(cleanup); err != nil {
-			log.Printf("移行用Redisデータの削除エラー: %v", err)
+			log.Printf("Redis移行用データ削除失敗: %v", err)
 		}
 	}()
 

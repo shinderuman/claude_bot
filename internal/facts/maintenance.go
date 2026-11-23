@@ -26,7 +26,7 @@ func (s *FactService) PerformMaintenance(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("クラスタ位置取得エラー: %w", err)
 	}
-	log.Printf("分散メンテナンス開始: Instance %d/%d (Bot: %s)", instanceID, totalInstances, s.config.BotUsername)
+	log.Printf("分散メンテナンス開始: インスタンス %d/%d、Bot %s", instanceID, totalInstances, s.config.BotUsername)
 
 	targets, err := s.factStore.GetAllTargets(ctx)
 	if err != nil {
@@ -52,7 +52,7 @@ func (s *FactService) PerformMaintenance(ctx context.Context) error {
 	if err := errors.Join(failures...); err != nil {
 		return err
 	}
-	log.Printf("メンテナンス完了: %d件のターゲット(担当分)を処理しました", archivedCount)
+	log.Printf("ファクトメンテナンス完了: 担当分%d対象をアーカイブ", archivedCount)
 	return nil
 }
 
@@ -66,7 +66,7 @@ func (s *FactService) processTargetMaintenance(ctx context.Context, target strin
 	}
 
 	if target == s.config.BotUsername {
-		log.Printf("Botターゲット %s のファクト統合・整理を開始します (全 %d 件)", target, len(allFacts))
+		log.Printf("Botファクト統合・整理開始: %s、全%d件", target, len(allFacts))
 		if err := s.ConsolidateBotFacts(ctx, target, allFacts); err != nil {
 			return false, fmt.Errorf("ファクト統合エラー: %w", err)
 		}
@@ -74,7 +74,7 @@ func (s *FactService) processTargetMaintenance(ctx context.Context, target strin
 		if err != nil {
 			return false, err
 		}
-		log.Printf("自己プロファイル更新: %s (全 %d 件)", target, len(allFacts))
+		log.Printf("自己プロフィール更新開始: %s、全%d件", target, len(allFacts))
 		if err := s.GenerateAndSaveBotProfile(ctx, allFacts); err != nil {
 			return false, fmt.Errorf("自己プロファイル生成エラー: %w", err)
 		}
@@ -99,15 +99,15 @@ func (s *FactService) processTargetMaintenance(ctx context.Context, target strin
 	shouldArchive, reason := s.shouldArchiveFacts(archiveCandidateFacts, totalInstances)
 
 	if shouldArchive {
-		log.Printf("ターゲット %s: %d件を担当 -> アーカイブを実行します (理由: %s, Instance %d)", target, len(archiveCandidateFacts), reason, instanceID)
+		log.Printf("アーカイブ開始: %s、担当%d件、理由 %s、インスタンス %d", target, len(archiveCandidateFacts), reason, instanceID)
 		if err := s.archiveTargetFacts(ctx, target, archiveCandidateFacts); err != nil {
-			log.Printf("ターゲット %s のアーカイブ失敗: %v", target, err)
+			log.Printf("アーカイブ失敗: %s、%v", target, err)
 			return false, err
 		}
 		return true, nil
 	}
 
-	log.Printf("ターゲット %s: %d件を担当 -> スキップします (件数不足, Instance %d)", target, len(archiveCandidateFacts), instanceID)
+	log.Printf("アーカイブ見送り: %s、担当%d件で不足、インスタンス %d", target, len(archiveCandidateFacts), instanceID)
 	return false, nil
 }
 
@@ -152,7 +152,7 @@ func (s *FactService) shouldArchiveFacts(facts []model.Fact, totalInstances int)
 }
 
 func (s *FactService) archiveTargetFacts(ctx context.Context, target string, facts []model.Fact) error {
-	log.Printf("ターゲット %s の事実をアーカイブ中 (対象: %d件)...", target, len(facts))
+	log.Printf("ファクトアーカイブ中: %s、%d件", target, len(facts))
 
 	allArchives, err := s.generateArchiveFacts(ctx, target, facts)
 	if err != nil {
@@ -166,7 +166,7 @@ func (s *FactService) archiveTargetFacts(ctx context.Context, target string, fac
 	if err := s.factStore.ReplaceFacts(ctx, target, facts, allArchives); err != nil {
 		return fmt.Errorf("アーカイブ保存エラー(ReplaceFacts): %v", err)
 	}
-	log.Printf("ターゲット %s のアーカイブ完了(担当分): %d件 -> %d件に圧縮", target, len(facts), len(allArchives))
+	log.Printf("アーカイブ完了: %s、担当分%d件 → %d件", target, len(facts), len(allArchives))
 
 	return nil
 }

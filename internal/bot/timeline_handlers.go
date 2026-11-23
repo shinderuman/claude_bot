@@ -18,7 +18,7 @@ func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session
 
 	targetStatus, err := b.mastodonClient.GetStatus(ctx, startID)
 	if err != nil {
-		log.Printf("開始ステータス取得失敗: %v", err)
+		log.Printf("分析の開始投稿取得失敗: %v", err)
 		b.postErrorMessage(ctx, statusID, mention, visibility, prompts.Messages.Error.UserPostNotFound)
 		return false
 	}
@@ -27,7 +27,7 @@ func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session
 
 	statuses, err := b.mastodonClient.GetStatusesByRange(ctx, targetAccountID, startID, endID)
 	if err != nil {
-		log.Printf("発言範囲取得失敗: %v", err)
+		log.Printf("投稿範囲取得失敗: %v", err)
 		b.postErrorMessage(ctx, statusID, mention, visibility, prompts.Messages.Error.AnalysisDataFetch)
 		return false
 	}
@@ -49,7 +49,7 @@ func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session
 
 	postedStatuses, err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
 	if err != nil {
-		log.Printf("応答の投稿に失敗しました: %v", err)
+		log.Printf("分析結果の返信失敗: %v", err)
 		b.postErrorMessage(ctx, statusID, mention, visibility, prompts.Messages.Error.AnalysisPost)
 		return false
 	}
@@ -68,11 +68,11 @@ func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session
 func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Session, conversation *model.Conversation, notification *gomastodon.Notification, targetDate, userMessage, statusID, mention, visibility string) bool {
 	accountID := string(notification.Account.ID)
 
-	log.Printf("Daily Summary Request: targetDate=%s", targetDate)
+	log.Printf("日次まとめ依頼受信: %s", targetDate)
 
 	loc, err := time.LoadLocation(b.config.Timezone)
 	if err != nil {
-		log.Printf("タイムゾーン読み込み失敗 (%s): %v", b.config.Timezone, err)
+		log.Printf("タイムゾーン読込失敗: %s、%v", b.config.Timezone, err)
 		b.postErrorMessage(ctx, statusID, mention, visibility, prompts.Messages.Error.TimeZone)
 		return false
 	}
@@ -80,7 +80,7 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 	now := time.Now().In(loc)
 	targetDay, err := time.ParseInLocation(DateFormatYMD, targetDate, loc)
 	if err != nil {
-		log.Printf("日付パース失敗: %s", targetDate)
+		log.Printf("日付解析失敗: %s", targetDate)
 		b.postErrorMessage(ctx, statusID, mention, visibility, fmt.Sprintf(prompts.Messages.Error.DateParse, targetDate))
 		return true
 	}
@@ -95,7 +95,7 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 
 	statuses, err := b.mastodonClient.GetStatusesByDateRange(ctx, accountID, targetDay, endTime)
 	if err != nil {
-		log.Printf("発言取得失敗: %v", err)
+		log.Printf("投稿取得失敗: %v", err)
 		b.postErrorMessage(ctx, statusID, mention, visibility, prompts.Messages.Error.DataFetch)
 		return false
 	}
@@ -117,7 +117,7 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 
 	postedStatuses, err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
 	if err != nil {
-		log.Printf("まとめ結果投稿エラー: %v", err)
+		log.Printf("日次まとめの返信失敗: %v", err)
 		b.postErrorMessage(ctx, statusID, mention, visibility, prompts.Messages.Error.SummaryPost)
 		return false
 	}

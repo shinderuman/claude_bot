@@ -37,7 +37,7 @@ func GetKnownBotUsernames(dataDir string) ([]string, error) {
 		path := filepath.Join(dataDir, name)
 		envMap, err := godotenv.Read(path)
 		if err != nil {
-			log.Printf("Warning: failed to read env file %s: %v", name, err)
+			log.Printf("Botアカウント設定読込失敗: %s、%v", name, err)
 			continue
 		}
 

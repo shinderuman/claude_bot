@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
+	"claude_bot/internal/mastodon"
 	"claude_bot/internal/model"
 	"claude_bot/internal/prompts"
 )
@@ -17,13 +19,11 @@ func (b *Bot) startFactMaintenanceLoop(ctx context.Context) {
 
 	interval := time.Duration(b.config.FactMaintenanceIntervalHours) * time.Hour
 	b.runInWindowedLoop(ctx, interval, "ファクトメンテナンス", func(ctx context.Context) {
-		log.Println("ファクトメンテナンスを実行中...")
 		if err := b.factService.PerformMaintenance(ctx); err != nil {
-			log.Printf("ファクトメンテナンスエラー: %v", err)
+			log.Printf("ファクトメンテナンス失敗: %v", err)
 		}
 
 		if b.factCollector != nil {
-			log.Println("Peer探索を実行中...")
 			b.factCollector.DiscoverAndCollectPeerFacts(ctx)
 		}
 	}, windowJitter, true)
@@ -52,8 +52,6 @@ func (b *Bot) runInWindowedLoop(ctx context.Context, interval time.Duration, tas
 	if interval <= 0 {
 		return
 	}
-	log.Printf("%sループを開始しました (間隔: %v)", taskName, interval)
-
 	b.scheduleDelayedTask(ctx, interval, taskName, task, getJitter, notifySlack)
 
 	go func() {
@@ -75,7 +73,7 @@ func (b *Bot) scheduleDelayedTask(ctx context.Context, interval time.Duration, t
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("CRITICAL: %sタスク実行中にパニック発生 (回復済み): %v", taskName, r)
+				log.Printf("%sのパニックから復帰: %v", taskName, r)
 			}
 		}()
 
@@ -86,11 +84,12 @@ func (b *Bot) scheduleDelayedTask(ctx context.Context, interval time.Duration, t
 				execTime = execTime.In(loc)
 			}
 
+			displayTime := execTime.Format(DateTimeFormat)
 			msg := fmt.Sprintf("📅 %s: %s に実行予定です",
 				taskName,
-				execTime.Format(DateTimeFormat),
+				displayTime,
 			)
-			log.Println(msg)
+			log.Printf("%s実行予定: %s", taskName, displayTime)
 			if notifySlack {
 				_ = b.slackClient.PostMessage(ctx, msg)
 			}
@@ -113,7 +112,7 @@ func (b *Bot) scheduleDelayedTask(ctx context.Context, interval time.Duration, t
 func (b *Bot) executeAutoPost(ctx context.Context) {
 	facts, err := b.factStore.GetRandomGeneralFactBundle(ctx, AutoPostFactCount)
 	if err != nil {
-		log.Printf("自動投稿用ファクトの取得失敗: %v", err)
+		log.Printf("自動投稿用ファクト取得失敗: %v", err)
 		return
 	}
 	if len(facts) == 0 {
@@ -126,13 +125,15 @@ func (b *Bot) executeAutoPost(ctx context.Context) {
 	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: model.RoleUser, Content: prompt}}, systemPrompt, int64(b.config.MaxPostChars), nil, b.config.LLMTemperature)
 
 	if response != "" {
-		runes := []rune(response)
-		log.Printf("自動投稿を実行します: %s...", string(runes[:min(LogContentMaxChars, len(runes))]))
 		status, err := b.mastodonClient.PostStatus(ctx, response, b.config.AutoPostVisibility)
 		if err != nil {
-			log.Printf("自動投稿エラー: %v", err)
+			log.Printf("自動投稿失敗: %s、%v", autoPostExcerpt(response), err)
 			return
 		}
+
+		postedText := b.mastodonClient.StripHTML(status.Content)
+		postedText = strings.TrimSuffix(strings.TrimSpace(postedText), strings.TrimSpace(mastodon.BotTag))
+		log.Printf("自動投稿: %s", autoPostExcerpt(postedText))
 
 		displayName := status.Account.DisplayName
 		if displayName == "" {
@@ -150,4 +151,12 @@ func (b *Bot) executeAutoPost(ctx context.Context) {
 		}
 		go b.factService.ExtractAndSaveFacts(ctx, response, baseFact)
 	}
+}
+
+func autoPostExcerpt(text string) string {
+	runes := []rune(strings.Join(strings.Fields(text), " "))
+	if len(runes) > LogContentMaxChars {
+		return string(runes[:LogContentMaxChars]) + "…"
+	}
+	return string(runes)
 }
