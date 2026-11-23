@@ -7,15 +7,12 @@ import (
 	"testing"
 )
 
-// repairTestCases defines inputs and expected outputs for integration testing.
-// These cases cover various forms of malformed JSON that the repair logic should handle.
 var repairTestCases = []struct {
 	name  string
 	input string
 	want  string
-	exact bool // If true, requires exact string match. If false, semantic equality is sufficient.
+	exact bool
 }{
-	// Basic Validity
 	{
 		name:  "Valid JSON array",
 		input: `[{"key":"value"}]`,
@@ -35,7 +32,6 @@ var repairTestCases = []struct {
 		exact: true,
 	},
 
-	// Tier 1: Structural Repairs (Truncation, Braces)
 	{
 		name:  "Truncated JSON array (simple)",
 		input: `[{"key":"value"},{"key":"val`,
@@ -133,7 +129,6 @@ var repairTestCases = []struct {
 		exact: true,
 	},
 
-	// Tier 2: Character/Encoding Repairs
 	{
 		name:  "Unescaped newline in value",
 		input: "[{\"key\":\"val\nue\"}]",
@@ -177,7 +172,6 @@ var repairTestCases = []struct {
 		exact: false,
 	},
 
-	// Tier 3: Quotes and Keys
 	{
 		name:  "Missing opening quote",
 		input: `{"key": 『value』}`,
@@ -296,21 +290,18 @@ var repairTestCases = []struct {
 	},
 }
 
-// TestIntegration tests the full UnmarshalWithRepair piepline using the test cases above.
 func TestIntegration(t *testing.T) {
 	for _, tt := range repairTestCases {
 		t.Run(tt.name, func(t *testing.T) {
 			var v interface{}
 			err := UnmarshalWithRepair(tt.input, &v, "[TEST]: ")
 
-			// Case 1: Expected success (want JSON is provided)
 			if tt.want != "" {
 				if err != nil {
 					t.Errorf("Unexpected error: %v", err)
 					return
 				}
 
-				// Verify semantic equality
 				var wantV interface{}
 				if err := json.Unmarshal([]byte(tt.want), &wantV); err != nil {
 					t.Fatalf("Invalid 'want' JSON in test case: %v", err)
@@ -319,11 +310,9 @@ func TestIntegration(t *testing.T) {
 					t.Errorf("Mismatch for %s.\nGot: %+v\nWant: %+v\n(Input: %q)", tt.name, v, wantV, tt.input)
 				}
 
-				// Verify exact string match if requested
 				if tt.exact {
 				}
 			} else {
-				// Case 2: Validity check only (no specific 'want' JSON)
 				if err != nil {
 					t.Errorf("Repair failed for input: %s\nError: %v", tt.input, err)
 				}
@@ -332,17 +321,16 @@ func TestIntegration(t *testing.T) {
 	}
 }
 
-// TestTier1 verifies structural repairs (braces, brackets, commas).
 func TestTier1(t *testing.T) {
 	cases := []struct {
 		input, want string
 	}{
-		{`[{"a":1},`, `[{"a":1}]`},                 // Truncated array
-		{`[[{"a":1}]]`, `[{"a":1}]`},               // Double array
-		{`{"a":1`, `{"a":1}`},                      // Missing brace
-		{`{"a": ["b" }`, `{"a": ["b" ]}`},          // Unclosed array in object
-		{`{"a":1, "b":2,}`, `{"a":1, "b":2}`},      // Trailing comma
-		{`[{"a":1} {"b":2}]`, `[{"a":1},{"b":2}]`}, // Missing comma between objects
+		{`[{"a":1},`, `[{"a":1}]`},
+		{`[[{"a":1}]]`, `[{"a":1}]`},
+		{`{"a":1`, `{"a":1}`},
+		{`{"a": ["b" }`, `{"a": ["b" ]}`},
+		{`{"a":1, "b":2,}`, `{"a":1, "b":2}`},
+		{`[{"a":1} {"b":2}]`, `[{"a":1},{"b":2}]`},
 	}
 	for _, tc := range cases {
 		if got := repairTier1(tc.input); got != tc.want {
@@ -351,19 +339,17 @@ func TestTier1(t *testing.T) {
 	}
 }
 
-// TestTier2 verifies character level repairs (encoding, localized symbols).
 func TestTier2(t *testing.T) {
 	cases := []struct {
 		input, wantSubstring string
 	}{
-		{`{"val": "It\'s"}`, `{"val": "It's"}`}, // Escaped single quote
-		{`{"key": "\x27val\x27"}`, `\u0027`},    // Hex escape
-		{`{"a":"b"}; {"c":"d"}`, `{"a":"b"}`},   // Semicolon (truncated to first object)
+		{`{"val": "It\'s"}`, `{"val": "It's"}`},
+		{`{"key": "\x27val\x27"}`, `\u0027`},
+		{`{"a":"b"}; {"c":"d"}`, `{"a":"b"}`},
 	}
 	for _, tc := range cases {
 		got := repairTier2(tc.input)
 		if !strings.Contains(got, tc.wantSubstring) {
-			// Fallback: check simple equality if substring is full body
 			if got != tc.wantSubstring {
 				t.Errorf("Tier2 failed for %q. Got: %q, Expected to contain/be: %q", tc.input, got, tc.wantSubstring)
 			}
@@ -371,38 +357,33 @@ func TestTier2(t *testing.T) {
 	}
 }
 
-// TestTier3 verifies quote and key repairs.
 func TestTier3(t *testing.T) {
 	cases := []struct {
 		input, want string
 	}{
-		{`{key: "val"}`, `{"key": "val"}`},    // Unquoted key
-		{`{"a":"b""}`, `{"a":"b"}`},           // Garbage quote
-		{`{"a":"b,"c":1}`, `{"a":"b","c":1}`}, // Missing quote before comma
-		{`[val1, val2]`, `["val1", "val2"]`},  // Unquoted values in array
-		{`{"key": news}`, `{"key": "news"}`},  // Unquoted value starting with n
+		{`{key: "val"}`, `{"key": "val"}`},
+		{`{"a":"b""}`, `{"a":"b"}`},
+		{`{"a":"b,"c":1}`, `{"a":"b","c":1}`},
+		{`[val1, val2]`, `["val1", "val2"]`},
+		{`{"key": news}`, `{"key": "news"}`},
 	}
 	for _, tc := range cases {
 		got := repairTier3(tc.input)
 		if !json.Valid([]byte(got)) {
 			t.Errorf("Tier3 produced invalid JSON for %q. Got: %q", tc.input, got)
 		}
-		// For simple cases, we expect exact structure match (ignoring whitespace if possible, but here strings are tight)
 		if tc.want != "" && got != tc.want && strings.ReplaceAll(got, " ", "") != strings.ReplaceAll(tc.want, " ", "") {
 			t.Errorf("Tier3 content mismatch. Input: %q\nGot: %q\nWant: %q", tc.input, got, tc.want)
 		}
 	}
 }
 
-// TestTier4 verifies the most aggressive repairs (masking, heuristics).
-// This essentially covers the legacy RepairJSON logic.
 func TestTier4(t *testing.T) {
-	// These cases are typically too hard for Tier 1-3
 	cases := []struct {
 		input, want string
 	}{
-		{`[{"target":"user","key":"attr","valueContent"}]`, `[{"target":"user","key":"attr","value":"Content"}]`}, // Merged key
-		{`[{"__general__","topic"}]`, `["__general__","topic"]`},                                                  // Object-like array
+		{`[{"target":"user","key":"attr","valueContent"}]`, `[{"target":"user","key":"attr","value":"Content"}]`},
+		{`[{"__general__","topic"}]`, `["__general__","topic"]`},
 	}
 	for _, tc := range cases {
 		got := repairTier4(tc.input)
@@ -420,7 +401,6 @@ func TestTier4(t *testing.T) {
 	}
 }
 
-// TestHelpers covers specific regex or logic helpers deeply.
 func TestHelpers(t *testing.T) {
 	t.Run("repairDoubleArray", func(t *testing.T) {
 		if got := repairDoubleArray(`[[{"a":1}]]`); got != `[{"a":1}]` {
@@ -444,7 +424,6 @@ func TestHelpers(t *testing.T) {
 	})
 }
 
-// Fuzzers
 func FuzzRepairJSON(f *testing.F) {
 	seeds := []string{
 		`{"key": "value"}`,
@@ -461,12 +440,10 @@ func FuzzRepairJSON(f *testing.F) {
 	f.Fuzz(func(t *testing.T, input string) {
 		defer func() {
 			if r := recover(); r != nil {
-				// Panics are bad
 				t.Fatalf("Panic in repairTier4: %v", r)
 			}
 		}()
 
-		// Just check for crashes or major regressions on valid json
 		repaired := repairTier4(input)
 		if json.Valid([]byte(input)) {
 			if !json.Valid([]byte(repaired)) {

@@ -20,10 +20,8 @@ func main() {
 	config.LoadEnvironment(*envFile)
 	cfg := config.LoadConfig()
 
-	// Initialize bot
 	b := bot.NewBot(cfg)
 
-	// シグナルハンドリング（SIGINT, SIGTERM）
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 

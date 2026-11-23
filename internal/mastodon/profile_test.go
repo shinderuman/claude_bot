@@ -8,9 +8,6 @@ import (
 	"github.com/mattn/go-mastodon"
 )
 
-// NOTE: これらのテストは、facts/service.go にある既存ロジックと100%一致することを確認するためのものです。
-// 集約（移動）した際、これらのテストをそのまま通るように実装します。
-
 func TestFormatProfileBody(t *testing.T) {
 	c := &Client{}
 
@@ -51,32 +48,26 @@ func TestBuildProfileFields(t *testing.T) {
 
 	got := c.BuildProfileFields(cfg, existingFields, authKey)
 
-	// フィールド数の確認 (Existing + ModelName + SystemID + Status + Updated = 5)
 	if len(got) != 5 {
 		t.Errorf("Expected 5 fields, got %d", len(got))
 	}
 
-	// 順序の確認
 	if got[0].Name != "Existing" {
 		t.Errorf("First field should be preserved. Got %s", got[0].Name)
 	}
 
-	// SystemID Check
 	if got[1].Name != ProfileFieldSystemID {
 		t.Errorf("Second field should be SystemID. Got %s", got[1].Name)
 	}
 
-	// MentionStatus Check
 	if got[2].Name != ProfileFieldMentionStatus {
 		t.Errorf("Third field should be MentionStatus. Got %s", got[2].Name)
 	}
 
-	// LastUpdated Check
 	if got[3].Name != ProfileFieldLastUpdated {
 		t.Errorf("Fourth field should be LastUpdated. Got %s", got[3].Name)
 	}
 
-	// Model Name Check
 	if got[4].Name != ProfileFieldModelName {
 		t.Errorf("Fifth field should be ModelName. Got %s", got[4].Name)
 	}

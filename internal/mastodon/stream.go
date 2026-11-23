@@ -7,7 +7,6 @@ import (
 	gomastodon "github.com/mattn/go-mastodon"
 )
 
-// StreamUser はホームタイムラインのストリーミングを開始し、イベントをチャネルに送信します
 func (c *Client) StreamUser(ctx context.Context, eventChan chan<- gomastodon.Event) {
 	events, err := c.client.StreamingUser(ctx)
 	if err != nil {
@@ -24,9 +23,8 @@ func (c *Client) StreamUser(ctx context.Context, eventChan chan<- gomastodon.Eve
 	log.Println("ユーザーストリーミング接続が切断されました")
 }
 
-// StreamPublic は連合タイムラインのストリーミングを開始し、イベントをチャネルに送信します
 func (c *Client) StreamPublic(ctx context.Context, eventChan chan<- gomastodon.Event) {
-	events, err := c.client.StreamingPublic(ctx, false) // false = 連合タイムライン
+	events, err := c.client.StreamingPublic(ctx, false)
 	if err != nil {
 		log.Printf("連合ストリーミング接続エラー: %v", err)
 		return
@@ -41,7 +39,6 @@ func (c *Client) StreamPublic(ctx context.Context, eventChan chan<- gomastodon.E
 	log.Println("連合ストリーミング接続が切断されました")
 }
 
-// ExtractStatusFromEvent はイベントから Status を抽出します
 func ExtractStatusFromEvent(event gomastodon.Event) *gomastodon.Status {
 	switch e := event.(type) {
 	case *gomastodon.UpdateEvent:

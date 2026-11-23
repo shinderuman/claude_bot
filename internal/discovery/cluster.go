@@ -17,12 +17,9 @@ import (
 )
 
 const (
-	// RegistryFile is the filename of the cluster registry file
 	RegistryFileName = "cluster_registry.json"
-	// HeartbeatDuration determines how long a registration is valid
-	// Should be slightly longer than the maintenance interval
+	// Keep the registry TTL longer than the maintenance interval.
 	HeartbeatDuration = 7 * time.Hour
-	// HeartbeatInterval determines how often we update our registration
 	HeartbeatInterval = 5 * time.Minute
 )
 
@@ -36,7 +33,6 @@ type Node struct {
 	JoinedAt    time.Time `json:"joined_at"`
 }
 
-// StartHeartbeatLoop starts a background loop to keep the bot registered
 func StartHeartbeatLoop(ctx context.Context, username string) {
 	if _, _, err := GetMyPosition(username); err != nil {
 		log.Printf("[Discovery] Initial registration failed: %v", err)
@@ -58,8 +54,6 @@ func StartHeartbeatLoop(ctx context.Context, username string) {
 	}()
 }
 
-// GetMyPosition registers the current bot and returns its position and total count
-// Sorting is based on JoinedAt (Arrival Order) to ensure deterministic indexing.
 func GetMyPosition(username string) (int, int, error) {
 	registryPath := util.GetFilePath(RegistryFileName)
 	lockPath := registryPath + ".lock"
@@ -98,26 +92,21 @@ func GetMyPosition(username string) (int, int, error) {
 		log.Printf("[Discovery] Failed to read registry (new?): %v", err)
 	}
 
-	// Update list: Remove expired nodes, Update/Add self
 	now := time.Now()
 	threshold := now.Add(-HeartbeatDuration)
 
-	// Map to ensure uniqueness by username
 	nodeMap := make(map[string]Node)
 
 	for _, node := range registry.Nodes {
-		// Skip self (will be handled specifically later)
 		if node.Username == username {
 			continue
 		}
 
-		// Check expiration
 		if !node.LastUpdated.After(threshold) {
 			log.Printf("[Discovery] Dropping expired node: %s (Last seen: %s)", node.Username, node.LastUpdated)
 			continue
 		}
 
-		// Handle duplicates: Keep the one with latest timestamp, but prefer oldest JoinedAt
 		if existing, exists := nodeMap[node.Username]; exists {
 			bestJoinedAt := existing.JoinedAt
 			if bestJoinedAt.IsZero() || (!node.JoinedAt.IsZero() && node.JoinedAt.Before(bestJoinedAt)) {
@@ -140,9 +129,7 @@ func GetMyPosition(username string) (int, int, error) {
 		}
 	}
 
-	// Handle Self
 	var selfNode Node
-	// Find previous state of self from registry (before we excluded it from map)
 	var oldSelf *Node
 	for _, node := range registry.Nodes {
 		if node.Username == username {
@@ -158,7 +145,6 @@ func GetMyPosition(username string) (int, int, error) {
 			selfNode.JoinedAt = now
 		}
 	} else {
-		// New entry
 		selfNode = Node{
 			Username:    username,
 			LastUpdated: now,
@@ -167,16 +153,12 @@ func GetMyPosition(username string) (int, int, error) {
 	}
 	nodeMap[username] = selfNode
 
-	// Convert map back to slice
 	var activeNodes []Node
 	for _, node := range nodeMap {
 		activeNodes = append(activeNodes, node)
 	}
 
-	// Sort nodes by JoinedAt (Arrival Order)
 	sort.Slice(activeNodes, func(i, j int) bool {
-		// If JoinedAt is equal (unlikely) or zero (legacy), fall back to Username
-		// Zero time comes first in Go (Before returns true), which is what we want (Legacy first)
 		if !activeNodes[i].JoinedAt.Equal(activeNodes[j].JoinedAt) {
 			return activeNodes[i].JoinedAt.Before(activeNodes[j].JoinedAt)
 		}
@@ -208,7 +190,6 @@ func GetMyPosition(username string) (int, int, error) {
 	return myIndex, len(activeNodes), nil
 }
 
-// GetKnownBotUsernames scans .env* files in the data directory to find all defined bot usernames.
 func GetKnownBotUsernames(dataDir string) ([]string, error) {
 
 	files, err := os.ReadDir(dataDir)
@@ -255,7 +236,6 @@ func GetKnownBotUsernames(dataDir string) ([]string, error) {
 	return usernames, nil
 }
 
-// GetKnownBotUsernamesMap returns a set of known bot usernames for efficient O(1) lookup.
 func GetKnownBotUsernamesMap(dataDir string) (map[string]struct{}, error) {
 	names, err := GetKnownBotUsernames(dataDir)
 	if err != nil {

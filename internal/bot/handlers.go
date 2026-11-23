@@ -16,13 +16,10 @@ import (
 )
 
 const (
-	// TempImageFilenameSVG is the format for temporary SVG files
 	TempImageFilenameSVG = "%s/generated_image_%d.svg"
-	// TempImageFilenamePNG is the format for temporary PNG files
 	TempImageFilenamePNG = "%s/generated_image_%d.png"
 )
 
-// handleChatResponse handles the normal chat response flow
 func (b *Bot) handleChatResponse(ctx context.Context, session *model.Session, conversation *model.Conversation, notification *gomastodon.Notification, userMessage string, images []model.Image, statusID, mention, visibility string) bool {
 	displayName := notification.Account.DisplayName
 	if displayName == "" {
@@ -41,12 +38,11 @@ func (b *Bot) handleChatResponse(ctx context.Context, session *model.Session, co
 	response := b.llmClient.GenerateResponse(ctx, session, conversation, relevantFacts, botProfile, images)
 
 	if response == "" {
-		store.RollbackLastMessages(conversation, RollbackCountSmall) // ユーザー発言を取り消し
+		store.RollbackLastMessages(conversation, RollbackCountSmall)
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.ResponseGeneration)
 		return false
 	}
 
-	// 投稿
 	postedStatuses, err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
 	if err != nil {
 		log.Printf("応答の投稿に失敗: %v", err)
@@ -55,13 +51,11 @@ func (b *Bot) handleChatResponse(ctx context.Context, session *model.Session, co
 		return false
 	}
 
-	// IDリストの作成
 	var postedIDs []string
 	for _, s := range postedStatuses {
 		postedIDs = append(postedIDs, string(s.ID))
 	}
 
-	// 自分の投稿から事実を抽出（学習）
 	if len(postedStatuses) > 0 {
 		status := postedStatuses[0]
 		displayName := status.Account.DisplayName
@@ -81,16 +75,13 @@ func (b *Bot) handleChatResponse(ctx context.Context, session *model.Session, co
 		go b.factService.ExtractAndSaveFacts(ctx, response, baseFact)
 	}
 
-	// 履歴に追加
 	store.AddMessage(conversation, model.RoleAssistant, response, postedIDs)
 
 	session.LastUpdated = time.Now()
 	return true
 }
 
-// handleImageGeneration handles image generation requests
 func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session, conversation *model.Conversation, imagePrompt, statusID, mention, visibility string) bool {
-	// SVG生成
 	svg, err := b.imageGenerator.GenerateSVG(ctx, imagePrompt)
 	if err != nil {
 		log.Printf("画像生成エラー: %v", err)
@@ -99,7 +90,6 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 		return false
 	}
 
-	// 一時ファイルに保存
 	tmpSvgFilename := fmt.Sprintf(TempImageFilenameSVG, os.TempDir(), time.Now().Unix())
 	if err := os.WriteFile(tmpSvgFilename, []byte(svg), 0644); err != nil {
 		log.Printf("SVG保存エラー: %v", err)
@@ -115,11 +105,9 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.ImageGeneration)
 		return false
 	} else {
-		defer os.Remove(tmpPngFilename) //nolint:errcheck // クリーンアップ
+		defer os.Remove(tmpPngFilename) //nolint:errcheck
 	}
 
-	// 画像を添付して返信
-	// メッセージを生成
 	replyPrompt := llm.BuildImageGenerationReplyPrompt(imagePrompt, b.config.CharacterPrompt)
 	replyMessages := []model.Message{{Role: model.RoleUser, Content: replyPrompt}}
 	response := b.llmClient.GenerateText(ctx, replyMessages, "", b.config.MaxResponseTokens, nil, b.config.LLMTemperature)
@@ -128,7 +116,6 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 		response = llm.Messages.Success.ImageGeneration
 	}
 
-	// 投稿
 	postedID, err := b.mastodonClient.PostResponseWithMedia(ctx, statusID, mention, response, visibility, tmpPngFilename)
 	if err != nil {
 		log.Printf("メディア投稿エラー: %v", err)
@@ -137,23 +124,19 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 		return false
 	}
 
-	// 成功したら履歴に追加
 	store.AddMessage(conversation, model.RoleAssistant, response, []string{postedID})
 
 	session.LastUpdated = time.Now()
 	return true
 }
 
-// classifyIntent classifies the user's intent using LLM
 func (b *Bot) classifyIntent(ctx context.Context, message string, urlCandidates []string) (model.IntentType, string, []string, string) {
-	// JSTの現在時刻を取得（タイムゾーンロード失敗時はUTC）
 	now := time.Now()
 	if loc, err := time.LoadLocation(b.config.Timezone); err == nil {
 		now = now.In(loc)
 	}
 
 	prompt := llm.BuildIntentClassificationPrompt(message, now, urlCandidates...)
-	// システムプロンプトはシンプルに
 	systemPrompt := llm.Messages.System.IntentClassification
 
 	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: model.RoleUser, Content: prompt}}, systemPrompt, b.config.MaxResponseTokens, nil, llm.TemperatureSystem)
@@ -177,14 +160,12 @@ func (b *Bot) classifyIntent(ctx context.Context, message string, urlCandidates 
 	return model.IntentType(result.Intent), result.ImagePrompt, result.AnalysisURLs, result.TargetDate
 }
 
-// handleFollowRequest handles the follow request logic
 func (b *Bot) handleFollowRequest(ctx context.Context, conversation *model.Conversation, notification *gomastodon.Notification, statusID, mention, visibility string) bool {
 	targetAccountID := string(notification.Account.ID)
 	targetAcct := notification.Account.Acct
 
 	log.Printf("フォローリクエスト受信: %s (ID: %s)", targetAcct, targetAccountID)
 
-	// 既にフォロー済みかチェック
 	isFollowing, err := b.mastodonClient.IsFollowing(ctx, targetAccountID)
 	if err != nil {
 		log.Printf("フォロー状態確認エラー: %v", err)
@@ -196,7 +177,6 @@ func (b *Bot) handleFollowRequest(ctx context.Context, conversation *model.Conve
 		log.Printf("既にフォロー済みです: %s", targetAcct)
 		replyMessage = b.generateFollowReply(ctx, targetAcct, llm.Templates.FollowResponseAlready, llm.Messages.Success.FollowAlready)
 	} else {
-		// まだフォローしていない場合、フォローを実行
 		err := b.mastodonClient.FollowAccount(ctx, targetAccountID)
 		if err != nil {
 			log.Printf("フォロー失敗: %v", err)
@@ -206,17 +186,14 @@ func (b *Bot) handleFollowRequest(ctx context.Context, conversation *model.Conve
 		replyMessage = b.generateFollowReply(ctx, targetAcct, llm.Templates.FollowResponse, llm.Messages.Success.FollowSuccess)
 	}
 
-	// 投稿
 	postedStatuses, err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, replyMessage, visibility)
 	if err != nil {
 		log.Printf("フォロー完了返信エラー: %v", err)
 	} else {
-		// IDリストの作成
 		var postedIDs []string
 		for _, s := range postedStatuses {
 			postedIDs = append(postedIDs, string(s.ID))
 		}
-		// 成功したら履歴に追加
 		store.AddMessage(conversation, model.RoleAssistant, replyMessage, postedIDs)
 	}
 
@@ -239,10 +216,8 @@ func (b *Bot) generateFollowReply(ctx context.Context, targetAcct, template, fal
 	return fmt.Sprintf(fallbackFormat, targetAcct)
 }
 
-// handleAssistantRequest handles the assistant analysis request
 func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session, conversation *model.Conversation, startID, endID, userMessage, statusID, mention, visibility string) bool {
 
-	// 1. URLからアカウント情報を特定するためにまず開始ステータスを取得
 	targetStatus, err := b.mastodonClient.GetStatus(ctx, startID)
 	if err != nil {
 		log.Printf("開始ステータス取得失敗: %v", err)
@@ -252,7 +227,6 @@ func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session
 
 	targetAccountID := string(targetStatus.Account.ID)
 
-	// 2. 発言範囲の取得
 	statuses, err := b.mastodonClient.GetStatusesByRange(ctx, targetAccountID, startID, endID)
 	if err != nil {
 		log.Printf("発言範囲取得失敗: %v", err)
@@ -265,11 +239,9 @@ func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session
 		return true
 	}
 
-	// 3. LLMによる分析
 	prompt := llm.BuildAssistantAnalysisPrompt(statuses, userMessage)
 	systemPrompt := llm.BuildSystemPrompt(b.config, "", "", "", true, b.config.CharacterPriority)
 
-	// 分析には長文の可能性があるため、サマリー用のトークン数を使用
 	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: model.RoleUser, Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil, llm.TemperatureSystem)
 
 	if response == "" {
@@ -277,7 +249,6 @@ func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session
 		return false
 	}
 
-	// 4. Mastodonに投稿 (分割投稿対応、全StatusID取得)
 	postedStatuses, err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
 	if err != nil {
 		log.Printf("応答の投稿に失敗しました: %v", err)
@@ -285,27 +256,22 @@ func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session
 		return false
 	}
 
-	// IDリストの作成
 	var postedIDs []string
 	for _, s := range postedStatuses {
 		postedIDs = append(postedIDs, string(s.ID))
 	}
 
-	// 5. 会話履歴にアシスタントの発言（全ID）を追加
 	store.AddMessage(conversation, model.RoleAssistant, response, postedIDs)
 
 	session.LastUpdated = time.Now()
 	return true
 }
 
-// handleDailySummaryRequest handles the daily summary request
 func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Session, conversation *model.Conversation, notification *gomastodon.Notification, targetDate, userMessage, statusID, mention, visibility string) bool {
-	// リクエスト送信者のアカウントIDを取得
 	accountID := string(notification.Account.ID)
 
 	log.Printf("Daily Summary Request: targetDate=%s", targetDate)
 
-	// JSTのタイムゾーンを取得
 	loc, err := time.LoadLocation(b.config.Timezone)
 	if err != nil {
 		log.Printf("タイムゾーン読み込み失敗 (%s): %v", b.config.Timezone, err)
@@ -313,7 +279,6 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 		return false
 	}
 
-	// 対象日を計算
 	now := time.Now().In(loc)
 	targetDay, err := time.ParseInLocation(DateFormatYMD, targetDate, loc)
 	if err != nil {
@@ -321,7 +286,6 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 		b.postErrorMessage(ctx, statusID, mention, visibility, fmt.Sprintf(llm.Messages.Error.DateParse, targetDate))
 		return true
 	}
-	// 3日前より過去かどうかチェック
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	if targetDay.Before(todayStart.AddDate(0, 0, -DailySummaryDaysLimit)) {
 		b.postErrorMessage(ctx, statusID, mention, visibility, llm.Messages.Error.DateLimit)
@@ -331,7 +295,6 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 	endTime := targetDay.AddDate(0, 0, 1)
 	targetDateStr := targetDay.Format(DateFormatYMDSlash)
 
-	// 発言を取得
 	statuses, err := b.mastodonClient.GetStatusesByDateRange(ctx, accountID, targetDay, endTime)
 	if err != nil {
 		log.Printf("発言取得失敗: %v", err)
@@ -344,7 +307,6 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 		return true
 	}
 
-	// LLMによるまとめ
 	prompt := llm.BuildDailySummaryPrompt(statuses, targetDateStr, userMessage, loc)
 	systemPrompt := llm.BuildSystemPrompt(b.config, "", "", "", true, b.config.CharacterPriority)
 
@@ -355,7 +317,6 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 		return false
 	}
 
-	// 投稿
 	postedStatuses, err := b.mastodonClient.PostResponseWithSplit(ctx, statusID, mention, response, visibility)
 	if err != nil {
 		log.Printf("まとめ結果投稿エラー: %v", err)
@@ -363,13 +324,11 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 		return false
 	}
 
-	// IDリストの作成
 	var postedIDs []string
 	for _, s := range postedStatuses {
 		postedIDs = append(postedIDs, string(s.ID))
 	}
 
-	// 履歴に追加
 	store.AddMessage(conversation, model.RoleAssistant, response, postedIDs)
 
 	session.LastUpdated = time.Now()

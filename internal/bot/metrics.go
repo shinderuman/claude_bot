@@ -29,7 +29,7 @@ type detailedMetricsLogEntry struct {
 	Level       string `json:"level"`
 	Msg         string `json:"msg"`
 	BotUsername string `json:"bot_username"`
-	MetricType  string `json:"metric_type"` // "fact_stat_source" or "fact_stat_target"
+	MetricType  string `json:"metric_type"`
 	Category    string `json:"category"`
 	Count       int    `json:"count"`
 }
@@ -45,7 +45,6 @@ func (b *Bot) startMetricsLogger(ctx context.Context) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	// 初回ログ出力 (起動直後にも状態を知りたいため)
 	if err := b.collectAndLogMetrics(); err != nil {
 		log.Printf("メトリクスログ出力失敗: %v", err)
 	}
@@ -63,7 +62,6 @@ func (b *Bot) startMetricsLogger(ctx context.Context) {
 }
 
 func (b *Bot) collectAndLogMetrics() error {
-	// 1. データ収集と計算
 	allFacts := b.factStore.GetAllFacts()
 	botUsernames, err := discovery.GetKnownBotUsernames(util.GetFilePath(""))
 	if err != nil {
@@ -74,7 +72,6 @@ func (b *Bot) collectAndLogMetrics() error {
 	factsSize := calculateTotalFactsSize(allFacts)
 	sessionCount, sessionSize := b.history.GetStats()
 
-	// 2. ログファイルを開く
 	f, err := os.OpenFile(util.GetFilePath(b.config.MetricsLogFile), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to open metrics log file: %w", err)
@@ -84,7 +81,6 @@ func (b *Bot) collectAndLogMetrics() error {
 	timestamp := time.Now().Format(time.RFC3339)
 	encoder := json.NewEncoder(f)
 
-	// 3. 各ログを出力
 	if err := writeSummaryLog(encoder, timestamp, b.config.BotUsername, len(allFacts), factsSize, sessionCount, sessionSize); err != nil {
 		return fmt.Errorf("failed to write summary log: %w", err)
 	}
@@ -147,23 +143,19 @@ func calculateFactStats(facts []model.Fact, botUsernames []string) FactStats {
 		ByTarget: make(map[string]int),
 	}
 
-	// ボット判定用マップ
 	isBot := make(map[string]bool)
 	for _, name := range botUsernames {
 		isBot[name] = true
 	}
 
 	for _, f := range facts {
-		// BySource
 		src := f.SourceType
 		if src == "" {
 			src = model.UnknownTarget
 		}
 		stats.BySource[src]++
 
-		// ByTarget Aggregation
 		target := f.Target
-		// 優先順位: General > Assistant > Bots > Users
 		if target == model.GeneralTarget {
 			stats.ByTarget["general"]++
 		} else if target == model.RoleAssistant {
@@ -171,7 +163,6 @@ func calculateFactStats(facts []model.Fact, botUsernames []string) FactStats {
 		} else if isBot[target] {
 			stats.ByTarget[target]++
 		} else {
-			// その他はユーザーとして集約
 			stats.ByTarget["users"]++
 		}
 	}

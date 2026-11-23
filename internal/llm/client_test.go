@@ -22,7 +22,6 @@ func (e *TestError) Error() string {
 	return fmt.Sprintf("%d: %s", e.StatusCode, e.Message)
 }
 
-// MockProvider for testing
 type MockProvider struct {
 	GenerateContentFunc func(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image, temperature float64) (string, string, error)
 }
@@ -37,7 +36,6 @@ func (m *MockProvider) GenerateContent(ctx context.Context, messages []model.Mes
 func (m *MockProvider) IsRetryable(err error) bool {
 	var te *TestError
 	if errors.As(err, &te) {
-		// 429はリトライせず即座に失敗扱い
 		return te.StatusCode >= http.StatusInternalServerError
 	}
 	return false
@@ -60,36 +58,30 @@ func (m *MockProvider) IsRateLimited(err error) bool {
 }
 
 func TestClient_ConcurrencyLimit(t *testing.T) {
-	// Configure max concurrency = 2
 	cfg := &config.Config{
 		LLMMaxConcurrency: 2,
 		LLMMaxRetries:     5,
 		LLMProvider:       "mock",
 	}
 
-	// Create client with mock provider manually since NewClient switch doesn't support "mock"
 	client := &Client{
 		provider:  &MockProvider{},
 		config:    cfg,
 		semaphore: make(chan struct{}, cfg.LLMMaxConcurrency),
 	}
 
-	// Override provider specifically for this test to track active calls
 	var activeCalls int32
 	var maxActiveCalls int32
 
-	// Identify calls using a sleep to simulate duration
 	mockP := &MockProvider{
 		GenerateContentFunc: func(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image, temperature float64) (string, string, error) {
 			current := atomic.AddInt32(&activeCalls, 1)
 
-			// Record peak concurrency
 			max := atomic.LoadInt32(&maxActiveCalls)
 			if current > max {
 				atomic.StoreInt32(&maxActiveCalls, current)
 			}
 
-			// Simulate processing time
 			time.Sleep(100 * time.Millisecond)
 
 			atomic.AddInt32(&activeCalls, -1)
@@ -98,7 +90,6 @@ func TestClient_ConcurrencyLimit(t *testing.T) {
 	}
 	client.provider = mockP
 
-	// Launch 10 concurrent requests
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
@@ -150,7 +141,6 @@ func TestClient_RetryLogic(t *testing.T) {
 		t.Errorf("Expected 3 calls (2 failures + 1 success), got %d", callCount)
 	}
 
-	// Expect delay: 1s + 2s = 3s minimum
 	if elapsed < 3*time.Second {
 		t.Errorf("Expected delay >= 3s, got %v", elapsed)
 	}
@@ -158,8 +148,8 @@ func TestClient_RetryLogic(t *testing.T) {
 
 func TestClient_RateLimitNoRetry(t *testing.T) {
 	cfg := &config.Config{
-		LLMMaxConcurrency:             1,
-		LLMMaxRetries:                 5,
+		LLMMaxConcurrency:              1,
+		LLMMaxRetries:                  5,
 		RateLimitNotifyIntervalMinutes: 60,
 	}
 
@@ -181,14 +171,12 @@ func TestClient_RateLimitNoRetry(t *testing.T) {
 	resp := client.GenerateText(context.Background(), nil, "", 100, nil, 0.0)
 	elapsed := time.Since(start)
 
-	// 429はリトライされず1回のみの呼び出しで即座に失敗
 	if resp != "" {
 		t.Errorf("Expected empty response on 429, got %q", resp)
 	}
 	if callCount != 1 {
 		t.Errorf("Expected 1 call (no retry on 429), got %d", callCount)
 	}
-	// バックオフ待機なし（即座に失敗）
 	if elapsed >= 1*time.Second {
 		t.Errorf("Expected no backoff delay on 429, got %v", elapsed)
 	}
@@ -202,7 +190,7 @@ func TestClient_adjustForGemma(t *testing.T) {
 		messages       []model.Message
 		systemPrompt   string
 		expectSystem   string
-		expectFirstMsg string // Check logic integration
+		expectFirstMsg string
 	}{
 		{
 			name:      "Should apply workaround: System prompt merged into user message",
@@ -212,7 +200,7 @@ func TestClient_adjustForGemma(t *testing.T) {
 				{Role: model.RoleUser, Content: "Hello"},
 			},
 			systemPrompt:   "You are a helpful assistant.",
-			expectSystem:   "", // Should be cleared
+			expectSystem:   "",
 			expectFirstMsg: "System Instructions:\nYou are a helpful assistant.\n\nUser Message:\nHello",
 		},
 		{

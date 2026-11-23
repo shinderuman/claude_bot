@@ -18,7 +18,6 @@ func TestRunWithDelay_Execution(t *testing.T) {
 		func(ctx context.Context) { executedCount++ },
 	}
 
-	// Use a very small delay for testing
 	delay := 10 * time.Millisecond
 
 	runWithDelay(ctx, delay, tasks)
@@ -36,28 +35,22 @@ func TestRunWithDelay_Cancellation(t *testing.T) {
 		func(ctx context.Context) { executedCount++ },
 	}
 
-	// Use a large delay
 	delay := 500 * time.Millisecond
 
-	// Run in goroutine because it blocks
 	done := make(chan struct{})
 	go func() {
 		runWithDelay(ctx, delay, tasks)
 		close(done)
 	}()
 
-	// Cancel immediately
 	cancel()
 
-	// Wait for return
 	select {
 	case <-done:
-		// success
 	case <-time.After(1 * time.Second):
 		t.Fatal("runWithDelay did not return after cancellation")
 	}
 
-	// Should not have executed tasks
 	if executedCount != 0 {
 		t.Errorf("Expected 0 tasks to be executed due to cancellation, got %d", executedCount)
 	}
@@ -71,13 +64,11 @@ func TestRunWithDelay_ContextCancelBetweenTasks(t *testing.T) {
 	tasks := []func(context.Context){
 		func(ctx context.Context) {
 			executedCount++
-			// Cancel context after first task
 			cancel()
 		},
 		func(ctx context.Context) { executedCount++ },
 	}
 
-	// Small delay
 	delay := 1 * time.Millisecond
 
 	runWithDelay(ctx, delay, tasks)

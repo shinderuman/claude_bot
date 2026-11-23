@@ -44,7 +44,7 @@ func TestExtractAndSaveFactsFromURLContent_MetadataPropagation(t *testing.T) {
 	if f.PostAuthor != "auth" {
 		t.Errorf("PostAuthor mismatch: %s", f.PostAuthor)
 	}
-	if f.Author != "auth" { // In URL content extraction code, Author is set to PostAuthor
+	if f.Author != "auth" {
 		t.Errorf("Author mismatch: %s", f.Author)
 	}
 }
@@ -70,7 +70,6 @@ func TestExtractAndSaveFactsFromSummary_MetadataPropagation(t *testing.T) {
 		t.Fatal("Expected fact saved")
 	}
 	f := capturedFacts[0]
-	// Should resolve "user" target to baseFact.Author
 	if f.Target != "summary_user" {
 		t.Errorf("Target mismatch: %s", f.Target)
 	}
@@ -80,7 +79,6 @@ func TestExtractAndSaveFactsFromSummary_MetadataPropagation(t *testing.T) {
 }
 
 func TestExtractAndSaveFacts_UnknownUsernameCorrection(t *testing.T) {
-	// Setup
 	var capturedFacts []model.Fact
 
 	mockLLM := &MockLLMClient{
@@ -113,26 +111,22 @@ func TestExtractAndSaveFacts_UnknownUsernameCorrection(t *testing.T) {
 	}
 	service.ExtractAndSaveFacts(context.Background(), "I am a Software Engineer", baseFact)
 
-	// Verification
 	if len(capturedFacts) == 0 {
 		t.Fatal("Expected fact to be saved")
 	}
 
 	savedFact := capturedFacts[0]
 
-	// Verify Target ID normalization (user -> authorID)
 	if savedFact.Target != authorID {
 		t.Errorf("Expected Target to be author ID %s, got %s", authorID, savedFact.Target)
 	}
 
-	// Verify Username correction (empty -> authorName when target == authorID)
 	if savedFact.TargetUserName != authorName {
 		t.Errorf("Expected TargetUserName to be corrected to %s, got %s", authorName, savedFact.TargetUserName)
 	}
 }
 
 func TestExtractAndSaveFacts_DropUnidentifiable(t *testing.T) {
-	// Setup
 	var capturedFacts []model.Fact
 
 	mockLLM := &MockLLMClient{
@@ -165,14 +159,12 @@ func TestExtractAndSaveFacts_DropUnidentifiable(t *testing.T) {
 	}
 	service.ExtractAndSaveFacts(context.Background(), "Someone likes fishing", baseFact)
 
-	// Verification
 	if len(capturedFacts) > 0 {
 		t.Errorf("Expected unidentifiable fact to be droppped, but got %v", capturedFacts[0])
 	}
 }
 
 func TestExtractAndSaveFacts_BotValidation(t *testing.T) {
-	// Setup
 	var capturedFacts []model.Fact
 
 	mockLLM := &MockLLMClient{
@@ -202,7 +194,7 @@ func TestExtractAndSaveFacts_BotValidation(t *testing.T) {
 		name           string
 		llmResponse    string
 		expectSaved    bool
-		targetOverride string // If set, overrides the target in the fact for checking
+		targetOverride string
 	}{
 		{
 			name:        "Known Bot with 'bot' in value -> Should Skip",
@@ -228,10 +220,8 @@ func TestExtractAndSaveFacts_BotValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Reset captured facts
 			capturedFacts = []model.Fact{}
 
-			// Override LLM response
 			mockLLM.GenerateTextFunc = func(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, currentImages []model.Image, temperature float64) string {
 				return tt.llmResponse
 			}
@@ -241,7 +231,7 @@ func TestExtractAndSaveFacts_BotValidation(t *testing.T) {
 				Author:             "auth",
 				AuthorUserName:     "authUser",
 				SourceType:         "mention",
-				PostAuthor:         "auth", // assuming post author is same as author for simple test
+				PostAuthor:         "auth",
 				PostAuthorUserName: "authUser",
 				IsTrusted:          false,
 			}
@@ -261,7 +251,6 @@ func TestExtractAndSaveFacts_BotValidation(t *testing.T) {
 }
 
 func TestExtractAndSaveFacts_MetadataPropagation(t *testing.T) {
-	// Setup
 	var capturedFacts []model.Fact
 
 	mockLLM := &MockLLMClient{
@@ -301,7 +290,6 @@ func TestExtractAndSaveFacts_MetadataPropagation(t *testing.T) {
 
 	saved := capturedFacts[0]
 
-	// Verify all metadata fields are propagated
 	if saved.SourceID != inputBaseFact.SourceID {
 		t.Errorf("SourceID mismatch: got %v, want %v", saved.SourceID, inputBaseFact.SourceID)
 	}
@@ -329,7 +317,6 @@ func TestExtractAndSaveFacts_MetadataPropagation(t *testing.T) {
 }
 
 func TestExtractAndSaveFacts_TrustedUser(t *testing.T) {
-	// Setup
 	var promptCalledWith string
 	mockLLM := &MockLLMClient{
 		GenerateTextFunc: func(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, currentImages []model.Image, temperature float64) string {
@@ -343,7 +330,6 @@ func TestExtractAndSaveFacts_TrustedUser(t *testing.T) {
 	factStore := store.NewFactStore(mockStorage, nil, "")
 	service := NewFactService(&config.Config{EnableFactStore: true, BotUsername: "my_bot"}, factStore, mockLLM, nil, nil, nil)
 
-	// Case 1: Trusted User
 	baseFactTrusted := model.Fact{Author: "trusted_user", IsTrusted: true}
 	service.ExtractAndSaveFacts(context.Background(), "msg", baseFactTrusted)
 
@@ -355,7 +341,6 @@ func TestExtractAndSaveFacts_TrustedUser(t *testing.T) {
 		t.Errorf("Trusted prompt should contain special instruction %q", expectedInstruction)
 	}
 
-	// Case 2: Untrusted User
 	promptCalledWith = ""
 	baseFactUntrusted := model.Fact{Author: "random_user", IsTrusted: false}
 	service.ExtractAndSaveFacts(context.Background(), "msg", baseFactUntrusted)
@@ -389,7 +374,6 @@ func TestExtractAndSaveFacts_TargetResolutionIntegration(t *testing.T) {
 	if len(capturedFacts) != 1 {
 		t.Fatal("Expected fact saved")
 	}
-	// Verify that "user" target was resolved to authorID from baseFact
 	if capturedFacts[0].Target != authorID {
 		t.Errorf("BaseFact.Author was not correctly used for target resolution. Got %s, want %s", capturedFacts[0].Target, authorID)
 	}
@@ -399,7 +383,6 @@ func TestExtractAndSaveFacts_MultipleFacts(t *testing.T) {
 	var capturedFacts []model.Fact
 	mockLLM := &MockLLMClient{
 		GenerateTextFunc: func(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, currentImages []model.Image, temperature float64) string {
-			// Return 2 facts
 			return `[
 				{"target":"user","key":"k1","value":"v1"},
 				{"target":"other","key":"k2","value":"v2"}

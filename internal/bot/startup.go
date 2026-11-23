@@ -7,12 +7,6 @@ import (
 	"time"
 )
 
-// executeStartupTasks executes necessary background tasks at startup
-// to avoid race conditions and ensure data consistency.
-//
-// Targeted tasks:
-// 1. Lightweight: Reload, Load Profile, Discovery (Staggered by 1m)
-// 2. Heavy: Compression, Maintenance Loop (Staggered by 10m)
 func (b *Bot) executeStartupTasks(ctx context.Context) {
 	instanceID, totalInstances, err := discovery.GetMyPosition(b.config.BotUsername)
 	if err != nil {
@@ -66,7 +60,6 @@ func (b *Bot) prepareStartupTasks() ([]func(context.Context), []func(context.Con
 	return lightTasks, heavyTasks
 }
 
-// runWithDelay waits for the specified duration and then executes tasks sequentially.
 func runWithDelay(ctx context.Context, delay time.Duration, tasks []func(context.Context)) {
 	if delay > 0 {
 		select {
@@ -76,9 +69,7 @@ func runWithDelay(ctx context.Context, delay time.Duration, tasks []func(context
 		}
 	}
 
-	// Execute tasks sequentially
 	for _, task := range tasks {
-		// Check context before each task
 		if ctx.Err() != nil {
 			return
 		}

@@ -10,14 +10,11 @@ import (
 )
 
 func TestBuildDailySummaryPrompt_Timezone(t *testing.T) {
-	// Setup timezone (JST)
 	jst, err := time.LoadLocation("Asia/Tokyo")
 	if err != nil {
 		t.Fatalf("failed to load location: %v", err)
 	}
 
-	// Create a sample status with UTC time
-	// 2023-12-08 15:00:00 UTC -> 2023-12-09 00:00:00 JST
 	utcTime := time.Date(2023, 12, 8, 15, 0, 0, 0, time.UTC)
 
 	statuses := []*mastodon.Status{
@@ -30,17 +27,13 @@ func TestBuildDailySummaryPrompt_Timezone(t *testing.T) {
 	targetDateStr := "2023/12/09"
 	userRequest := ""
 
-	// Generate prompt
 	prompt := BuildDailySummaryPrompt(statuses, targetDateStr, userRequest, jst)
 
-	// Verify timestamp in generated prompt
-	// Expected: "00:00" (JST) because 15:00 UTC is 00:00 JST next day
 	expectedTimeStr := "00:00"
 	if !strings.Contains(prompt, expectedTimeStr) {
 		t.Errorf("prompt should contain formatted JST time %q, but got:\n%s", expectedTimeStr, prompt)
 	}
 
-	// Verify it does NOT contain UTC time
 	unexpectedTimeStr := "15:00"
 	if strings.Contains(prompt, unexpectedTimeStr) {
 		t.Errorf("prompt should NOT contain UTC time %q, but got:\n%s", unexpectedTimeStr, prompt)
@@ -58,9 +51,9 @@ func TestBuildSystemPrompt_AnalogPriority(t *testing.T) {
 		name                   string
 		includeCharacterPrompt bool
 		priority               float64
-		wantEffect             string // Expected specific substring
-		wantMissing            string // Substring that MUST NOT be present
-		wantOrdering           bool   // Whether to check ordering (Recency Bias)
+		wantEffect             string
+		wantMissing            string
+		wantOrdering           bool
 	}{
 		{
 			name:                   "Priority 0.1 (Fact Focused)",
@@ -79,7 +72,7 @@ func TestBuildSystemPrompt_AnalogPriority(t *testing.T) {
 		{
 			name:                   "Summary Mode (No Character Prompt)",
 			includeCharacterPrompt: false,
-			priority:               0.0, // Should be ignored
+			priority:               0.0,
 			wantMissing:            "【応答バランス指示】",
 			wantOrdering:           false,
 		},
@@ -101,26 +94,18 @@ func TestBuildSystemPrompt_AnalogPriority(t *testing.T) {
 				}
 			}
 
-			// Verify Recency Bias Ordering
 			if tt.wantOrdering {
 				idxChar := strings.Index(prompt, "CharacterPrompt")
 				idxFact := strings.Index(prompt, Messages.System.KnowledgeBase)
-
-				// If Facts are present in the prompt (passed as "Facts" argument, so should be there if not empty)
-				// In this test setup, we pass "Facts" as relevantFacts so header should exist.
 
 				if idxChar == -1 || idxFact == -1 {
 					t.Errorf("Expected both Character and Fact parts to be present for ordering check. CharIdx: %d, FactIdx: %d", idxChar, idxFact)
 				} else {
 					if tt.priority < 0.5 {
-						// Low Priority = Fact Focused = Facts should be LAST (Recency Bias)
-						// Expected: Character ... Facts
 						if idxFact < idxChar {
 							t.Errorf("Ordering mismatch for priority %.1f (Fact Focused).\nExpected Facts AFTER Character (Recency Bias).\nGot: Fact at %d, Character at %d", tt.priority, idxFact, idxChar)
 						}
 					} else {
-						// High Priority = Character Focused = Character should be LAST
-						// Expected: Facts ... Character
 						if idxChar < idxFact {
 							t.Errorf("Ordering mismatch for priority %.1f (Character Focused).\nExpected Character AFTER Facts (Recency Bias).\nGot: Character at %d, Fact at %d", tt.priority, idxChar, idxFact)
 						}
@@ -138,14 +123,13 @@ func TestBuildSystemPrompt_FactsTruncation(t *testing.T) {
 		MaxPostChars:    500,
 	}
 
-	// Create a long facts string
 	longFacts := strings.Repeat("a", 1000)
 
 	tests := []struct {
 		name                   string
 		priority               float64
 		includeCharacterPrompt bool
-		wantLengthOrder        string // "shorter" or "longer" relative to other priority (concept check)
+		wantLengthOrder        string
 		expectedRatio          float64
 	}{
 		{
@@ -169,10 +153,6 @@ func TestBuildSystemPrompt_FactsTruncation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			prompt := BuildSystemPrompt(cfg, "", longFacts, "", tt.includeCharacterPrompt, tt.priority)
 
-			// Extract facts part length (approximate)
-			// KnowledgeBase header is constant, we look at the content length
-			// Note: The prompt contains other parts, but the variation comes from facts.
-
 			currentLen := len(prompt)
 			switch tt.priority {
 			case 0.1:
@@ -183,14 +163,10 @@ func TestBuildSystemPrompt_FactsTruncation(t *testing.T) {
 		})
 	}
 
-	// Verify that High Priority (Character focused) results in SHORTER prompt due to facts truncation
 	if lenHighPriority >= lenLowPriority {
 		t.Errorf("Expected prompt with Priority 0.9 (Low Facts) to be shorter than Priority 0.1. Got P0.9=%d, P0.1=%d", lenHighPriority, lenLowPriority)
 	}
 
-	// Calculate ratio difference to ensure it's roughly correct
-	// Note: prompt includes base text, so exact ratio check on total length is hard.
-	// We just verified the direction (shorter).
 }
 
 func TestBuildSystemPrompt_ProfileTruncation(t *testing.T) {
@@ -200,8 +176,7 @@ func TestBuildSystemPrompt_ProfileTruncation(t *testing.T) {
 		MaxPostChars:    500,
 	}
 
-	// Create a long profile string (must be longer than MinFactsRetentionRatio threshold to see truncation)
-	longProfile := strings.Repeat("ProfileInfo ", 100) // 1200 chars approx
+	longProfile := strings.Repeat("ProfileInfo ", 100)
 
 	tests := []struct {
 		name     string
@@ -222,10 +197,8 @@ func TestBuildSystemPrompt_ProfileTruncation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Only pass botProfile, no facts, no summary
 			prompt := BuildSystemPrompt(cfg, "", "", longProfile, true, tt.priority)
 
-			// Check for truncation marker if priority is high
 			isTruncated := strings.Contains(prompt, "... (truncated)")
 
 			if tt.priority == 0.9 {

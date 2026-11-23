@@ -59,7 +59,6 @@ func (m *mockFactStorage) Close() error {
 func TestFactStore_SearchFuzzy_TargetUserName(t *testing.T) {
 	store := NewMemoryFactStore()
 
-	// Add test facts
 	facts := []model.Fact{
 		{
 			Target:         "user1@example.com",
@@ -74,7 +73,6 @@ func TestFactStore_SearchFuzzy_TargetUserName(t *testing.T) {
 			Value:          "Programming",
 		},
 	}
-	// Use Add instead of direct slice access
 	for _, f := range facts {
 		store.Add(context.Background(), f)
 	}
@@ -170,8 +168,6 @@ func TestFactStore_RemoveFacts(t *testing.T) {
 		t.Errorf("Store facts count = %d, want 2", len(allFacts))
 	}
 
-	// Verify persistence in memory (MemoryStore doesn't use disk, so skipping "disk verification")
-	// but we can check if it's gone from retrieval
 	remaining, _ := store.GetByTarget(context.Background(), target)
 	for _, f := range remaining {
 		if f.Value == "delete" {
@@ -180,22 +176,15 @@ func TestFactStore_RemoveFacts(t *testing.T) {
 	}
 }
 
-// IO SaveAndLoad test removed as MemoryStore doesn't implement File I/O directly in this interface logic
-// Logic for verifying persistence will be in RedisStore tests.
-// The previous IO tests tested the specific file operations of Legacy FactStore.
-
-// Cleanup test rewritten to use manual removal logic or if interface supports it (it doesn't explicitly have Cleanup(duration))
-// But we can test Remove with time condition
 func TestFactStore_Cleanup_Logic(t *testing.T) {
 	store := NewMemoryFactStore()
 
 	now := time.Now()
-	oldTime := now.AddDate(0, 0, -31) // 31 days old
+	oldTime := now.AddDate(0, 0, -31)
 
 	store.Add(context.Background(), model.Fact{Value: "new", Timestamp: now, Target: "t", Key: "k1"})
 	store.Add(context.Background(), model.Fact{Value: "old", Timestamp: oldTime, Target: "t", Key: "k2"})
 
-	// Simulate Cleanup logic using Remove
 	threshold := now.Add(-30 * 24 * time.Hour)
 	removed, _ := store.Remove(context.Background(), "t", func(f model.Fact) bool {
 		return f.Timestamp.Before(threshold)
@@ -237,12 +226,6 @@ func TestFactStore_GetRecentFacts(t *testing.T) {
 	}
 }
 
-// ZombieProtection test removed as it tested File I/O concurrency logic specific to the old implementation.
-
-// RemoveFactsByKey is not in interface but can be simulated or added if essential.
-// Plan listed RemoveFactsByKey in "interface definition" in doc?
-// Doc: GetByTarget, SearchFuzzy, Remove, Backup. RemoveByKey is not explicitly in interface.go I wrote.
-// But we can test Remove with Key filter.
 func TestFactStore_RemoveFactsByKey_Simulation(t *testing.T) {
 	store := NewMemoryFactStore()
 
@@ -250,11 +233,7 @@ func TestFactStore_RemoveFactsByKey_Simulation(t *testing.T) {
 	key := "target_key"
 	facts := []model.Fact{
 		{Target: target, Key: key, Value: "v1", Timestamp: time.Now()},
-		{Target: target, Key: key, Value: "v2", Timestamp: time.Now()}, // Duplicate key logic in MemoryStore might update this?
-		// MemoryStore.Add updates if Target/Key matches and Value matches? No, logic:
-		// matches Target/Key/Value -> update.
-		// matches Target/Key but Value diff -> append.
-		// So duplicate keys are allowed if values differ.
+		{Target: target, Key: key, Value: "v2", Timestamp: time.Now()},
 		{Target: target, Key: "other_key", Value: "v3", Timestamp: time.Now()},
 		{Target: "other", Key: key, Value: "v4", Timestamp: time.Now()},
 	}
@@ -262,7 +241,6 @@ func TestFactStore_RemoveFactsByKey_Simulation(t *testing.T) {
 		store.Add(context.Background(), f)
 	}
 
-	// Remove by Key
 	count, _ := store.Remove(context.Background(), target, func(f model.Fact) bool {
 		return f.Key == key
 	})
@@ -286,16 +264,12 @@ func TestFactStore_RemoveFactsByKey_Simulation(t *testing.T) {
 func TestFactStore_SearchFuzzy_ColleagueProfile(t *testing.T) {
 	store := NewMemoryFactStore()
 
-	// Add test facts
 	facts := []model.Fact{
 		{
-			// Target is self (bot)
 			Target:         "bot_user",
 			TargetUserName: "MyBot",
-			// Key starts with system:colleague_profile
-			Key: "system:colleague_profile:12345",
-			// Value contains the name we want to search for
-			Value: "Name: Tanaka Taro\nBio: A very nice colleague.",
+			Key:            "system:colleague_profile:12345",
+			Value:          "Name: Tanaka Taro\nBio: A very nice colleague.",
 		},
 		{
 			Target:         "bot_user",
@@ -308,7 +282,6 @@ func TestFactStore_SearchFuzzy_ColleagueProfile(t *testing.T) {
 		store.Add(context.Background(), f)
 	}
 
-	// 1. Search by "Tanaka" (contained in Value)
 	results1, _ := store.SearchFuzzy(context.Background(), []string{"bot_user"}, []string{"Tanaka"})
 
 	if len(results1) != 1 {
@@ -319,13 +292,11 @@ func TestFactStore_SearchFuzzy_ColleagueProfile(t *testing.T) {
 		}
 	}
 
-	// 2. Search by "colleague" (Key prefix search - should still work if key matches)
 	results2, _ := store.SearchFuzzy(context.Background(), []string{"bot_user"}, []string{"colleague"})
 	if len(results2) != 1 {
 		t.Errorf("Search by Key part failed: got %d results, want 1", len(results2))
 	}
 
-	// 3. Search by "Sushi" (Regular fact, Value search should NOT happen for non-system keys)
 	results3, _ := store.SearchFuzzy(context.Background(), []string{"bot_user"}, []string{"Sushi"})
 	if len(results3) != 0 {
 		t.Errorf("Regular fact value search should not happen: got %d results, want 0", len(results3))

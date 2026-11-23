@@ -2,8 +2,6 @@ package llm
 
 const MinFactsRetentionRatio = 0.05
 
-// truncateFactsByPriority adjusts the length of the facts string based on the character priority.
-// Higher character high priority (closer to 1.0) results in shorter facts (closer to 0.1 ratio).
 func truncateFactsByPriority(facts string, priority float64, includeCharacterPrompt bool) string {
 	if !includeCharacterPrompt {
 		return facts

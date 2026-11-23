@@ -148,19 +148,19 @@ func TestTruncateText(t *testing.T) {
 			name:  "Exceed limit (simple)",
 			input: "abcde",
 			limit: 3,
-			want:  "abc", // "abc" (3 chars)
+			want:  "abc",
 		},
 		{
 			name:  "Exceed limit (cut at period)",
 			input: "あいうえお。かきくけこ。",
 			limit: 8,
-			want:  "あいうえお。", // 6 chars (including period)
+			want:  "あいうえお。",
 		},
 		{
 			name:  "Cut at newline",
 			input: "Line1\nLine2",
 			limit: 8,
-			want:  "Line1\n", // "Line1\nLi" -> cut at \n
+			want:  "Line1\n",
 		},
 	}
 

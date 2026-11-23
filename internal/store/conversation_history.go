@@ -13,7 +13,6 @@ import (
 )
 
 const (
-	// Conversation
 	MinMessagesForIdleCheck = 4
 )
 
@@ -83,11 +82,9 @@ func (h *ConversationHistory) Save() error {
 		return err
 	}
 
-	// 0644: User(RW), Group(R), Other(R)
 	return os.WriteFile(h.saveFilePath, data, 0644)
 }
 
-// GetStats returns the number of sessions and the size of the history file
 func (h *ConversationHistory) GetStats() (int, int64) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -102,26 +99,22 @@ func (h *ConversationHistory) GetStats() (int, int64) {
 }
 
 func (h *ConversationHistory) GetOrCreateConversation(session *model.Session, rootStatusID string) *model.Conversation {
-	// 1. RootStatusIDで検索
 	for i := range session.Conversations {
 		if session.Conversations[i].RootStatusID == rootStatusID {
 			return &session.Conversations[i]
 		}
 	}
 
-	// 2. メッセージ内のStatusIDで検索（会話のどこかに含まれる投稿へのリプライの場合）
 	for i := range session.Conversations {
 		for _, msg := range session.Conversations[i].Messages {
 			for _, id := range msg.StatusIDs {
 				if id == rootStatusID {
-					// ヒットした場合、この会話を継続として扱う
 					return &session.Conversations[i]
 				}
 			}
 		}
 	}
 
-	// 新規会話作成
 	newConv := model.Conversation{
 		RootStatusID: rootStatusID,
 		CreatedAt:    time.Now(),
@@ -158,16 +151,12 @@ func FindOldConversations(config *config.Config, session *model.Session) []model
 	var oldConvs []model.Conversation
 
 	for _, conv := range session.Conversations {
-		// 最終更新日時を使用
 		lastUpdated := conv.LastUpdated
 
-		// 保持期間切れチェック (絶対的な寿命)
 		isExpired := conv.CreatedAt.Before(retentionThreshold)
 
-		// アイドル状態チェック (最後の更新からの経過時間)
-		// メッセージ数が一定以上ある場合のみアイドル判定を行う（短い会話は即サマリしない）
 		isIdle := false
-		if len(conv.Messages) >= MinMessagesForIdleCheck { // 最低2往復程度
+		if len(conv.Messages) >= MinMessagesForIdleCheck {
 			isIdle = lastUpdated.Before(idleThreshold)
 		}
 
@@ -182,9 +171,6 @@ func FindOldConversations(config *config.Config, session *model.Session) []model
 func UpdateSessionWithSummary(session *model.Session, summary string, oldConversations []model.Conversation) {
 	session.Summary = summary
 
-	// Remove old conversations
-	// Remove specific conversations from the slice.
-	// A simple way is to rebuild the slice.
 	var keepConvs []model.Conversation
 	oldMap := make(map[string]bool)
 	for _, c := range oldConversations {

@@ -10,7 +10,6 @@ import (
 	"claude_bot/internal/model"
 )
 
-// QueryRelevantFacts queries relevant facts based on the message
 func (s *FactService) QueryRelevantFacts(ctx context.Context, author, authorUserName, message string) string {
 	if !s.config.EnableFactStore {
 		return ""
@@ -37,28 +36,22 @@ func (s *FactService) QueryRelevantFacts(ctx context.Context, author, authorUser
 			q.TargetCandidates = []string{author}
 		}
 
-		// Bot自身も検索対象に含める (自己認識)
 		if s.config.BotUsername != "" {
 			q.TargetCandidates = append(q.TargetCandidates, s.config.BotUsername)
 		}
 
-		// 一般知識も常に検索対象に含める
 		q.TargetCandidates = append(q.TargetCandidates, model.GeneralTarget)
 
-		// あいまい検索を使用
 		facts := s.factStore.SearchFuzzy(q.TargetCandidates, q.Keys)
 
-		// 最新のファクトも取得して追加（「最近なにを覚えた？」などの質問に対応するため）
 		recentFacts := s.factStore.GetRecentFacts(RecentFactsCount)
 
-		// 重複排除用マップ
 		seen := make(map[string]bool)
 		for _, f := range facts {
 			key := fmt.Sprintf("%s:%s", f.Target, f.Key)
 			seen[key] = true
 		}
 
-		// 検索結果にない最新ファクトを追加
 		for _, f := range recentFacts {
 			key := fmt.Sprintf("%s:%s", f.Target, f.Key)
 			if !seen[key] {

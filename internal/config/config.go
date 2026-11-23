@@ -13,7 +13,6 @@ type Config struct {
 	MastodonServer      string
 	MastodonAccessToken string
 
-	// LLM Provider Settings
 	LLMProvider       string
 	LLMTemperature    float64
 	LLMMaxConcurrency int
@@ -21,44 +20,36 @@ type Config struct {
 	GeminiAPIKey      string
 	GeminiModel       string
 
-	// Claude Settings
 	AnthropicAuthToken string
 	AnthropicBaseURL   string
 	AnthropicModel     string
 
-	// キャラクター設定
 	BotUsername       string
 	CharacterPrompt   string
 	CharacterPriority float64
 	AllowRemoteUsers  bool
 	EnableFactStore   bool
 
-	// Slack Settings
 	SlackBotToken       string
 	SlackChannelID      string
 	SlackErrorChannelID string
 
-	// 会話管理設定
 	ConversationMessageCompressThreshold int
 	ConversationMessageKeepCount         int
 	ConversationRetentionHours           int
 	ConversationIdleHours                int
 	ConversationMinKeepCount             int
-	// Fact Maintenance
-	FactMaintenanceIntervalHours int
-	RunMaintenanceOnStartup      bool
+	FactMaintenanceIntervalHours         int
+	RunMaintenanceOnStartup              bool
 
-	// LLM & Post Settings
 	MaxResponseTokens int64
 	MaxSummaryTokens  int64
 	MaxFactTokens     int64
 	MaxImageTokens    int64
 	MaxPostChars      int
 
-	// URL filtering
 	URLBlacklist *URLBlacklist
 
-	// ファクト収集設定
 	FactCollectionEnabled         bool
 	FactCollectionFederated       bool
 	FactCollectionHome            bool
@@ -66,65 +57,49 @@ type Config struct {
 	FactCollectionMaxPerHour      int
 	FactCollectionFromPostContent bool
 
-	// 画像認識設定
 	EnableImageRecognition bool
 
-	// 画像生成設定
 	EnableImageGeneration bool
 
-	// 自動投稿設定
 	AutoPostIntervalHours int
 	AutoPostVisibility    string
 
-	// ブロードキャストコマンド設定
 	BroadcastCommand string
 
-	// ファクト管理設定
-	FactRetentionDays int // ファクト保持期間（日数）
-	MaxFacts          int // 最大ファクト数
+	FactRetentionDays int
+	MaxFacts          int
 	RedisURL          string
 	RedisFactsKey     string
 
-	// Storage Settings
 	SessionFileName   string
 	FactStoreFileName string
 	BotProfileFile    string
 	Timezone          string
 
-	// Metrics Settings
 	MetricsLogFile            string
 	MetricsLogIntervalMinutes int
 
-	// 通知設定
 	RateLimitNotifyIntervalMinutes int
 }
 
-// IsGlobalCollectionEnabled は全体（他人含む）のファクト収集が有効かどうかを返します
 func (c *Config) IsGlobalCollectionEnabled() bool {
 	return c.FactCollectionEnabled
 }
 
-// IsSelfLearningEnabled は自己学習（自身の発言からのファクト収集）が有効かどうかを返します
 func (c *Config) IsSelfLearningEnabled() bool {
-	// ファクトストアが有効で、かつホームタイムライン収集（自分の発言を含む）が有効な場合
 	return c.EnableFactStore && c.FactCollectionHome
 }
 
-// IsAnyCollectionEnabled は何らかのファクト収集（全体、自己学習、またはPeer収集）が有効かどうかを返します
 func (c *Config) IsAnyCollectionEnabled() bool {
 	return c.FactCollectionEnabled || c.EnableFactStore
 }
 
-// IsFederatedStreamingEnabled は連合タイムラインのストリーミングを行うべきかを返します
-// 全体収集が有効で、かつ連合収集設定が有効な場合にのみ真となります
 func (c *Config) IsFederatedStreamingEnabled() bool {
 	return c.IsGlobalCollectionEnabled() && c.FactCollectionFederated
 }
 
 func LoadEnvironment(envPath string) {
-	// 1. 個別設定ファイルの読み込み
 	if envPath == "" {
-		// 指定がない場合はデフォルトの .env を探す
 		envPath = util.GetFilePath(".env")
 	}
 
@@ -132,9 +107,7 @@ func LoadEnvironment(envPath string) {
 		log.Fatal("個別環境設定ファイルが見つかりません: ", envPath)
 	}
 
-	// 2. 共通設定ファイルの読み込み (data/.env)
-	// godotenv.Load は既存の環境変数を上書きしないため、
-	// 個別設定で未定義の項目のみがここから読み込まれる。
+	// godotenv.Load only fills unset variables, so the instance settings take precedence.
 	commonEnvPath := util.GetFilePath(".env")
 	if err := godotenv.Load(commonEnvPath); err != nil {
 		log.Printf("共通環境設定ファイルなしか読み込み失敗（無視します）: %s", commonEnvPath)
@@ -163,7 +136,6 @@ func LoadConfig() *Config {
 		AllowRemoteUsers:  parseBool(os.Getenv("ALLOW_REMOTE_USERS")),
 		EnableFactStore:   parseBool(os.Getenv("ENABLE_FACT_STORE")),
 
-		// Slack Settings
 		SlackBotToken:       os.Getenv("SLACK_BOT_TOKEN"),
 		SlackChannelID:      os.Getenv("SLACK_CHANNEL_ID"),
 		SlackErrorChannelID: os.Getenv("SLACK_ERROR_CHANNEL_ID"),
@@ -181,8 +153,6 @@ func LoadConfig() *Config {
 		MaxFactTokens:     int64(parseInt(os.Getenv("MAX_FACT_TOKENS"))),
 		MaxImageTokens:    int64(parseInt(os.Getenv("MAX_IMAGE_TOKENS"))),
 		MaxPostChars:      parseInt(os.Getenv("MAX_POST_CHARS")),
-
-		// URLBlacklist will be initialized separately with context
 
 		FactCollectionEnabled:         parseBool(os.Getenv("FACT_COLLECTION_ENABLED")),
 		FactCollectionFederated:       parseBool(os.Getenv("FACT_COLLECTION_FEDERATED")),
@@ -216,7 +186,6 @@ func LoadConfig() *Config {
 		RateLimitNotifyIntervalMinutes: parseInt(os.Getenv("RATE_LIMIT_NOTIFY_INTERVAL_MINUTES")),
 	}
 
-	// プロバイダー固有のバリデーション
 	switch cfg.LLMProvider {
 	case LLMProviderGemini:
 		if cfg.GeminiAPIKey == "" {

@@ -11,25 +11,21 @@ import (
 	"claude_bot/internal/model"
 )
 
-// MemoryFactStore is an in-memory implementation of FactStorage for testing
 type MemoryFactStore struct {
 	mu    sync.RWMutex
 	facts []model.Fact
 }
 
-// NewMemoryFactStore creates a new MemoryFactStore
 func NewMemoryFactStore() *MemoryFactStore {
 	return &MemoryFactStore{
 		facts: []model.Fact{},
 	}
 }
 
-// Add adds a new fact or updates an existing one
 func (s *MemoryFactStore) Add(ctx context.Context, fact model.Fact) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Logic matches FactStore.AddFact
 	for i, existing := range s.facts {
 		if existing.Target == fact.Target && existing.Key == fact.Key {
 			val1 := fmt.Sprintf("%v", existing.Value)
@@ -56,7 +52,6 @@ func (s *MemoryFactStore) Add(ctx context.Context, fact model.Fact) error {
 	return nil
 }
 
-// GetByTarget returns all facts for a specific target
 func (s *MemoryFactStore) GetByTarget(ctx context.Context, target string) ([]model.Fact, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -70,16 +65,13 @@ func (s *MemoryFactStore) GetByTarget(ctx context.Context, target string) ([]mod
 	return results, nil
 }
 
-// GetRecent returns the most recent n facts
 func (s *MemoryFactStore) GetRecent(ctx context.Context, limit int) ([]model.Fact, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	// Create a copy to sort
 	facts := make([]model.Fact, len(s.facts))
 	copy(facts, s.facts)
 
-	// Sort by timestamp descending
 	sort.Slice(facts, func(i, j int) bool {
 		return facts[i].Timestamp.After(facts[j].Timestamp)
 	})
@@ -90,7 +82,6 @@ func (s *MemoryFactStore) GetRecent(ctx context.Context, limit int) ([]model.Fac
 	return facts[:limit], nil
 }
 
-// SearchFuzzy searches facts based on targets and keys
 func (s *MemoryFactStore) SearchFuzzy(ctx context.Context, targets []string, keys []string) ([]model.Fact, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -131,7 +122,6 @@ func (s *MemoryFactStore) SearchFuzzy(ctx context.Context, targets []string, key
 	return results, nil
 }
 
-// Remove removes facts based on a filter function
 func (s *MemoryFactStore) Remove(ctx context.Context, target string, filter func(model.Fact) bool) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -150,14 +140,11 @@ func (s *MemoryFactStore) Remove(ctx context.Context, target string, filter func
 	return deletedCount, nil
 }
 
-// Replace replaces specific facts for a target atomically
 func (s *MemoryFactStore) Replace(ctx context.Context, target string, remove []model.Fact, add []model.Fact) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// 1. Remove
 	var afterRemove []model.Fact
-	// Map to verify equality for removal
 	toRemoveMap := make(map[string]bool)
 	for _, f := range remove {
 		key := fmt.Sprintf("%s:%s:%s", f.Target, f.Key, fmt.Sprint(f.Value))
@@ -176,19 +163,16 @@ func (s *MemoryFactStore) Replace(ctx context.Context, target string, remove []m
 
 	s.facts = afterRemove
 
-	// 2. Add
 	for _, f := range add {
 		if f.Timestamp.IsZero() {
 			f.Timestamp = time.Now()
 		}
-		// Basic append, ignoring deduplication logic.
 
 		s.facts = append(s.facts, f)
 	}
 	return nil
 }
 
-// GetAllFacts returns all facts
 func (s *MemoryFactStore) GetAllFacts(ctx context.Context) ([]model.Fact, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -198,7 +182,6 @@ func (s *MemoryFactStore) GetAllFacts(ctx context.Context) ([]model.Fact, error)
 	return results, nil
 }
 
-// EnforceMaxFacts keeps only the most recent maxFacts facts, removing older ones
 func (s *MemoryFactStore) EnforceMaxFacts(ctx context.Context, maxFacts int) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -207,8 +190,6 @@ func (s *MemoryFactStore) EnforceMaxFacts(ctx context.Context, maxFacts int) (in
 		return 0, nil
 	}
 
-	// Sort by timestamp descending (newest first)
-	// We want to keep the first maxFacts.
 	sort.Slice(s.facts, func(i, j int) bool {
 		return s.facts[i].Timestamp.After(s.facts[j].Timestamp)
 	})
@@ -219,7 +200,6 @@ func (s *MemoryFactStore) EnforceMaxFacts(ctx context.Context, maxFacts int) (in
 	return deletedCount, nil
 }
 
-// Close no-op
 func (s *MemoryFactStore) Close() error {
 	return nil
 }

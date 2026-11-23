@@ -6,7 +6,6 @@ import (
 	"time"
 )
 
-// IntentType represents the user's intent derived from the message
 type IntentType string
 
 const (
@@ -47,16 +46,13 @@ type Conversation struct {
 type Message struct {
 	Role      string
 	Content   string
-	StatusIDs []string // Mastodon Status IDs (multiple if split)
+	StatusIDs []string
 }
 
-// GetLastUserStatusID retrieves the status ID of the last user message in the conversation
 func (c *Conversation) GetLastUserStatusID() string {
 	for i := len(c.Messages) - 1; i >= 0; i-- {
 		msg := c.Messages[i]
 		if msg.Role == RoleUser && len(msg.StatusIDs) > 0 {
-			// ユーザー発言は通常1つのStatusIDを持つが、将来的な拡張や稀なケース（分割投稿の統合など）を考慮し、
-			// 物理的に「最後」のステータスIDを取得するために末尾の要素を使用する。
 			return msg.StatusIDs[len(msg.StatusIDs)-1]
 		}
 	}
@@ -70,40 +66,35 @@ type Session struct {
 }
 
 type Fact struct {
-	Target         string      `json:"target"`          // 情報の対象（誰の情報か）
-	TargetUserName string      `json:"target_username"` // 対象のUserName
-	Author         string      `json:"author"`          // 情報の提供者（誰が言ったか）
-	AuthorUserName string      `json:"author_username"` // 提供者のUserName
+	Target         string      `json:"target"`
+	TargetUserName string      `json:"target_username"`
+	Author         string      `json:"author"`
+	AuthorUserName string      `json:"author_username"`
 	Key            string      `json:"key"`
 	Value          interface{} `json:"value"`
 	Timestamp      time.Time   `json:"timestamp"`
 
-	// ソース情報
-	SourceID           string `json:"source_id,omitempty"`            // 情報源となった発言のID
-	SourceType         string `json:"source_type,omitempty"`          // "mention", "federated", "home"
-	SourceURL          string `json:"source_url,omitempty"`           // 投稿のURL
-	PostAuthor         string `json:"post_author,omitempty"`          // 投稿者のAcct
-	PostAuthorUserName string `json:"post_author_username,omitempty"` // 投稿者の表示名
-	IsTrusted          bool   `json:"is_trusted,omitempty"`           // 信頼できるユーザーからの情報かどうか
+	SourceID           string `json:"source_id,omitempty"`
+	SourceType         string `json:"source_type,omitempty"`
+	SourceURL          string `json:"source_url,omitempty"`
+	PostAuthor         string `json:"post_author,omitempty"`
+	PostAuthorUserName string `json:"post_author_username,omitempty"`
+	IsTrusted          bool   `json:"is_trusted,omitempty"`
 }
 
-// ComputeUniqueKey returns a stable unique key for the fact based on its meaningful content
 func (f *Fact) ComputeUniqueKey() string {
 	return fmt.Sprintf("%s|%s|%v", f.Target, f.Key, f.Value)
 }
 
 type StringArray []string
 
-// UnmarshalJSON handles both single string and array of strings
 func (s *StringArray) UnmarshalJSON(data []byte) error {
-	// 1. Try as []string
 	var arr []string
 	if err := json.Unmarshal(data, &arr); err == nil {
 		*s = StringArray(arr)
 		return nil
 	}
 
-	// 2. Try as string (treat as single element array)
 	var str string
 	if err := json.Unmarshal(data, &str); err == nil {
 		*s = StringArray{str}

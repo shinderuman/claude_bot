@@ -13,17 +13,15 @@ import (
 )
 
 const (
-	MaxBodySize = 500 * 1024 // 500KB limit (increased for content extraction)
+	MaxBodySize = 500 * 1024
 	Timeout     = 10 * time.Second
-	// User-Agent to mimic a browser to avoid 403s on some sites
+	// Some sites reject requests without a browser User-Agent.
 	UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 (+https://github.com/shinderuman/claude_bot)"
 
-	// HTTP
 	MaxRedirects            = 10
 	MaxContentLength        = 2000
 	ContentTruncationSuffix = "..."
 
-	// Content-Type
 	ContentTypeHTML = "text/html"
 )
 
@@ -33,23 +31,18 @@ type PageContent struct {
 	Description string
 	ImageURL    string
 	SiteName    string
-	Content     string // Extracted text content from body
+	Content     string
 }
 
-// FetchPageContent retrieves metadata (Title, Description, OGP) and text content from the given URL.
-// It enforces strict security measures: timeout, size limit, content type check, and redirect validation.
 func FetchPageContent(ctx context.Context, urlStr string, blacklist []string) (*PageContent, error) {
 	ctx, cancel := context.WithTimeout(ctx, Timeout)
 	defer cancel()
 
-	// Custom client to handle redirect validation
 	client := &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= MaxRedirects {
 				return errors.New("stopped after 10 redirects")
 			}
-			// Validate redirect URL
-			// If blacklist is nil/empty, IsValidURL will still check for IP addresses and scheme
 			if err := IsValidURL(req.URL.String(), blacklist); err != nil {
 				return fmt.Errorf("リダイレクト先が不正です: %w", err)
 			}
@@ -73,16 +66,13 @@ func FetchPageContent(ctx context.Context, urlStr string, blacklist []string) (*
 		return nil, fmt.Errorf("HTTPエラー: %d", resp.StatusCode)
 	}
 
-	// Content-Type check
 	contentType := resp.Header.Get("Content-Type")
 	if !strings.Contains(contentType, ContentTypeHTML) {
 		return nil, errors.New("HTMLコンテンツではありません")
 	}
 
-	// Limit reader to prevent reading large files
 	limitedReader := io.LimitReader(resp.Body, MaxBodySize)
 
-	// リダイレクト後の最終URLを取得
 	finalURL := resp.Request.URL.String()
 
 	return extractPageContent(limitedReader, finalURL)
@@ -97,10 +87,8 @@ func extractPageContent(r io.Reader, urlStr string) (*PageContent, error) {
 	meta := &PageContent{URL: urlStr}
 	extractMetaAndTitle(doc, meta)
 
-	// Extract text content from body
 	meta.Content = extractTextContent(doc)
 
-	// タイトルなどのクリーニング
 	meta.Title = strings.TrimSpace(meta.Title)
 	meta.Description = strings.TrimSpace(meta.Description)
 	meta.Content = strings.TrimSpace(meta.Content)
@@ -120,7 +108,6 @@ func extractMetaAndTitle(n *html.Node, meta *PageContent) {
 			name := getAttr(n, "name")
 			content := getAttr(n, "content")
 
-			// OGP tags
 			switch property {
 			case "og:title":
 				meta.Title = content
@@ -132,7 +119,6 @@ func extractMetaAndTitle(n *html.Node, meta *PageContent) {
 				meta.SiteName = content
 			}
 
-			// Standard meta tags
 			switch name {
 			case "description":
 				if meta.Description == "" {
@@ -147,14 +133,12 @@ func extractMetaAndTitle(n *html.Node, meta *PageContent) {
 	}
 }
 
-// extractTextContent extracts visible text from the HTML body
 func extractTextContent(n *html.Node) string {
 	var sb strings.Builder
 	var f func(*html.Node)
 
 	f = func(n *html.Node) {
 		if n.Type == html.ElementNode {
-			// Skip script, style, and other non-content tags
 			switch n.Data {
 			case "script", "style", "noscript", "iframe", "svg", "header", "footer", "nav":
 				return
@@ -174,7 +158,6 @@ func extractTextContent(n *html.Node) string {
 		}
 	}
 
-	// Find body tag to start extraction
 	var body *html.Node
 	var findBody func(*html.Node)
 	findBody = func(n *html.Node) {
@@ -194,12 +177,9 @@ func extractTextContent(n *html.Node) string {
 	if body != nil {
 		f(body)
 	} else {
-		// If no body tag found, try extracting from root (fallback)
 		f(n)
 	}
 
-	// Limit content length to avoid token limit issues
-	// Use rune based slicing to avoid invalid UTF-8 sequences
 	runes := []rune(sb.String())
 	if len(runes) > MaxContentLength {
 		return string(runes[:MaxContentLength]) + ContentTruncationSuffix

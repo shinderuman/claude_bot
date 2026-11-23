@@ -19,7 +19,6 @@ func init() {
 	retryBaseDelay = 1 * time.Millisecond
 }
 
-// Mock response structures for Gemini REST API
 type geminiContent struct {
 	Parts []geminiPart `json:"parts"`
 	Role  string       `json:"role,omitempty"`
@@ -40,20 +39,18 @@ type geminiResponse struct {
 }
 
 func TestGenerateContent_RetryLogic(t *testing.T) {
-	// Setup mock server
 	retryCount := 0
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		retryCount++
 
 		var resp geminiResponse
-		if retryCount <= 5 { // 5 retries means 6 attempts total to exceed, but here we test success on 3rd attempt
-			// Return short response
+		if retryCount <= 5 {
 			resp = geminiResponse{
 				Candidates: []geminiCandidate{
 					{
 						Content: geminiContent{
 							Parts: []geminiPart{
-								{Text: "あ"}, // 1 char
+								{Text: "あ"},
 							},
 							Role: "model",
 						},
@@ -61,7 +58,6 @@ func TestGenerateContent_RetryLogic(t *testing.T) {
 				},
 			}
 		} else {
-			// 最終リトライで成功
 			if retryCount == 6 {
 				resp = geminiResponse{
 					Candidates: []geminiCandidate{
@@ -82,9 +78,7 @@ func TestGenerateContent_RetryLogic(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	// Configure client to use mock server
 	ctx := context.Background()
-	// NOTE: We assume genai.NewClient respects WithHTTPClient and WithEndpoint
 	gClient, err := genai.NewClient(ctx, option.WithAPIKey("test-key"), option.WithEndpoint(ts.URL), option.WithHTTPClient(ts.Client()))
 	if err != nil {
 		t.Fatalf("Failed to create genai client: %v", err)
@@ -99,16 +93,13 @@ func TestGenerateContent_RetryLogic(t *testing.T) {
 		client:      gClient,
 		model:       gClient.GenerativeModel(cfg.GeminiModel),
 		config:      cfg,
-		slackClient: slack.NewClient("", "", "", ""), // Disabled client
+		slackClient: slack.NewClient("", "", "", ""),
 	}
-
-	// Test case: Success after retries
 
 	messages := []model.Message{
 		{Role: "user", Content: "こんにちは"},
 	}
 
-	// Enable profiling context to trigger retry logic
 	ctx = context.WithValue(ctx, model.ContextKeyIsProfileGeneration, true)
 
 	respText, _, err := client.GenerateContent(ctx, messages, "", 100, nil, 0.0)
@@ -121,7 +112,6 @@ func TestGenerateContent_RetryLogic(t *testing.T) {
 		t.Errorf("Expected response %q, got %q", expected, respText)
 	}
 
-	// Verify constants
 	if MinProfileResponseLength != 50 {
 		t.Errorf("Expected MinProfileResponseLength to be 50, got %d", MinProfileResponseLength)
 	}
@@ -132,14 +122,13 @@ func TestGenerateContent_RetryLogic(t *testing.T) {
 }
 
 func TestGenerateContent_MaxRetriesExceeded(t *testing.T) {
-	// Setup mock server that always returns short response
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := geminiResponse{
 			Candidates: []geminiCandidate{
 				{
 					Content: geminiContent{
 						Parts: []geminiPart{
-							{Text: "短い"}, // 2 chars
+							{Text: "短い"},
 						},
 					},
 				},
@@ -161,14 +150,13 @@ func TestGenerateContent_MaxRetriesExceeded(t *testing.T) {
 		client:      gClient,
 		model:       gClient.GenerativeModel("gemini-1.5-pro"),
 		config:      &config.Config{},
-		slackClient: slack.NewClient("", "", "", ""), // Disabled client
+		slackClient: slack.NewClient("", "", "", ""),
 	}
 
 	messages := []model.Message{
 		{Role: "user", Content: "Hi"},
 	}
 
-	// Enable profiling context to trigger retry logic
 	ctx = context.WithValue(ctx, model.ContextKeyIsProfileGeneration, true)
 
 	_, _, err = client.GenerateContent(ctx, messages, "", 100, nil, 0.0)
@@ -183,14 +171,13 @@ func TestGenerateContent_MaxRetriesExceeded(t *testing.T) {
 }
 
 func TestGenerateContent_ShortResponseAllowed(t *testing.T) {
-	// Setup mock server that returns short response
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := geminiResponse{
 			Candidates: []geminiCandidate{
 				{
 					Content: geminiContent{
 						Parts: []geminiPart{
-							{Text: "あた"}, // 2 chars
+							{Text: "あた"},
 						},
 					},
 				},
@@ -212,14 +199,13 @@ func TestGenerateContent_ShortResponseAllowed(t *testing.T) {
 		client:      gClient,
 		model:       gClient.GenerativeModel("gemini-1.5-pro"),
 		config:      &config.Config{},
-		slackClient: slack.NewClient("", "", "", ""), // Disabled client
+		slackClient: slack.NewClient("", "", "", ""),
 	}
 
 	messages := []model.Message{
 		{Role: "user", Content: "Hi"},
 	}
 
-	// Without profiler context, short response should be accepted
 	respText, _, err := client.GenerateContent(ctx, messages, "", 100, nil, 0.0)
 	if err != nil {
 		t.Fatalf("GenerateContent failed: %v", err)

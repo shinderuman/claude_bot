@@ -10,12 +10,9 @@ import (
 	"claude_bot/internal/model"
 )
 
-// FactExtractor interface for extracting facts from summaries
 type FactExtractor interface {
 	ExtractAndSaveFactsFromSummary(ctx context.Context, summary string, baseFact model.Fact)
 }
-
-// Conversation compression and summarization
 
 func (h *ConversationHistory) CompressHistoryIfNeeded(ctx context.Context, session *model.Session, userID string, cfg *config.Config, llmClient *llm.Client, factExtractor FactExtractor) {
 	for i := range session.Conversations {
@@ -42,7 +39,6 @@ func (h *ConversationHistory) compressConversationIfNeeded(ctx context.Context, 
 	conversation.Messages = conversation.Messages[compressCount:]
 	session.Summary = summary
 
-	// 要約から事実を抽出
 	if factExtractor != nil {
 		baseFact := model.Fact{Author: userID}
 		go factExtractor.ExtractAndSaveFactsFromSummary(ctx, summary, baseFact)
@@ -71,7 +67,6 @@ func (h *ConversationHistory) compressOldConversations(ctx context.Context, sess
 	UpdateSessionWithSummary(session, summary, oldConversations)
 	UpdateSessionWithSummary(session, summary, oldConversations)
 
-	// 要約から事実を抽出
 	if factExtractor != nil {
 		baseFact := model.Fact{Author: userID}
 		go factExtractor.ExtractAndSaveFactsFromSummary(ctx, summary, baseFact)

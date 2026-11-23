@@ -32,13 +32,11 @@ func main() {
 	testFacts := flag.Bool("test-facts", false, "テスト用facts.jsonを使用（data/facts_test.json）")
 	flag.Parse()
 
-	// テスト用: .envを読み込む（引数で指定またはデフォルト）
 	var envPath string
 	if flag.NArg() > 0 {
 		envPath = flag.Arg(0)
 	}
 
-	// 環境変数の読み込み（共通設定ファイル .env の読み込みも含む）
 	if os.Getenv("RUN_MAINTENANCE") == "" {
 		os.Setenv("RUN_MAINTENANCE", "false")
 	}
@@ -49,16 +47,12 @@ func main() {
 		log.Printf("デフォルト設定ファイルを読み込みました")
 	}
 
-	// config.LoadConfig()内で環境変数は参照される
-
 	cfg := config.LoadConfig()
 
-	// 設定情報を出力
 	printConfig(cfg)
 
 	llmClient := llm.NewClient(cfg)
 
-	// ファクトストア初期化（テストモードなら別ファイル）
 	factsFile := "data/facts.json"
 	if *testFacts {
 		factsFile = "data/facts_test.json"
@@ -66,7 +60,6 @@ func main() {
 	}
 
 	memoryStore := store.NewMemoryFactStore()
-	// Load facts manually
 	if _, err := os.Stat(factsFile); err == nil {
 		data, err := os.ReadFile(factsFile)
 		if err != nil {
@@ -171,8 +164,6 @@ func testResponse(cfg *config.Config, client *llm.Client, factService *facts.Fac
 		log.Fatal("エラー: GEMINI_API_KEY環境変数が設定されていません")
 	}
 
-	// テスト用セッション作成
-	// テストユーザー: asmodeus (facts.jsonにデータがあるユーザー)
 	testUser := "asmodeus"
 	testUserName := "グレートマグマカッター"
 
@@ -200,7 +191,6 @@ func testResponse(cfg *config.Config, client *llm.Client, factService *facts.Fac
 
 	ctx := context.Background()
 
-	// 事実検索
 	log.Println("事実を検索中...")
 	relevantFacts := factService.QueryRelevantFacts(ctx, testUser, testUserName, message)
 	if relevantFacts != "" {
@@ -232,7 +222,6 @@ func testResponse(cfg *config.Config, client *llm.Client, factService *facts.Fac
 	log.Println(response)
 	log.Println("------------------")
 
-	// ファクト抽出と保存
 	if cfg.EnableFactStore {
 		log.Println()
 		log.Println("ファクトを抽出中...")
@@ -258,10 +247,8 @@ func testSummary(cfg *config.Config, client *llm.Client, newMessages, existingSu
 		log.Fatal("エラー: ANTHROPIC_AUTH_TOKEN環境変数が設定されていません")
 	}
 
-	// 新しいメッセージをフォーマット
 	formattedMessages := newMessages
 
-	// 要約プロンプトを構築
 	summaryPrompt := llm.BuildSummaryPrompt(formattedMessages, existingSummary)
 
 	log.Println("--- 要約プロンプト ---")
@@ -269,7 +256,6 @@ func testSummary(cfg *config.Config, client *llm.Client, newMessages, existingSu
 	log.Println("--------------------")
 	log.Println()
 
-	// 要約生成
 	messages := []model.Message{{Role: model.RoleUser, Content: summaryPrompt}}
 	ctx := context.Background()
 	summary := client.GenerateSummary(ctx, messages, existingSummary)
@@ -295,7 +281,6 @@ func testFactExtraction(cfg *config.Config, client *llm.Client, message string) 
 		log.Fatal("エラー: ANTHROPIC_AUTH_TOKEN環境変数が設定されていません")
 	}
 
-	// 事実抽出プロンプトを構築
 	authorUserName := "testuser"
 	author := "testuser@example.com"
 	prompt := llm.BuildFactExtractionPrompt(authorUserName, author, message, "test_bot", false)
@@ -305,7 +290,6 @@ func testFactExtraction(cfg *config.Config, client *llm.Client, message string) 
 	log.Println("------------------------")
 	log.Println()
 
-	// 事実抽出
 	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 	ctx := context.Background()
 	response := client.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, cfg.MaxResponseTokens, nil, llm.TemperatureSystem)
@@ -334,17 +318,14 @@ func testRawImage(cfg *config.Config, client *llm.Client, message, imagePath str
 		log.Fatal("エラー: ANTHROPIC_AUTH_TOKEN環境変数が設定されていません")
 	}
 
-	// 画像読み込み
 	img, err := loadImage(imagePath)
 	if err != nil {
 		log.Fatalf("画像読み込みエラー: %v", err)
 	}
 	currentImages := []model.Image{*img}
 
-	// メッセージ作成
 	messages := []model.Message{{Role: "user", Content: message}}
 
-	// API呼び出し（システムプロンプトなし）
 	ctx := context.Background()
 	response := client.GenerateText(ctx, messages, "", cfg.MaxResponseTokens, currentImages, cfg.LLMTemperature)
 
@@ -367,12 +348,10 @@ func testAutoPost(cfg *config.Config, client *llm.Client) {
 		log.Fatal("エラー: ANTHROPIC_AUTH_TOKEN環境変数が設定されていません")
 	}
 
-	// Storeの初期化
 	_ = store.InitializeHistory(cfg)
 	slackClient := slack.NewClient(cfg.SlackBotToken, cfg.SlackChannelID, cfg.SlackErrorChannelID, cfg.BotUsername)
 	factStore := store.InitializeFactStore(cfg, slackClient)
 
-	// ファクトバンドル取得
 	facts, err := factStore.GetRandomGeneralFactBundle(5)
 	if err != nil {
 		log.Fatalf("ファクト取得エラー: %v", err)
@@ -388,17 +367,14 @@ func testAutoPost(cfg *config.Config, client *llm.Client) {
 	}
 	log.Println()
 
-	// プロンプト作成
 	prompt := llm.BuildAutoPostPrompt(facts)
 	log.Println("--- 生成されたプロンプト ---")
 	log.Println(prompt)
 	log.Println("--------------------------")
 	log.Println()
 
-	// システムプロンプト（キャラクター設定のみ）
 	systemPrompt := llm.BuildSystemPrompt(cfg, "", "", "", true, cfg.CharacterPriority)
 
-	// API呼び出し
 	ctx := context.Background()
 	response := client.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, int64(cfg.MaxPostChars), nil, cfg.LLMTemperature)
 
@@ -450,7 +426,6 @@ func testGenerateImage(imageGen *image.ImageGenerator, prompt string) {
 		log.Fatalf("画像生成エラー: %v", err)
 	}
 
-	// SVGファイルとして保存
 	filename := fmt.Sprintf("generated_image_%d.svg", time.Now().Unix())
 	if err := imageGen.SaveSVGToFile(svg, filename); err != nil {
 		log.Fatalf("ファイル保存エラー: %v", err)
@@ -459,7 +434,6 @@ func testGenerateImage(imageGen *image.ImageGenerator, prompt string) {
 	log.Printf("成功: 画像を保存しました: %s", filename)
 	log.Printf("ファイルサイズ: %d bytes", len(svg))
 
-	// Base64エンコード版も保存
 	encoded := base64.StdEncoding.EncodeToString([]byte(svg))
 	base64Filename := fmt.Sprintf("generated_image_%d.base64.txt", time.Now().Unix())
 	if err := os.WriteFile(base64Filename, []byte(encoded), 0644); err != nil {
@@ -478,17 +452,14 @@ func testErrorMessageGeneration(cfg *config.Config, client *llm.Client, errorDet
 		log.Fatal("エラー: ANTHROPIC_AUTH_TOKEN環境変数が設定されていません")
 	}
 
-	// プロンプト作成
 	prompt := llm.BuildErrorMessagePrompt(errorDetail)
 	log.Println("--- 生成されたプロンプト ---")
 	log.Println(prompt)
 	log.Println("--------------------------")
 	log.Println()
 
-	// システムプロンプト（キャラクター設定のみ）
 	systemPrompt := llm.BuildSystemPrompt(cfg, "", "", "", true, cfg.CharacterPriority)
 
-	// API呼び出し
 	ctx := context.Background()
 	response := client.GenerateText(ctx, []model.Message{{Role: "user", Content: prompt}}, systemPrompt, cfg.MaxResponseTokens, nil, cfg.LLMTemperature)
 
@@ -514,7 +485,6 @@ func testConversation(cfg *config.Config, client *llm.Client, lastMessage string
 		log.Fatal("エラー: GEMINI_API_KEY環境変数が設定されていません")
 	}
 
-	// 履歴の構築
 	messages := []model.Message{
 		{Role: "user", Content: "ねぇルナ、今日の晩御飯なにがいいと思う？"},
 		{Role: "assistant", Content: "ふん、ご主人様ったら、そんなことも自分で決められないのですか？...まあ、今日は魔力が満ちているので、激辛麻婆豆腐なんていかがでしょう。深淵なる赤色が食欲をそそりますわよ。"},
@@ -528,10 +498,8 @@ func testConversation(cfg *config.Config, client *llm.Client, lastMessage string
 	log.Println("----------------")
 	log.Println()
 
-	// システムプロンプト（キャラクター設定 + 要約なし）
 	systemPrompt := llm.BuildSystemPrompt(cfg, "", "", "", true, cfg.CharacterPriority)
 
-	// API呼び出し
 	ctx := context.Background()
 	response := client.GenerateText(ctx, messages, systemPrompt, cfg.MaxResponseTokens, nil, cfg.LLMTemperature)
 
@@ -555,8 +523,6 @@ func testProfileUpdate(cfg *config.Config) {
 		log.Fatal("エラー: ANTHROPIC_AUTH_TOKEN環境変数が設定されていません")
 	}
 
-	// プロファイル生成による上書き防止のため、一時ファイルに出力先を変更
-	// ユーザー要望により、生成されたファイルは確認後に削除する
 	originalProfileFile := cfg.BotProfileFile
 	tempProfileFile := fmt.Sprintf("Profile_TEST_%d.txt", time.Now().Unix())
 	cfg.BotProfileFile = tempProfileFile
@@ -569,34 +535,27 @@ func testProfileUpdate(cfg *config.Config) {
 		cfg.BotProfileFile = originalProfileFile
 	}()
 
-	// 1. Mastodon APIのモックサーバーを起動
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[MockServer] Request Received: %s %s", r.Method, r.URL.Path)
 
-		// 期待されるAPIエンドポイント
 		if r.Method == "PATCH" && r.URL.Path == "/api/v1/accounts/update_credentials" {
 			log.Println("[MockServer] プロフィール更新リクエスト受信成功")
 
-			// リクエストボディの解析（必要に応じて検証）
 			body, _ := io.ReadAll(r.Body)
 			log.Printf("[MockServer] Body: %s", string(body))
 
-			// 成功レスポンス（最小限のJSON）
 			w.Header().Set("Content-Type", "application/json")
 			fmt.Fprintln(w, `{"id": "123456", "username": "bot", "note": "updated profile"}`)
 			return
 		}
 
-		// ユーザー情報確認（verify_credentials）のモック
 		if r.Method == "GET" && r.URL.Path == "/api/v1/accounts/verify_credentials" {
 			log.Println("[MockServer] ユーザー情報確認リクエスト受信成功")
 			w.Header().Set("Content-Type", "application/json")
-			// Fieldsは空配列または適当な値を返す
 			fmt.Fprintln(w, `{"id": "123456", "username": "bot", "display_name": "Test Bot", "fields": []}`)
 			return
 		}
 
-		// ステータス投稿（トゥート）のモック
 		if r.Method == "POST" && r.URL.Path == "/api/v1/statuses" {
 			log.Println("[MockServer] ステータス投稿リクエスト受信成功")
 			body, _ := io.ReadAll(r.Body)
@@ -606,22 +565,19 @@ func testProfileUpdate(cfg *config.Config) {
 			return
 		}
 
-		// その他のリクエストは404
 		http.NotFound(w, r)
 	}))
 	defer ts.Close()
 	log.Printf("[MockServer] Started at %s", ts.URL)
 
-	// 2. モック用Mastodonクライアントの作成
 	mockConfig := mastodon.Config{
-		Server:           ts.URL,        // モックサーバーのURL
-		AccessToken:      "dummy_token", // ダミー
+		Server:           ts.URL,
+		AccessToken:      "dummy_token",
 		BotUsername:      "bot",
 		AllowRemoteUsers: true,
 	}
 	mockClient := mastodon.NewClient(mockConfig)
 
-	// 生成されたRawテキストを想定
 	dummyNoteRaw := "これはテスト用のプロフィール本文です。\n\n整形前です。"
 	dummyAuthKey := "dummy_auth_key"
 
@@ -643,7 +599,6 @@ func testProfileUpdate(cfg *config.Config) {
 	log.Println()
 	log.Println("成功: プロフィール生成およびモックリクエスト処理が完了しました")
 
-	// 生成されたファイルの内容を表示
 	if cfg.BotProfileFile != "" {
 		content, err := os.ReadFile(cfg.BotProfileFile)
 		if err != nil {

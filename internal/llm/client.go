@@ -16,9 +16,7 @@ import (
 )
 
 const (
-	// TemperatureSystem is the temperature used for system tasks requiring accuracy
 	TemperatureSystem = 0.0
-	// ModelKeywordGemma identifies Gemma models
 	ModelKeywordGemma = "gemma"
 )
 
@@ -30,7 +28,6 @@ type Client struct {
 	toolUseCheck    sync.Once
 	toolUseDisabled atomic.Bool
 
-	// 429通知の間引き状態（最終通知時刻）
 	rateLimitMu        sync.Mutex
 	lastRateLimitNotif time.Time
 }
@@ -70,9 +67,7 @@ func (c *Client) GenerateSummary(ctx context.Context, messages []model.Message, 
 	return c.GenerateText(ctx, messages, systemPrompt, c.config.MaxSummaryTokens, nil, TemperatureSystem)
 }
 
-// GenerateText calls the configured LLM provider to generate text content
 func (c *Client) GenerateText(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, currentImages []model.Image, temperature float64) string {
-	// Semaphore acquisition to limit concurrency
 	select {
 	case c.semaphore <- struct{}{}:
 		defer func() { <-c.semaphore }()

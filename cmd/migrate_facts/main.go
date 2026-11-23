@@ -20,9 +20,7 @@ func main() {
 	factsFile := flag.String("facts", "", "Path to facts.json (required)")
 	flag.Parse()
 
-	// 1. Load Config
 	config.LoadEnvironment(*envFile)
-	// 1. Load Config (Environment only)
 	config.LoadEnvironment(*envFile)
 
 	redisURL := os.Getenv("REDIS_URL")
@@ -35,7 +33,6 @@ func main() {
 		log.Fatal("REDIS_FACTS_KEY is not set in environment variables.")
 	}
 
-	// 2. Load facts.json
 	filePath := *factsFile
 	if filePath == "" {
 		log.Fatal("-facts flag is required.")
@@ -53,7 +50,6 @@ func main() {
 	}
 	log.Printf("Loaded %d facts from JSON.", len(facts))
 
-	// 3. Connect to Redis (Raw client for cleanup)
 	opt, err := redis.ParseURL(redisURL)
 	if err != nil {
 		log.Fatalf("Invalid Redis URL: %v", err)
@@ -65,20 +61,17 @@ func main() {
 		log.Fatalf("Failed to connect to Redis: %v", err)
 	}
 
-	// 4. Cleanup old keys (Targeted deletion)
 	prefix := redisFactsKey
 
 	log.Printf("Cleaning up existing Redis data (prefix: %s)...", prefix)
 
-	// Delete specific known keys first (Sets/ZSets)
 	keysToDelete := []string{
 		prefix + ":timeline",
 		prefix + ":targets",
 		prefix + ":fact_hashes",
 	}
-	rdb.Del(ctx, keysToDelete...).Err() // Ignore error if not exist
+	rdb.Del(ctx, keysToDelete...).Err()
 
-	// Scan and delete Hash keys
 	scanMatch := prefix + ":*"
 	var cursor uint64
 	var n int
@@ -101,14 +94,12 @@ func main() {
 	}
 	log.Printf("Deleted %d fact hash keys and global sets.", n)
 
-	// 5. Initialize RedisFactStore for insertion
 	redisStore, err := store.NewRedisFactStore(redisURL, redisFactsKey)
 	if err != nil {
 		log.Fatalf("Failed to create RedisFactStore: %v", err)
 	}
 	defer redisStore.Close()
 
-	// 6. Insert Facts
 	log.Println("Migrating facts to Redis...")
 	start := time.Now()
 	successCount := 0

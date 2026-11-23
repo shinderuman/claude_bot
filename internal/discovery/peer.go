@@ -12,13 +12,11 @@ import (
 	gomastodon "github.com/mattn/go-mastodon"
 )
 
-// PeerDiscoverer handles the discovery and authentication of peer bots
 type PeerDiscoverer struct {
 	mastodonClient *mastodon.Client
 	myUsername     string
 }
 
-// NewPeerDiscoverer creates a new PeerDiscoverer
 func NewPeerDiscoverer(client *mastodon.Client, myUsername string) *PeerDiscoverer {
 	return &PeerDiscoverer{
 		mastodonClient: client,
@@ -26,7 +24,6 @@ func NewPeerDiscoverer(client *mastodon.Client, myUsername string) *PeerDiscover
 	}
 }
 
-// IsPeer checks if the given account is a valid peer by verifying the auth key hash
 func (pd *PeerDiscoverer) IsPeer(account *gomastodon.Account) bool {
 	if account == nil {
 		return false
@@ -49,13 +46,12 @@ func (pd *PeerDiscoverer) IsPeer(account *gomastodon.Account) bool {
 	return false
 }
 
-// DiscoverPeersFromRegistry reads the cluster registry, follows unknown peers, and executes a callback for each valid peer
 func (pd *PeerDiscoverer) DiscoverPeersFromRegistry(ctx context.Context, onPeerFound func(ctx context.Context, account *gomastodon.Account)) error {
 	registryPath := util.GetFilePath(RegistryFileName)
 	data, err := os.ReadFile(registryPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil // Registry doesn't exist yet, nothing to discover
+			return nil
 		}
 		return err
 	}
@@ -71,32 +67,25 @@ func (pd *PeerDiscoverer) DiscoverPeersFromRegistry(ctx context.Context, onPeerF
 
 	for _, node := range registry.Nodes {
 		username := node.Username
-		// Skip self
 		if username == pd.myUsername {
 			continue
 		}
 
-		// Check if already following
-		// Requires resolving username to ID first.
-		// So we'll fetch the account first.
 		account, err := pd.mastodonClient.GetAccountByUsername(ctx, username)
 		if err != nil {
 			log.Printf("Peer探索: ユーザー %s の取得失敗: %v", username, err)
 			continue
 		}
 
-		// Verify if it's a valid peer (has the correct hash)
 		if !pd.IsPeer(account) {
 			log.Printf("Peer探索: ユーザー %s は正規のPeerではありません (Hash不一致)", username)
 			continue
 		}
 
-		// Execute callback for valid peer (e.g. for collecting facts)
 		if onPeerFound != nil {
 			onPeerFound(ctx, account)
 		}
 
-		// Check relationship
 		isFollowing, err := pd.mastodonClient.IsFollowing(ctx, string(account.ID))
 		if err != nil {
 			log.Printf("Peer探索: フォロー状態確認失敗 (%s): %v", username, err)

@@ -8,13 +8,12 @@ import (
 )
 
 func TestIsPeer(t *testing.T) {
-	// Setup
 	authKey, err := GetPeerAuthKey()
 	if err != nil {
 		t.Fatalf("Failed to get auth key: %v", err)
 	}
 
-	client := &mastodon.Client{} // Mock client not needed for IsPeer
+	client := &mastodon.Client{}
 	pd := NewPeerDiscoverer(client, "bot_user")
 
 	tests := []struct {

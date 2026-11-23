@@ -11,7 +11,6 @@ import (
 	"github.com/slack-go/slack"
 )
 
-// Mock RateLimitedError
 type mockRateLimitedError struct{}
 
 func (e *mockRateLimitedError) Error() string             { return "too many requests" }
@@ -70,13 +69,7 @@ func TestIsRateLimitedError(t *testing.T) {
 	}
 }
 
-// Note: TestPostMessageToChannel_Backoff is hard to implement with pure unit tests
-// without mocking the internal slack.Client or abstracting time/sleep.
-// For now, we rely on the logic review and isRateLimitedError test.
-
-// TestPostMessageToChannel_RetryLogic verifies the backoff loop using a mock server
 func TestPostMessageToChannel_RetryLogic(t *testing.T) {
-	// Setup: Temporary override of time variables for fast testing
 	origInitialBackoff := initialBackoff
 	origMaxBackoffDelay := maxBackoffDelay
 	origMaxTotalTimeout := maxTotalTimeout
@@ -86,17 +79,13 @@ func TestPostMessageToChannel_RetryLogic(t *testing.T) {
 		maxTotalTimeout = origMaxTotalTimeout
 	}()
 
-	// Set very short durations
 	initialBackoff = 1 * time.Millisecond
 	maxBackoffDelay = 5 * time.Millisecond
-	maxTotalTimeout = 100 * time.Millisecond // Should timeout after a few retries
+	maxTotalTimeout = 100 * time.Millisecond
 
-	// 1. Start a mock server that always returns 429
 	callCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
-		// slack-go expects a JSON response usually, but for 429 just status might be enough,
-		// but let's send a standard body just in case it tries to parse error.
 		w.Header().Set("Retry-After", "1")
 		w.WriteHeader(http.StatusTooManyRequests)
 		if _, err := w.Write([]byte(`{"ok":false, "error":"ratelimited"}`)); err != nil {
@@ -105,8 +94,6 @@ func TestPostMessageToChannel_RetryLogic(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// 2. Create a Slack client pointing to the mock server
-	// We use the Slack option to change the API URL base
 	sClient := slack.New("dummy-token", slack.OptionAPIURL(server.URL+"/"))
 
 	client := &Client{
@@ -115,17 +102,13 @@ func TestPostMessageToChannel_RetryLogic(t *testing.T) {
 		enabled:   true,
 	}
 
-	// 3. Execute PostMessageToChannel
-	// It should retry until maxTotalTimeout (100ms)
 	ctx := context.Background()
 	err := client.PostMessageToChannel(ctx, "C12345", "test message")
 
-	// 4. Assertions
 	if err != nil {
 		t.Errorf("Expected nil error (silent failure on timeout), got %v", err)
 	}
 
-	// We expect multiple calls due to retries
 	if callCount < 2 {
 		t.Errorf("Expected retries, got callCount=%d", callCount)
 	}

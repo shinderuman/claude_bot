@@ -28,7 +28,6 @@ func (b *Bot) startFactMaintenanceLoop(ctx context.Context) {
 			log.Printf("ファクトメンテナンスエラー: %v", err)
 		}
 
-		// Peer探索とプロファイル収集（メンテナンスタイミングで実行）
 		if b.factCollector != nil {
 			log.Println("Peer探索を実行中...")
 			b.factCollector.DiscoverAndCollectPeerFacts(ctx)
@@ -42,7 +41,6 @@ func (b *Bot) startAutoPostLoop(ctx context.Context) {
 	}
 
 	interval := time.Duration(b.config.AutoPostIntervalHours) * time.Hour
-	// Default jitter: Random within interval
 	jitterFunc := func(interval time.Duration) time.Duration {
 		minutes := int64(interval.Minutes())
 		if minutes > 0 {
@@ -116,23 +114,17 @@ func (b *Bot) scheduleDelayedTask(ctx context.Context, interval time.Duration, t
 }
 
 func (b *Bot) executeAutoPost(ctx context.Context) {
-	// ランダムな一般知識のバンドルを取得
 	facts, err := b.factStore.GetRandomGeneralFactBundle(AutoPostFactCount)
 	if err != nil || len(facts) == 0 {
 		return
 	}
 
-	// プロンプト作成
 	prompt := llm.BuildAutoPostPrompt(facts)
-	// システムプロンプトはキャラクター設定のみを使用（要約などは不要）
-	// AutoPostの場合はMaxPostChars制限を適用
 	systemPrompt := llm.BuildSystemPrompt(b.config, "", "", "", true, b.config.CharacterPriority)
 
-	// 画像なしで呼び出し
 	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: model.RoleUser, Content: prompt}}, systemPrompt, int64(b.config.MaxPostChars), nil, b.config.LLMTemperature)
 
 	if response != "" {
-		// 公開投稿として送信
 		log.Printf("自動投稿を実行します: %s...", string([]rune(response))[:min(LogContentMaxChars, len([]rune(response)))])
 		status, err := b.mastodonClient.PostStatus(ctx, response, b.config.AutoPostVisibility)
 		if err != nil {
@@ -140,7 +132,6 @@ func (b *Bot) executeAutoPost(ctx context.Context) {
 			return
 		}
 
-		// 自分の投稿から事実を抽出（学習）
 		displayName := status.Account.DisplayName
 		if displayName == "" {
 			displayName = status.Account.Username

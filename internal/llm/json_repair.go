@@ -10,12 +10,10 @@ import (
 	"strings"
 )
 
-// ErrorNotifierFunc defines the callback signature for error notifications
 type ErrorNotifierFunc func(message, details string)
 
 var errorNotifier ErrorNotifierFunc
 
-// Pre-compiled regexes for performance optimization
 var (
 	reMissingCommaQuotes     = regexp.MustCompile(`:"([a-zA-Z0-9_]+),"([a-zA-Z0-9_]+)":`)
 	reMergedKeyValue         = regexp.MustCompile(`([,{]\s*)"(value)([^":,]+)"`)
@@ -44,45 +42,35 @@ var (
 	reMissingClosingBrace    = regexp.MustCompile(`(:\s*(?:"[^"]*"|true|false|null|[0-9\.-]+)\s*),\s*\{`)
 )
 
-// SetErrorNotifier sets the callback function for error notifications.
 func SetErrorNotifier(notifier ErrorNotifierFunc) {
 	errorNotifier = notifier
 }
 
-// UnmarshalWithRepair attempts unmarshal; retries with repair on failure.
-// Logs detailed error only if repair also fails.
 func UnmarshalWithRepair(jsonStr string, v interface{}, logPrefix string) error {
-	// Phase 1: Standard Unmarshal
 	if err := json.Unmarshal([]byte(jsonStr), v); err == nil {
 		return nil
 	}
 
-	// Phase 2: Tier 1 - Structural Repair
 	t1 := repairTier1(jsonStr)
 	if err := json.Unmarshal([]byte(t1), v); err == nil {
 		return nil
 	}
 
-	// Phase 3: Tier 2 - Character Repair
 	t2 := repairTier2(jsonStr)
 	if err := json.Unmarshal([]byte(t2), v); err == nil {
 		return nil
 	}
 
-	// Phase 4: Tier 3 - Quote Repair
 	t3 := repairTier3(jsonStr)
 	if err := json.Unmarshal([]byte(t3), v); err == nil {
 		return nil
 	}
 
-	// Phase 5: Tier 4 - Aggressive Repair
 	t4 := repairTier4(jsonStr)
 	if err := json.Unmarshal([]byte(t4), v); err == nil {
-		// Handle specific array-of-objects wrapped in [] case if needed, though RepairJSON covers some
 		return nil
 	}
 
-	// Special case: Try wrapping in array if it looks like a slice of objects
 	if typeErr, ok := json.Unmarshal([]byte(t4), &v).(*json.UnmarshalTypeError); ok {
 		if typeErr.Type.Kind() == reflect.Slice && typeErr.Value == "object" {
 			arrayWrapped := "[" + t4 + "]"
@@ -103,7 +91,6 @@ func UnmarshalWithRepair(jsonStr string, v interface{}, logPrefix string) error 
 	return err
 }
 
-// repairTier1 applies minimal structural repairs.
 func repairTier1(s string) string {
 	s = fixTrailingCommas(s)
 	s = repairDoubleArray(s)
@@ -115,7 +102,6 @@ func repairTier1(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// repairTier2 applies character level fixes
 func repairTier2(s string) string {
 	s = fixEscapedSingleQuotes(s)
 	s = fixHexEscapes(s)
@@ -126,7 +112,6 @@ func repairTier2(s string) string {
 	return repairTier1(s)
 }
 
-// repairTier3 applies quote and key fixes.
 func repairTier3(s string) string {
 	s = fixEscapedSingleQuotes(s)
 	s = fixHexEscapes(s)
@@ -149,8 +134,6 @@ func repairTier3(s string) string {
 	return repairTier1(s)
 }
 
-// repairTier4 attempts to repair a truncated or malformed JSON string.
-// repairs unclosed arrays and stack-based structural issues.
 func repairTier4(s string) string {
 	s = fixFullWidthColons(s)
 	s = fixEscapedSingleQuotes(s)
@@ -173,8 +156,6 @@ func repairTier4(s string) string {
 	return s
 }
 
-// applyComplexRegexRepairs applies aggressive regex-based fixes on a MASKED string.
-// Formerly known as preprocessJSON.
 func applyComplexRegexRepairs(s string) string {
 	s = fixDoubleCommas(s)
 
@@ -197,8 +178,6 @@ func applyComplexRegexRepairs(s string) string {
 
 	return s
 }
-
-// --- Tier 1 Helpers ---
 
 func fixTrailingCommas(s string) string {
 	return reTrailingCommas.ReplaceAllString(s, `$1$2`)
@@ -449,8 +428,6 @@ func fixMissingCommaBetweenObjects(s string) string {
 	return reMissingCommaObjects.ReplaceAllString(s, `$1,$2`)
 }
 
-// --- Tier 2 Helpers ---
-
 func fixFullWidthColons(s string) string {
 	s = reFullWidthColonKey.ReplaceAllString(s, `$1": `)
 	return reFullWidthColonQuoted.ReplaceAllString(s, `": `)
@@ -486,8 +463,6 @@ func fixJapaneseOpeningQuote(s string) string {
 func fixJapaneseClosingQuote(s string) string {
 	return reJapaneseClosingQuote.ReplaceAllString(s, `"$1`)
 }
-
-// --- Tier 3 Helpers ---
 
 func fixUnquotedKeys(s string) string {
 	return reUnquotedKeys.ReplaceAllString(s, `$1"$2":`)
@@ -588,8 +563,6 @@ func fixUnquotedValuesInArray(s string) string {
 func fixDanglingKey(s string) string {
 	return reDanglingKey.ReplaceAllString(s, `}`)
 }
-
-// --- Tier 4 Helpers ---
 
 func maskStrings(s string) (string, []string) {
 	var originals []string

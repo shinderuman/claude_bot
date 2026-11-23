@@ -6,7 +6,6 @@ import (
 	"log"
 )
 
-// SearchFuzzy はファクトの曖昧検索を行います
 func (s *FactStore) SearchFuzzy(targets []string, keys []string) []model.Fact {
 	results, err := s.storage.SearchFuzzy(context.Background(), targets, keys)
 	if err != nil {
@@ -16,7 +15,6 @@ func (s *FactStore) SearchFuzzy(targets []string, keys []string) []model.Fact {
 	return results
 }
 
-// GetRecentFacts は最新のファクトを取得します
 func (s *FactStore) GetRecentFacts(limit int) []model.Fact {
 	results, err := s.storage.GetRecent(context.Background(), limit)
 	if err != nil {
@@ -27,16 +25,11 @@ func (s *FactStore) GetRecentFacts(limit int) []model.Fact {
 }
 
 func (s *FactStore) GetRandomGeneralFactBundle(count int) ([]model.Fact, error) {
-	// Legacy implementation:
-	// facts := s.GetFactsByTarget(model.GeneralTarget)
-	// shuffle and return count.
 
-	// We can use GetFactsByTarget
 	facts := s.GetFactsByTarget(model.GeneralTarget)
 	if len(facts) <= count {
 		return facts, nil
 	}
-	// Returning requested count.
 	return facts[:count], nil
 }
 

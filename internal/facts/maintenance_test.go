@@ -11,7 +11,6 @@ import (
 	"claude_bot/internal/store"
 )
 
-// MockLLMClient implements LLMClient for testing
 type MockLLMClient struct {
 	GenerateTextFunc func(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, currentImages []model.Image, temperature float64) string
 }
@@ -23,16 +22,12 @@ func (m *MockLLMClient) GenerateText(ctx context.Context, messages []model.Messa
 	return ""
 }
 
-// MockFactStoreForConsolidation implements necessary methods for FactStore interaction
-// We mock s.storage (FactStorage interface) to intercept calls.
-
 type MockFactStorage struct {
 	AddFunc         func(ctx context.Context, fact model.Fact) error
 	GetByTargetFunc func(ctx context.Context, target string) ([]model.Fact, error)
 	GetAllFactsFunc func(ctx context.Context) ([]model.Fact, error)
 	RemoveFunc      func(ctx context.Context, target string, filter func(model.Fact) bool) (int, error)
 	ReplaceFunc     func(ctx context.Context, target string, oldFacts, newFacts []model.Fact) error
-	// Others...
 }
 
 func (m *MockFactStorage) Add(ctx context.Context, fact model.Fact) error {
@@ -75,7 +70,6 @@ func (m *MockFactStorage) SearchFuzzy(ctx context.Context, targets []string, key
 }
 
 func TestConsolidateBotFacts(t *testing.T) {
-	// Setup Data
 	target := "test_bot"
 	systemFact := model.Fact{
 		Target: target, Key: "system:colleague_profile:other", Value: "Ignore me", Timestamp: time.Now(),
@@ -89,7 +83,6 @@ func TestConsolidateBotFacts(t *testing.T) {
 
 	facts := []model.Fact{systemFact, normalFact1, normalFact2}
 
-	// Mock Storage
 	mockStorage := &MockFactStorage{
 		GetAllFactsFunc: func(ctx context.Context) ([]model.Fact, error) {
 			return nil, nil
@@ -101,39 +94,31 @@ func TestConsolidateBotFacts(t *testing.T) {
 			return nil, nil
 		},
 		ReplaceFunc: func(ctx context.Context, tgt string, oldFacts, newFacts []model.Fact) error {
-			// Verify that oldFacts DOES NOT contain systemFact
 			for _, f := range oldFacts {
 				if strings.HasPrefix(f.Key, "system:") {
 					t.Errorf("Replace called with system fact in oldFacts (it should have been filtered out!): %v", f.Key)
 				}
 			}
-			// Verify that input facts are present
-			if len(oldFacts) != 2 { // normalFact1, normalFact2
+			if len(oldFacts) != 2 {
 				t.Errorf("Expected 2 facts to be replaced, got %d", len(oldFacts))
 			}
 			return nil
 		},
 	}
 
-	// Mock LLM
 	mockLLM := &MockLLMClient{
 		GenerateTextFunc: func(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, currentImages []model.Image, temperature float64) string {
-			// Ensure system info is NOT in the prompt (implicit verification via what LLM receives)
-			// But here we just return a valid JSON response
 			return `[{"target":"test_bot","key":"preference","value":"Fruit (Consolidated)","timestamp":"2023-01-01T00:00:00Z"}]`
 		},
 	}
 
-	// Use store package to create FactStore wrapper
 	factStore := store.NewFactStore(mockStorage, nil, "")
 	service := NewFactService(&config.Config{EnableFactStore: true}, factStore, mockLLM, nil, nil, nil)
 
-	// Execute
 	err := service.ConsolidateBotFacts(context.Background(), target, facts)
 	if err != nil {
 		t.Fatalf("ConsolidateBotFacts failed: %v", err)
 	}
 
-	// wait for saveAsync
 	time.Sleep(100 * time.Millisecond)
 }

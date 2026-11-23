@@ -82,24 +82,18 @@ func TestConversationHistory_GetOrCreateConversation(t *testing.T) {
 		Messages:     []model.Message{},
 	}
 
-	// Add initial message
 	AddMessage(&conv, "user", "Hello", []string{"id1"})
 
-	// Initialize session with this conversation
 	session.Conversations = []model.Conversation{conv}
 
-	// Test case 1: Find conversation by RootStatusID
 	foundConv := history.GetOrCreateConversation(session, "root1")
 	if foundConv.RootStatusID != "root1" {
 		t.Errorf("expected foundConv.RootStatusID to be 'root1', got %s", foundConv.RootStatusID)
 	}
-	// Verify it points to the element in the slice
 	if foundConv != &session.Conversations[0] {
 		t.Errorf("expected foundConv to point to session.Conversations[0]")
 	}
 
-	// Test case 2: Find conversation by Message ID
-	// Add a message with specific IDs TO THE FOUND CONVERSATION (in session)
 	AddMessage(foundConv, "assistant", "Response", []string{"id2", "id3"})
 
 	foundConvByID := history.GetOrCreateConversation(session, "id2")
@@ -112,7 +106,6 @@ func TestConversationHistory_GetOrCreateConversation(t *testing.T) {
 		t.Errorf("expected to find existing conversation by Message ID 'id3'")
 	}
 
-	// Test case 3: Create new conversation
 	newConv := history.GetOrCreateConversation(session, "new_root")
 	if newConv == foundConv {
 		t.Errorf("expected to create a new conversation for 'new_root', got same old one")

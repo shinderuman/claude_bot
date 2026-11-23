@@ -10,7 +10,7 @@ func TestFactUnmarshal(t *testing.T) {
 		name     string
 		jsonStr  string
 		wantKey  string
-		wantType string // "string", "bool", "float64"
+		wantType string
 	}{
 		{
 			name: "String Value",

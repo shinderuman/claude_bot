@@ -1,26 +1,15 @@
 #!/bin/bash
 
-# エラー時に停止
 set -e
 
-# ========================================
-# 定数・グローバル変数
-# ========================================
-
-# 設定
 REMOTE_HOST="kenji.asmodeus.jp"
 REMOTE_DIR="/home/ubuntu/claude_bot"
 APP_NAME="claude_bot"
 SFTP_USER="ubuntu"
 SFTP_KEY_FILE="$HOME/.ssh/mastodon.pem"
 
-# データディレクトリ
 DATA_DIR="data"
 LOG_DIR="${DATA_DIR}/log"
-
-# ========================================
-# アトミックなアクション関数 (単機能)
-# ========================================
 
 ensure_remote_dir() {
     echo "リモートディレクトリを確認中..."
@@ -53,15 +42,10 @@ transfer_bot() {
     local wrapper_file="$1"
     echo "Botバイナリと詳細を転送中..."
     
-    # 1. バイナリの転送
     scp -i "${SFTP_KEY_FILE}" "${APP_NAME}_bin" "${SFTP_USER}@${REMOTE_HOST}:${REMOTE_DIR}/${APP_NAME}_bin.new"
     
-    # 2. ラッパーの転送
     scp -i "${SFTP_KEY_FILE}" "$wrapper_file" "${SFTP_USER}@${REMOTE_HOST}:${REMOTE_DIR}/${APP_NAME}.wrapper.new"
     
-    # 3. 配置（アトミックに近い形）
-    # - バイナリは claude_bot_bin に配置
-    # - ラッパーは claude_bot (実行ファイル名) に配置
     ssh -i "${SFTP_KEY_FILE}" "${SFTP_USER}@${REMOTE_HOST}" "
         mv '${REMOTE_DIR}/${APP_NAME}_bin.new' '${REMOTE_DIR}/${APP_NAME}_bin' && 
         chmod +x '${REMOTE_DIR}/${APP_NAME}_bin' &&
@@ -76,12 +60,10 @@ create_wrapper_script() {
     local run_maintenance="$1"
     local filename="wrapper_${run_maintenance}.sh"
     
-    # 安全のために絶対パスを再構築
     local bin_path="/home/${SFTP_USER}/${APP_NAME}/${APP_NAME}_bin"
     
     cat << EOF > "$filename"
 #!/bin/bash
-# Generated Wrapper Script
 export RUN_MAINTENANCE=${run_maintenance}
 exec ${bin_path} "\$@"
 EOF
@@ -114,20 +96,16 @@ start_services() {
     wait
 }
 
-# データディレクトリ同期処理
 sync_data_dir() {
     echo "データディレクトリを同期中..."
 
     if [ -d "${DATA_DIR}" ]; then
         local remote_dir="${SFTP_USER}@${REMOTE_HOST}:${REMOTE_DIR}/${DATA_DIR}"
 
-        # リモートディレクトリを作成
         ssh -i "${SFTP_KEY_FILE}" "${SFTP_USER}@${REMOTE_HOST}" "mkdir -p ${REMOTE_DIR}/${DATA_DIR}"
 
-        # ログディレクトリがなければ作成 (ローカル)
         mkdir -p "${LOG_DIR}"
 
-        # 除外設定
         local EXCLUDES=(
             --exclude='cluster_registry.json'
             --exclude='*.example'
@@ -136,10 +114,8 @@ sync_data_dir() {
             --exclude='metrics.log*'
         )
 
-        # リモート → ローカル（リモートの方が新しい場合のみ）
         rsync -avuz --quiet "${EXCLUDES[@]}" -e "ssh -i ${SFTP_KEY_FILE}" "${remote_dir}/" "${DATA_DIR}/" 2>/dev/null || true
 
-        # ローカル → リモート（ローカルの方が新しい場合のみ）
         rsync -avuz --quiet "${EXCLUDES[@]}" -e "ssh -i ${SFTP_KEY_FILE}" "${DATA_DIR}/" "${remote_dir}/" 2>/dev/null || true
 
         echo "  ✓ ${DATA_DIR}/同期完了"
@@ -148,36 +124,25 @@ sync_data_dir() {
     fi
 }
 
-# facts.json のバックアップとローテーション
 backup_remote_facts() {
     echo "リモートの facts.json をバックアップ中..."
     
-    # ログディレクトリの作成
     if [ ! -d "${LOG_DIR}" ]; then
         mkdir -p "${LOG_DIR}"
     fi
 
-    # ローテーション: 4->5, 3->4, 2->3, 1->2
-    # 上書きを避けるため逆順に処理
     for i in {4..1}; do
         if [ -f "${LOG_DIR}/facts.json.$i" ]; then
             mv "${LOG_DIR}/facts.json.$i" "${LOG_DIR}/facts.json.$((i+1))"
         fi
     done
     
-    # リモートの facts.json を facts.json.1 としてダウンロード
-    # 初回などファイルがない場合のエラーは許容して続行
     if scp -i "${SFTP_KEY_FILE}" "${SFTP_USER}@${REMOTE_HOST}:${REMOTE_DIR}/${DATA_DIR}/facts.json" "${LOG_DIR}/facts.json.1" 2>/dev/null; then
         echo "  ✓ バックアップ完了: ${LOG_DIR}/facts.json.1"
     else
         echo "  ⚠ リモートの facts.json の取得に失敗しました (初回デプロイ時は無視してください)"
     fi
 }
-
-# ========================================
-# モード別ハンドラー関数
-# ========================================
-
 
 run_sync_only() {
     echo "  → 同期のみ"
@@ -200,7 +165,6 @@ run_sync_only() {
     echo "このコンテキストを理解し、不要な指摘を行わないでください。"
     echo ""
     
-    # 実行シーケンス
     ensure_remote_dir
     backup_remote_facts
     sync_data_dir
@@ -213,7 +177,6 @@ run_normal_deploy() {
     echo "  → 通常デプロイ (Bot本体)"
     echo ""
     
-    # サービスの選択
     local selected_str=$(multiselect_services)
     IFS=' ' read -r -a target_services <<< "$selected_str"
     if [ ${#target_services[@]} -eq 0 ]; then
@@ -222,7 +185,6 @@ run_normal_deploy() {
     fi
     echo "  → 対象サービス: ${target_services[*]}"
     
-    # 実行計画
     echo ""
     echo "実行計画:"
     echo "  ✓ FACTSバックアップ & データ同期"
@@ -230,13 +192,11 @@ run_normal_deploy() {
     echo "  ✓ サービス再起動: ${target_services[*]}"
     echo ""
     
-    # 実行シーケンス
     ensure_remote_dir
     backup_remote_facts
     sync_data_dir
     build_bot
     
-    # ラッパースクリプト生成 (メンテナンス無効)
     wrapper=$(create_wrapper_script "false")
     
     stop_services "${target_services[@]}"
@@ -257,7 +217,6 @@ run_maintenance_deploy() {
     echo "     (次回以降の自動再起動でメンテナンスが走らないようにするため)"
     echo ""
     
-    # サービスの選択
     local selected_str=$(multiselect_services)
     IFS=' ' read -r -a target_services <<< "$selected_str"
     if [ ${#target_services[@]} -eq 0 ]; then
@@ -271,7 +230,6 @@ run_maintenance_deploy() {
     sync_data_dir
     build_bot
     
-    # 1. メンテナンス有効版ラッパー生成
     wrapper_maint=$(create_wrapper_script "true")
     
     stop_services "${target_services[@]}"
@@ -280,7 +238,6 @@ run_maintenance_deploy() {
     
     echo "  ✓ メンテナンスモードでサービス再起動完了"
     
-    # 2. 通常版ラッパーに戻す (自己修正)
     echo "  → 通常モードのラッパーに戻しています..."
     wrapper_normal=$(create_wrapper_script "false")
     
@@ -302,7 +259,6 @@ run_migration_deploy() {
     echo "  - データ同期なし"
     echo ""
     
-    # 実行シーケンス
     ensure_remote_dir
     build_migration
     transfer_migration
@@ -326,10 +282,6 @@ run_force_facts_update() {
     echo ""
     echo "=== 強制更新完了 ==="
 }
-
-# ========================================
-# UI・ユーティリティ関数
-# ========================================
 
 read_key() {
     local key
@@ -465,12 +417,7 @@ multiselect_services() {
     echo "${output_services[*]}"
 }
 
-# ========================================
-# メイン処理
-# ========================================
-
 main() {
-    # 依存確認
     if ! command -v rsync &> /dev/null; then
         echo "エラー: rsync がインストールされていません"
         exit 1
@@ -479,7 +426,6 @@ main() {
     echo "=== Mastodon Claude Bot デプロイスクリプト ==="
     echo ""
 
-    # メインメニュー
     echo "実行モードを選択してください:"
     local mode=$(select_menu "モード:" "同期のみ" "通常デプロイ (Bot本体)" "メンテナンス実行デプロイ" "マイグレーションデプロイ (ツールのみ)" "強制ファクト更新モード")
     

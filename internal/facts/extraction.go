@@ -10,7 +10,6 @@ import (
 	"claude_bot/internal/model"
 )
 
-// ExtractAndSaveFacts extracts facts from a message and saves them to the store
 func (s *FactService) ExtractAndSaveFacts(ctx context.Context, message string, baseFact model.Fact) {
 	if !s.config.EnableFactStore {
 		return
@@ -59,7 +58,6 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, message string, b
 
 }
 
-// ExtractAndSaveFactsFromURLContent extracts facts from url content and saves them to the store
 func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, urlContent string, baseFact model.Fact) {
 	if !s.config.EnableFactStore {
 		return
@@ -104,7 +102,6 @@ func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, url
 
 }
 
-// ExtractAndSaveFactsFromSummary extracts facts from a conversation summary and saves them to the store
 func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summary string, baseFact model.Fact) {
 	if !s.config.EnableFactStore || summary == "" {
 		return
@@ -150,7 +147,6 @@ func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summar
 
 }
 
-// SaveColleagueFact saves or updates a colleague's profile fact
 func (s *FactService) SaveColleagueFact(ctx context.Context, targetUserName, displayName, note string) error {
 	key := fmt.Sprintf("%s%s", model.SystemColleagueProfileKeyPrefix, targetUserName)
 	value := fmt.Sprintf("Name: %s\nBio: %s", displayName, note)
@@ -177,8 +173,6 @@ func (s *FactService) SaveColleagueFact(ctx context.Context, targetUserName, dis
 	return nil
 }
 
-// resolveFactTarget normalizes the target and username.
-// treatUnknownAsAuthor: for summary extraction, "unknown" target is often the conversation partner.
 func resolveFactTarget(target, targetUserName, authorID, authorName string, treatUnknownAsAuthor bool) (string, string) {
 	if target == model.RoleUser || target == "" {
 		target = authorID

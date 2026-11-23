@@ -2,7 +2,6 @@ package llm
 
 import "claude_bot/internal/model"
 
-// Templates holds long prompt template strings
 var Templates = struct {
 	FactExtraction           string
 	URLContentFactExtraction string

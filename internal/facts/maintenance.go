@@ -14,13 +14,11 @@ import (
 	"claude_bot/internal/model"
 )
 
-// PerformMaintenance orchestrates the maintenance of the fact store, including archiving
 func (s *FactService) PerformMaintenance(ctx context.Context) error {
 	if !s.config.EnableFactStore {
 		return nil
 	}
 
-	// クラスタ位置の取得
 	instanceID, totalInstances, err := discovery.GetMyPosition(s.config.BotUsername)
 	if err != nil {
 		log.Fatalf("クラスタ位置取得エラー (分散処理無効): %v", err)
@@ -41,26 +39,22 @@ func (s *FactService) PerformMaintenance(ctx context.Context) error {
 	return nil
 }
 
-// processTargetMaintenance handles maintenance for a single target
 func (s *FactService) processTargetMaintenance(ctx context.Context, target string, instanceID, totalInstances int) (bool, error) {
 	allFacts := s.factStore.GetFactsByTarget(target)
 	if len(allFacts) == 0 {
 		return false, nil
 	}
 
-	// Botターゲット（自分自身）の場合は統合処理を行う
 	if target == s.config.BotUsername {
 		log.Printf("Botターゲット %s のファクト統合・整理を開始します (全 %d 件)", target, len(allFacts))
 		if err := s.ConsolidateBotFacts(ctx, target, allFacts); err != nil {
 			log.Printf("ファクト統合エラー: %v", err)
 		} else {
-			// 統合成功時はリストをリロード
 			allFacts = s.factStore.GetFactsByTarget(target)
 		}
 		log.Printf("自己プロファイル更新: %s (全 %d 件)", target, len(allFacts))
 		if err := s.GenerateAndSaveBotProfile(ctx, allFacts); err != nil {
 			log.Printf("自己プロファイル生成エラー: %v", err)
-			// プロファイル生成失敗はメンテナンス全体の失敗とはしない
 		}
 	}
 
@@ -69,8 +63,6 @@ func (s *FactService) processTargetMaintenance(ctx context.Context, target strin
 		return false, nil
 	}
 
-	// アーカイブ対象のフィルタリング
-	// システム管理用のファクト（同僚プロファイルなど）はアーカイブ対象外とする
 	var archiveCandidateFacts []model.Fact
 	for _, f := range myFacts {
 		if !strings.HasPrefix(f.Key, model.SystemFactKeyPrefix) {
@@ -78,7 +70,6 @@ func (s *FactService) processTargetMaintenance(ctx context.Context, target strin
 		}
 	}
 
-	// アーカイブ候補がなければスキップ
 	if len(archiveCandidateFacts) == 0 {
 		return false, nil
 	}
@@ -98,7 +89,6 @@ func (s *FactService) processTargetMaintenance(ctx context.Context, target strin
 	return false, nil
 }
 
-// shardFacts filters facts based on consistent hashing
 func (s *FactService) shardFacts(facts []model.Fact, instanceID, totalInstances int) []model.Fact {
 	if totalInstances <= 1 {
 		return facts
@@ -118,7 +108,6 @@ func (s *FactService) shardFacts(facts []model.Fact, instanceID, totalInstances 
 	return myFacts
 }
 
-// shouldArchiveFacts determines if facts should be archived based on thresholds
 func (s *FactService) shouldArchiveFacts(facts []model.Fact, totalInstances int) (bool, string) {
 	if len(facts) >= ArchiveFactThreshold/max(1, totalInstances) {
 		return true, ArchiveReasonThresholdMet
@@ -152,7 +141,6 @@ func (s *FactService) archiveTargetFacts(ctx context.Context, target string, fac
 		return fmt.Errorf("有効なアーカイブが生成されませんでした")
 	}
 
-	// 安全装置: データ損失防止
 	if len(facts) > 0 && len(allArchives) == 0 {
 		return fmt.Errorf("アーカイブ生成結果が0件のため保存を中止しました")
 	}
@@ -165,7 +153,6 @@ func (s *FactService) archiveTargetFacts(ctx context.Context, target string, fac
 	return nil
 }
 
-// generateArchiveFacts handles the common logic of batching facts, calling LLM, and parsing responses
 func (s *FactService) generateArchiveFacts(ctx context.Context, target string, facts []model.Fact) ([]model.Fact, error) {
 	var allArchives []model.Fact
 	totalFacts := len(facts)
@@ -179,7 +166,6 @@ func (s *FactService) generateArchiveFacts(ctx context.Context, target string, f
 		prompt := llm.BuildFactArchivingPrompt(batch)
 		messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 
-		// Use extraction system prompt for JSON output structure
 		systemPrompt := llm.Messages.System.FactExtraction
 
 		response := s.llmClient.GenerateText(ctx, messages, systemPrompt, s.config.MaxSummaryTokens, nil, llm.TemperatureSystem)
@@ -206,7 +192,6 @@ func (s *FactService) generateArchiveFacts(ctx context.Context, target string, f
 		return nil, nil
 	}
 
-	// Post-process metadata
 	for i := range allArchives {
 		allArchives[i].Target = target
 		if allArchives[i].TargetUserName == "" || allArchives[i].TargetUserName == model.UnknownTarget {
@@ -224,13 +209,11 @@ func (s *FactService) generateArchiveFacts(ctx context.Context, target string, f
 	return allArchives, nil
 }
 
-// ConsolidateBotFacts consolidates facts for a bot target using LLM to maintain character richness
 func (s *FactService) ConsolidateBotFacts(ctx context.Context, target string, facts []model.Fact) error {
 	if len(facts) == 0 {
 		return nil
 	}
 
-	// 1. Prepare input list
 	var factList strings.Builder
 	for _, f := range facts {
 		if strings.HasPrefix(f.Key, model.SystemFactKeyPrefix) {
@@ -243,17 +226,14 @@ func (s *FactService) ConsolidateBotFacts(ctx context.Context, target string, fa
 		return nil
 	}
 
-	// 2. Generate consolidated facts via LLM
 	prompt := llm.BuildFactConsolidationPrompt(factList.String(), s.config.CharacterPrompt)
 	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 
-	// System Prompt for JSON extraction
 	response := s.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, s.config.MaxFactTokens*2, nil, llm.TemperatureSystem)
 	if response == "" {
 		return fmt.Errorf("ConsolidateBotFacts: LLM response empty")
 	}
 
-	// 3. Parse JSON
 	var consolidatedFacts []model.Fact
 	jsonStr := llm.ExtractJSON(response)
 	if err := llm.UnmarshalWithRepair(jsonStr, &consolidatedFacts, "FactConsolidation"); err != nil {
@@ -264,7 +244,6 @@ func (s *FactService) ConsolidateBotFacts(ctx context.Context, target string, fa
 		return fmt.Errorf("ConsolidateBotFacts: Result is empty")
 	}
 
-	// 4. Post-process and Save
 	for i := range consolidatedFacts {
 		consolidatedFacts[i].Target = target
 		if consolidatedFacts[i].TargetUserName == "" {
@@ -277,7 +256,6 @@ func (s *FactService) ConsolidateBotFacts(ctx context.Context, target string, fa
 		consolidatedFacts[i].SourceType = model.SourceTypeArchive
 	}
 
-	// system:ファクトを除外して更新対象リストを作成
 	var factsToReplace []model.Fact
 	for _, f := range facts {
 		if !strings.HasPrefix(f.Key, model.SystemFactKeyPrefix) {
@@ -285,7 +263,6 @@ func (s *FactService) ConsolidateBotFacts(ctx context.Context, target string, fa
 		}
 	}
 
-	// Replace existing facts (only non-system ones) with consolidated ones
 	if err := s.factStore.ReplaceFacts(target, factsToReplace, consolidatedFacts); err != nil {
 		return fmt.Errorf("ConsolidateBotFacts: ReplaceFacts failed: %v", err)
 	}
@@ -294,7 +271,6 @@ func (s *FactService) ConsolidateBotFacts(ctx context.Context, target string, fa
 	return nil
 }
 
-// GenerateAndSaveBotProfile generates a profile summary from facts and saves it to a file
 func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []model.Fact) error {
 	if s.config.BotProfileFile == "" {
 		return nil
@@ -319,7 +295,6 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 
 	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 
-	// System Promptとしてキャラクター設定を渡す
 	generateCtx := context.WithValue(ctx, model.ContextKeyIsProfileGeneration, true)
 	profileText := s.llmClient.GenerateText(generateCtx, messages, s.config.CharacterPrompt, s.config.MaxSummaryTokens, nil, s.config.LLMTemperature)
 	if profileText == "" {
@@ -330,8 +305,6 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 		return fmt.Errorf("プロファイルファイル保存失敗 (%s): %v", s.config.BotProfileFile, err)
 	}
 
-	// Mastodonのプロフィールも更新する
-	// Peer認証キーを取得
 	authKey, err := discovery.GetPeerAuthKey()
 	if err != nil {
 		log.Printf("Peer認証キー生成失敗: %v", err)
@@ -350,7 +323,6 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 
 	log.Printf("自己プロファイルを更新しました: %s (%d文字)", s.config.BotProfileFile, len([]rune(profileText)))
 
-	// Slackにも通知
 	if s.slackClient != nil {
 		message := fmt.Sprintf(`🤖 プロフィールを更新しました
 
@@ -363,7 +335,6 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 	return nil
 }
 
-// LoadBotProfile loads facts for the bot itself and regenerates the profile
 func (s *FactService) LoadBotProfile(ctx context.Context) error {
 	if !s.config.EnableFactStore {
 		return nil

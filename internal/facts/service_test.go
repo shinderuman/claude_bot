@@ -23,9 +23,6 @@ func getTestService() (*FactService, *mastodon.Client) {
 	return s, m
 }
 
-// TestFormatProfileText was removed as the logic was moved to mastodon.Client and decoupled.
-// See internal/mastodon/profile_test.go for TestFormatProfileBody and TestTruncateText.
-
 func TestShardingDistribution(t *testing.T) {
 	totalInstances := 4
 	totalFacts := 1000
@@ -61,7 +58,7 @@ func TestShardingDistribution(t *testing.T) {
 	}
 
 	expectedAvg := totalFacts / totalInstances
-	tolerance := float64(expectedAvg) * 0.2 // Allow 20% deviation
+	tolerance := float64(expectedAvg) * 0.2
 
 	t.Logf("Distribution results for %d facts across %d instances:", totalFacts, totalInstances)
 	for i := range totalInstances {
@@ -75,7 +72,7 @@ func TestShardingDistribution(t *testing.T) {
 
 func TestSmallBatchSkipping(t *testing.T) {
 	totalInstances := 4
-	threshold := 50 / 4 // 12
+	threshold := 50 / 4
 
 	var facts []model.Fact
 	for i := range 5 {
@@ -144,10 +141,10 @@ func TestBuildProfileFields(t *testing.T) {
 			name:        "Update Existing Managed Fields & Preserve Others",
 			allowRemote: true,
 			existingFields: []gomastodon.Field{
-				{Name: "First", Value: "1"}, // Should stay first
+				{Name: "First", Value: "1"},
 				{Name: mastodon.ProfileFieldSystemID, Value: "old-key"},
 				{Name: mastodon.ProfileFieldLastUpdated, Value: "old-time"},
-				{Name: "Second", Value: "2"}, // Should stay second (before managed fields)
+				{Name: "Second", Value: "2"},
 				{Name: mastodon.ProfileFieldMentionStatus, Value: "old-status"},
 			},
 			authKey:          "new-auth-key",
@@ -168,7 +165,6 @@ func TestBuildProfileFields(t *testing.T) {
 
 			got := m.BuildProfileFields(cfg, tt.existingFields, tt.authKey)
 
-			// 1. Verify Managed Fields Exist and match values
 			managedFound := map[string]bool{
 				mastodon.ProfileFieldSystemID:      false,
 				mastodon.ProfileFieldMentionStatus: false,
@@ -189,7 +185,6 @@ func TestBuildProfileFields(t *testing.T) {
 					managedFound[mastodon.ProfileFieldMentionStatus] = true
 				}
 				if f.Name == mastodon.ProfileFieldLastUpdated {
-					// Time check is loose (just check it exists and has length)
 					if len(f.Value) == 0 {
 						t.Error("LastUpdated field is empty")
 					}
@@ -203,10 +198,6 @@ func TestBuildProfileFields(t *testing.T) {
 				}
 			}
 
-			// 2. Verify Order
-			// Expected order: [User Fields...] -> SystemID -> MentionStatus -> LastUpdated
-
-			// Find indices
 			var idxSystemID, idxMention, idxLastUpdated = -1, -1, -1
 			for i, f := range got {
 				switch f.Name {
@@ -230,10 +221,9 @@ func TestBuildProfileFields(t *testing.T) {
 				t.Errorf("Order invalid: MentionStatus (%d) should be before LastUpdated (%d)", idxMention, idxLastUpdated)
 			}
 
-			// Verify User fields are BEFORE managed fields
 			for i, f := range got {
 				if _, isManaged := managedFound[f.Name]; !isManaged {
-					if i > idxSystemID { // SystemID is the first managed field
+					if i > idxSystemID {
 						t.Errorf("User field %s found at index %d, expected before SystemID (%d)", f.Name, i, idxSystemID)
 					}
 				}
@@ -249,24 +239,16 @@ func TestBuildProfileFields_OrderGuarantee(t *testing.T) {
 		Timezone:         "UTC",
 	}
 
-	// Input with scrambled order and managed fields mixed with user fields
 	input := []gomastodon.Field{
-		{Name: mastodon.ProfileFieldLastUpdated, Value: "old-time"},     // Should move to end
-		{Name: "UserField1", Value: "1"},                                // Should be first
-		{Name: mastodon.ProfileFieldMentionStatus, Value: "old-status"}, // Should move to middle
-		{Name: "UserField2", Value: "2"},                                // Should be second
-		{Name: mastodon.ProfileFieldSystemID, Value: "old-key"},         // Should move to start of managed block
+		{Name: mastodon.ProfileFieldLastUpdated, Value: "old-time"},
+		{Name: "UserField1", Value: "1"},
+		{Name: mastodon.ProfileFieldMentionStatus, Value: "old-status"},
+		{Name: "UserField2", Value: "2"},
+		{Name: mastodon.ProfileFieldSystemID, Value: "old-key"},
 	}
 
 	authKey := "new-auth-key"
 	got := m.BuildProfileFields(cfg, input, authKey)
-
-	// Expected Order:
-	// 1. UserField1
-	// 2. UserField2
-	// 3. SystemID
-	// 4. MentionStatus
-	// 5. LastUpdated
 
 	if len(got) != 5 {
 		t.Fatalf("Expected 5 fields, got %d", len(got))
@@ -286,7 +268,6 @@ func TestBuildProfileFields_OrderGuarantee(t *testing.T) {
 		}
 	}
 
-	// Verify SystemID update
 	if got[2].Value != authKey {
 		t.Errorf("SystemID value mismatch: got %s, want %s", got[2].Value, authKey)
 	}
@@ -295,13 +276,8 @@ func TestBuildProfileFields_OrderGuarantee(t *testing.T) {
 func TestShouldArchiveFacts(t *testing.T) {
 	s, _ := getTestService()
 
-	// Constants from service.go (assumed based on logic)
-	// ArchiveFactThreshold = 10
-	// ArchiveMinFactCount  = 2
-	// ArchiveAgeDays       = 30
-
 	now := time.Now()
-	oldTime := now.AddDate(0, 0, -31) // 31 days ago
+	oldTime := now.AddDate(0, 0, -31)
 
 	tests := []struct {
 		name           string
@@ -312,14 +288,14 @@ func TestShouldArchiveFacts(t *testing.T) {
 	}{
 		{
 			name:           "Threshold Met (Single Instance)",
-			facts:          makeFacts(50, now), // 50 facts
+			facts:          makeFacts(50, now),
 			totalInstances: 1,
 			want:           true,
 			wantReason:     ArchiveReasonThresholdMet,
 		},
 		{
 			name:           "Threshold Met (Multiple Instances)",
-			facts:          makeFacts(13, now), // 50 / 4 = 12.5 -> 13 >= 12
+			facts:          makeFacts(13, now),
 			totalInstances: 4,
 			want:           true,
 			wantReason:     ArchiveReasonThresholdMet,
@@ -330,7 +306,7 @@ func TestShouldArchiveFacts(t *testing.T) {
 				f := makeFacts(9, now)
 				f = append(f, model.Fact{Value: "old", Timestamp: oldTime})
 				return f
-			}(), // 10 facts total (9 new, 1 old) >= 10
+			}(),
 			totalInstances: 1,
 			want:           true,
 			wantReason:     ArchiveReasonOldData,
@@ -346,7 +322,7 @@ func TestShouldArchiveFacts(t *testing.T) {
 			name: "Insufficient Count (Old Data)",
 			facts: []model.Fact{
 				{Value: "old", Timestamp: oldTime},
-			}, // Only 1 fact, need 10
+			},
 			totalInstances: 1,
 			want:           false,
 			wantReason:     ArchiveReasonInsufficient,
@@ -366,7 +342,6 @@ func TestShouldArchiveFacts(t *testing.T) {
 	}
 }
 
-// Helper to create facts
 func makeFacts(count int, ts time.Time) []model.Fact {
 	var facts []model.Fact
 	for i := 0; i < count; i++ {
@@ -386,7 +361,6 @@ func TestFactService_isValidFact(t *testing.T) {
 		fact model.Fact
 		want bool
 	}{
-		// 1. Target Validation
 		{
 			name: "Empty Target",
 			fact: model.Fact{Target: "", Key: "k", Value: "v"},
@@ -408,7 +382,6 @@ func TestFactService_isValidFact(t *testing.T) {
 			want: false,
 		},
 
-		// 2. Content Validation
 		{
 			name: "Nil Value",
 			fact: model.Fact{Target: "valid_target", Key: "k", Value: nil},
@@ -435,7 +408,6 @@ func TestFactService_isValidFact(t *testing.T) {
 			want: false,
 		},
 
-		// 3. Bot Filtering
 		{
 			name: "Known Bot with 'bot' keyword",
 			fact: model.Fact{Target: "known_bot", Key: "desc", Value: "I am a bot"},
@@ -447,7 +419,6 @@ func TestFactService_isValidFact(t *testing.T) {
 			want: true,
 		},
 
-		// 4. Normal Case
 		{
 			name: "Valid User Fact",
 			fact: model.Fact{Target: "valid_target", Key: "k", Value: "v"},
@@ -459,7 +430,6 @@ func TestFactService_isValidFact(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			factStore := store.NewFactStore(&MockFactStorage{}, nil, "")
 
-			// Setup service with known bots
 			knownBots := map[string]struct{}{"known_bot": {}}
 			service := NewFactService(&config.Config{}, factStore, mockLLM, nil, nil, knownBots)
 

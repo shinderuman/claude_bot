@@ -10,8 +10,6 @@ import (
 	"strings"
 )
 
-// GetPeerAuthKey generates a unique authentication key based on the machine's identity.
-// It uses Hostname + MachineID to generate a SHA256 hash.
 func GetPeerAuthKey() (string, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -28,11 +26,9 @@ func GetPeerAuthKey() (string, error) {
 	return hex.EncodeToString(hash[:]), nil
 }
 
-// GetMachineID retrieves the unique machine ID based on the OS.
 func GetMachineID() (string, error) {
 	switch runtime.GOOS {
 	case "darwin":
-		// macOS: use IOPlatformUUID
 		out, err := exec.Command("ioreg", "-rd1", "-c", "IOPlatformExpertDevice").Output()
 		if err != nil {
 			return "", err
@@ -48,7 +44,6 @@ func GetMachineID() (string, error) {
 		}
 		return "", fmt.Errorf("IOPlatformUUID not found")
 	case "linux":
-		// Linux: use /etc/machine-id or /var/lib/dbus/machine-id
 		content, err := os.ReadFile("/etc/machine-id")
 		if err == nil {
 			return strings.TrimSpace(string(content)), nil

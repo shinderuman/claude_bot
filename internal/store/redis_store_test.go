@@ -35,7 +35,6 @@ func TestRedisFactStore_Workflow(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
 
-	// 1. Add Facts
 	fact1 := model.Fact{
 		Target:         "user1",
 		TargetUserName: "User1",
@@ -58,7 +57,6 @@ func TestRedisFactStore_Workflow(t *testing.T) {
 		t.Fatalf("Add fact2 failed: %v", err)
 	}
 
-	// 2. GetByTarget
 	facts, err := store.GetByTarget(ctx, "user1")
 	if err != nil {
 		t.Fatalf("GetByTarget failed: %v", err)
@@ -67,7 +65,6 @@ func TestRedisFactStore_Workflow(t *testing.T) {
 		t.Errorf("GetByTarget returned %d facts, want 2", len(facts))
 	}
 
-	// 3. Update Existing (Same Key+Value -> Same Hash)
 	fact1Updated := fact1
 	fact1Updated.Author = "updated_bot"
 	fact1Updated.Timestamp = now.Add(2 * time.Second)
@@ -79,7 +76,6 @@ func TestRedisFactStore_Workflow(t *testing.T) {
 	if len(facts) != 2 {
 		t.Errorf("After update, expected 2 facts (deduplicated), got %d", len(facts))
 	}
-	// Verify update content
 	for _, f := range facts {
 		if f.Key == "k1" && f.Value == "v1" {
 			if f.Author != "updated_bot" {
@@ -88,7 +84,6 @@ func TestRedisFactStore_Workflow(t *testing.T) {
 		}
 	}
 
-	// 4. Add Same Key, Diff Value (Should Append)
 	fact3 := model.Fact{
 		Target:         "user1",
 		TargetUserName: "User1",
@@ -105,7 +100,6 @@ func TestRedisFactStore_Workflow(t *testing.T) {
 		t.Errorf("With diff value, expected 3 facts, got %d", len(facts))
 	}
 
-	// 5. GetRecent
 	recent, err := store.GetRecent(ctx, 2)
 	if err != nil {
 		t.Fatalf("GetRecent failed: %v", err)
@@ -113,14 +107,7 @@ func TestRedisFactStore_Workflow(t *testing.T) {
 	if len(recent) != 2 {
 		t.Errorf("GetRecent returned %d, want 2", len(recent))
 	}
-	// Expected order: fact3 (newest), fact1Updated (2nd), fact2 (3rd).
-	// Timestamps:
-	// fact1Updated: now+2s
-	// fact3: now+3s
-	// fact2: now+1s
-	// So recent should be fact3, fact1Updated
 
-	// Sort by Time Desc for checking
 	sort.Slice(recent, func(i, j int) bool {
 		return recent[i].Timestamp.After(recent[j].Timestamp)
 	})
@@ -132,17 +119,14 @@ func TestRedisFactStore_Workflow(t *testing.T) {
 		t.Errorf("Second recent should be v1, got %v", recent[1].Value)
 	}
 
-	// 6. SearchFuzzy
 	results, err := store.SearchFuzzy(ctx, []string{"User1"}, []string{"k1"})
 	if err != nil {
 		t.Fatalf("SearchFuzzy failed: %v", err)
 	}
 	if len(results) != 2 {
-		// Expect v1 (k1) and v1_new (k1)
 		t.Errorf("SearchFuzzy found %d facts, want 2", len(results))
 	}
 
-	// 7. Remove
 	deleted, err := store.Remove(ctx, "user1", func(f model.Fact) bool {
 		return f.Key == "k1"
 	})

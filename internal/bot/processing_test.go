@@ -102,7 +102,6 @@ func TestProcessResponseClassifiesOnlyCurrentPost(t *testing.T) {
 }
 
 func TestPrepareConversation(t *testing.T) {
-	// Setup
 	cfg := &config.Config{BotUsername: "bot"}
 
 	b := &Bot{
@@ -110,7 +109,6 @@ func TestPrepareConversation(t *testing.T) {
 		mastodonClient: nil,
 	}
 
-	// Case 1: Simple message, no parent, no URLs
 	ctx := context.Background()
 	conv := &model.Conversation{Messages: []model.Message{}}
 	notif := &gomastodon.Notification{

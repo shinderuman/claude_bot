@@ -93,9 +93,7 @@ func (c *Client) requestModel(systemPrompt string, maxTokens int64, temperature 
 	return &requestModel
 }
 
-// ChatSession(SendMessage)は内部でストリーミングAPIを使用し、
-// 現行モデルではレスポンスのパースに失敗するため使用しない。
-// 履歴はプロンプトへの埋め込みで送信する。
+// ChatSession.SendMessage uses a streaming API whose responses failed to parse with these models.
 func (c *Client) buildRequestParts(messages []model.Message, images []model.Image) ([]genai.Part, error) {
 	parts, err := c.buildCurrentMessageParts(messages, images)
 	if err != nil {
@@ -125,7 +123,6 @@ func buildHistoryPrompt(messages []model.Message) string {
 }
 
 func configureModel(requestModel *genai.GenerativeModel, systemPrompt string, maxTokens int64, temperature float64) {
-	// システムプロンプトの設定
 	if systemPrompt != "" {
 		requestModel.SystemInstruction = &genai.Content{
 			Parts: []genai.Part{genai.Text(systemPrompt)},
@@ -134,11 +131,9 @@ func configureModel(requestModel *genai.GenerativeModel, systemPrompt string, ma
 		requestModel.SystemInstruction = nil
 	}
 
-	// トークン上限の設定
 	if maxTokens > 0 {
 		requestModel.SetMaxOutputTokens(int32(maxTokens))
 	}
-	// Temperatureの設定
 	requestModel.SetTemperature(float32(temperature))
 
 	requestModel.SafetySettings = []*genai.SafetySetting{
@@ -162,7 +157,6 @@ func configureModel(requestModel *genai.GenerativeModel, systemPrompt string, ma
 }
 
 func (c *Client) buildCurrentMessageParts(messages []model.Message, images []model.Image) ([]genai.Part, error) {
-	// 最新メッセージの取得
 	if len(messages) == 0 {
 		return nil, fmt.Errorf("メッセージが空です")
 	}
@@ -172,17 +166,14 @@ func (c *Client) buildCurrentMessageParts(messages []model.Message, images []mod
 	var parts []genai.Part
 	parts = append(parts, genai.Text(lastMsg.Content))
 
-	// 画像の添付
 	if len(images) > 0 {
 		for _, img := range images {
-			// Base64デコード
 			data, err := base64.StdEncoding.DecodeString(img.Data)
 			if err != nil {
 				log.Printf("画像デコード警告: %v", err)
 				continue
 			}
 
-			// MIMEタイプ処理
 			parts = append(parts, genai.ImageData(img.MediaType, data))
 		}
 	}
@@ -215,7 +206,6 @@ func (c *Client) validateResponse(ctx context.Context, resp *genai.GenerateConte
 
 func (c *Client) IsRetryable(err error) bool {
 	if gerr, ok := err.(*googleapi.Error); ok {
-		// 429はリトライせず即座に失敗扱い（別途 IsRateLimited で判定）
 		return gerr.Code >= http.StatusInternalServerError
 	}
 	return false
@@ -228,7 +218,6 @@ func (c *Client) IsBadRequest(err error) bool {
 	return false
 }
 
-// IsRateLimited はエラーが429 Too Many Requestsかを判定する
 func (c *Client) IsRateLimited(err error) bool {
 	if gerr, ok := err.(*googleapi.Error); ok {
 		return gerr.Code == http.StatusTooManyRequests

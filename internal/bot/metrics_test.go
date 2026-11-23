@@ -8,20 +8,16 @@ import (
 
 func TestCalculateFactStats(t *testing.T) {
 	facts := []model.Fact{
-		// Source: home
 		{SourceType: "home", Target: "__general__"},
 		{SourceType: "home", Target: "assistant"},
 		{SourceType: "home", Target: "bot1"},
 
-		// Source: federated
 		{SourceType: "federated", Target: "userA"},
 		{SourceType: "federated", Target: "userB"},
-		{SourceType: "federated", Target: "userA"}, // userA count = 2
+		{SourceType: "federated", Target: "userA"},
 
-		// Source: archive
 		{SourceType: "archive", Target: "userC"},
 
-		// Unknown source
 		{SourceType: "", Target: "userD"},
 	}
 
@@ -38,7 +34,7 @@ func TestCalculateFactStats(t *testing.T) {
 		"general":   1,
 		"assistant": 1,
 		"bot1":      1,
-		"users":     5, // userA(2) + userB(1) + userC(1) + userD(1)
+		"users":     5,
 	}
 
 	stats := calculateFactStats(facts, botUsernames)

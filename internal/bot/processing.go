@@ -18,7 +18,6 @@ import (
 	"golang.org/x/net/html"
 )
 
-// analysisURLCandidates collects full links from the current post, including links displayed in shortened form.
 func analysisURLCandidates(content string) []string {
 	doc, err := html.Parse(strings.NewReader(content))
 	if err != nil {
@@ -71,7 +70,6 @@ func analysisStatusID(link string) string {
 	return util.ExtractIDFromURL(statusPath)
 }
 
-// prepareConversation handles context enrichment (parent posts, URL data) and saves the user message
 func (b *Bot) prepareConversation(ctx context.Context, conversation *model.Conversation, notification *gomastodon.Notification, userMessage, statusID string) string {
 	if updatedMsg, enriched := b.enrichContextWithParent(ctx, conversation, notification, userMessage); enriched {
 		userMessage = updatedMsg
@@ -87,7 +85,6 @@ func (b *Bot) prepareConversation(ctx context.Context, conversation *model.Conve
 	return userMessage
 }
 
-// enrichContextWithParent retrieves parent post content if available and updates the message
 func (b *Bot) enrichContextWithParent(ctx context.Context, conversation *model.Conversation, notification *gomastodon.Notification, userMessage string) (string, bool) {
 	if notification.Status.InReplyToID == nil || len(conversation.Messages) > 0 {
 		return userMessage, false
@@ -120,7 +117,6 @@ func (b *Bot) enrichContextWithParent(ctx context.Context, conversation *model.C
 	return userMessage, false
 }
 
-// triggerFactExtraction initiates async fact extraction processes
 func (b *Bot) triggerFactExtraction(ctx context.Context, notification *gomastodon.Notification, userMessage, statusID string) {
 	displayName := notification.Account.DisplayName
 	if displayName == "" {
@@ -155,7 +151,6 @@ func (b *Bot) triggerFactExtraction(ctx context.Context, notification *gomastodo
 	b.extractFactsFromMentionURLs(ctx, notification, displayName)
 }
 
-// extractFactsFromMentionURLs extracts facts from URLs in the mention
 func (b *Bot) extractFactsFromMentionURLs(ctx context.Context, notification *gomastodon.Notification, displayName string) {
 	content := string(notification.Status.Content)
 	urls := urlRegex.FindAllString(content, -1)
@@ -167,12 +162,10 @@ func (b *Bot) extractFactsFromMentionURLs(ctx context.Context, notification *gom
 	author := notification.Account.Acct
 
 	for _, u := range urls {
-		// 基本的なURLバリデーション（スキーム、IPアドレスチェック）
 		if err := fetcher.IsValidURLBasic(u); err != nil {
 			continue
 		}
 
-		// ノイズURL（プロフィールURL、ハッシュタグURLなど）をフィルタリング
 		if fetcher.IsNoiseURL(u) {
 			continue
 		}
@@ -185,7 +178,6 @@ func (b *Bot) extractFactsFromMentionURLs(ctx context.Context, notification *gom
 
 			urlContent := fetcher.FormatPageContent(meta)
 
-			// URLコンテンツからファクト抽出（リダイレクト後の最終URLを使用）
 			baseFact := model.Fact{
 				SourceType:         model.SourceTypeMentionURL,
 				SourceURL:          meta.URL,
@@ -198,28 +190,22 @@ func (b *Bot) extractFactsFromMentionURLs(ctx context.Context, notification *gom
 }
 
 func (b *Bot) extractURLContext(ctx context.Context, notification *gomastodon.Notification, content string) string {
-	// 1. Mastodon Card (優先)
 	if notification.Status.Card != nil {
 		return llm.BuildCardPrompt(notification.Status.Card)
 	}
 
-	// 2. 独自取得 (Cardがない場合)
 	urls := urlRegex.FindAllString(content, -1)
 	if len(urls) == 0 {
 		return ""
 	}
 
-	// 最初の有効なURLのみ処理
 	for _, u := range urls {
-		// URLの末尾に日本語などが付着する場合があるため、クリーニング
 		u = util.CleanURL(u)
 
-		// 基本的なURLバリデーション（スキーム、IPアドレスチェック）
 		if err := fetcher.IsValidURLBasic(u); err != nil {
 			continue
 		}
 
-		// ノイズURL（プロフィールURL、ハッシュタグURLなど）をフィルタリング
 		if fetcher.IsNoiseURL(u) {
 			continue
 		}

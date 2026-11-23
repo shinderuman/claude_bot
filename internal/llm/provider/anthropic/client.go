@@ -55,13 +55,11 @@ func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, 
 		}
 	}
 
-	// Payloadキャプチャの準備
 	pc := &provider.PayloadCapture{}
 	ctx = context.WithValue(ctx, provider.CaptureKey, pc)
 
 	msg, err := c.client.Messages.New(ctx, params)
 
-	// キャプチャされたPayloadを取得
 	payload := string(pc.Body)
 
 	if err != nil {
@@ -75,7 +73,6 @@ func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, 
 func (c *Client) IsRetryable(err error) bool {
 	var aerr *anthropic.Error
 	if errors.As(err, &aerr) {
-		// 429はリトライせず即座に失敗扱い（別途 IsRateLimited で判定）
 		return aerr.StatusCode >= http.StatusInternalServerError
 	}
 	return false
@@ -89,7 +86,6 @@ func (c *Client) IsBadRequest(err error) bool {
 	return false
 }
 
-// IsRateLimited はエラーが429 Too Many Requestsかを判定する
 func (c *Client) IsRateLimited(err error) bool {
 	var aerr *anthropic.Error
 	if errors.As(err, &aerr) {
@@ -113,7 +109,6 @@ func convertMessages(messages []model.Message, currentImages []model.Image) []an
 		if msg.Role == model.RoleAssistant {
 			result[i] = anthropic.NewAssistantMessage(anthropic.NewTextBlock(msg.Content))
 		} else {
-			// 最後のユーザーメッセージに画像を添付
 			if i == len(messages)-1 && len(currentImages) > 0 {
 				content := []anthropic.ContentBlockParamUnion{
 					anthropic.NewTextBlock(msg.Content),

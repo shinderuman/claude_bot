@@ -22,7 +22,6 @@ func (c *Client) ExtractUserMessage(notification *gomastodon.Notification) strin
 	return content
 }
 
-// ExtractContentFromStatus extracts clean text content and images from a status
 func (c *Client) ExtractContentFromStatus(status *gomastodon.Status) (string, []model.Image, error) {
 	content := stripHTML(string(status.Content))
 	words := strings.Fields(content)
@@ -70,7 +69,6 @@ func (c *Client) downloadImage(url string) (string, string, error) {
 		return "", "", err
 	}
 
-	// メディアタイプ判定
 	mimeType := http.DetectContentType(data)
 	if !strings.HasPrefix(mimeType, "image/") {
 		return "", "", fmt.Errorf("not an image: %s", mimeType)
@@ -90,7 +88,6 @@ func stripHTML(htmlStr string) string {
 	return buf.String()
 }
 
-// StripHTML exposes stripHTML as a public method
 func (c *Client) StripHTML(htmlStr string) string {
 	return stripHTML(htmlStr)
 }
@@ -116,7 +113,6 @@ func (c *Client) PostResponseWithSplit(ctx context.Context, inReplyToID, mention
 	var postedStatuses []*gomastodon.Status
 	currentReplyID := inReplyToID
 	for i, part := range parts {
-		// 投稿順序の保証のため待機
 		if i > 0 {
 			time.Sleep(SplitPostDelay)
 		}
@@ -137,9 +133,7 @@ func (c *Client) PostResponseWithSplit(ctx context.Context, inReplyToID, mention
 	return postedStatuses, nil
 }
 
-// PostResponseWithMedia posts a response with media attachment
 func (c *Client) PostResponseWithMedia(ctx context.Context, inReplyToID, mention, response, visibility, mediaPath string) (string, error) {
-	// Upload media
 	attachment, err := c.client.UploadMedia(ctx, mediaPath)
 	if err != nil {
 		log.Printf("メディアアップロードエラー: %v", err)
@@ -149,7 +143,6 @@ func (c *Client) PostResponseWithMedia(ctx context.Context, inReplyToID, mention
 		return "", err
 	}
 
-	// Post with media
 	fullResponse := mention + " " + response
 	toot := &gomastodon.Toot{
 		Status:      fullResponse,
@@ -183,7 +176,6 @@ func (c *Client) postReply(ctx context.Context, inReplyToID, content, visibility
 	return status, nil
 }
 
-// PostStatus posts a new status (not a reply)
 func (c *Client) PostStatus(ctx context.Context, content, visibility string) (*gomastodon.Status, error) {
 	limit := c.config.MaxPostChars - len([]rune(BotTag))
 	truncated := truncateText(content, limit) + BotTag

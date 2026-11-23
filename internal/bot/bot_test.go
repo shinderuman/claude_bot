@@ -11,15 +11,6 @@ import (
 	gomastodon "github.com/mattn/go-mastodon"
 )
 
-func TestClassifyIntent_RelativeDates(t *testing.T) {
-	// 実際のLLMをモックする必要があるが、ここではプロンプトの生成ロジックと
-	// 想定されるJSON出力に対するパースロジックをテストするのではなく、
-	// 実際のLLMの挙動をシミュレートする単体テストは難しい。
-	// 代わりに、bot.goのclassifyIntentが返す値を想定したロジックテストを行うべきだが、
-	// ここでは意図判定のプロンプトが適切かどうかが問題。
-	// プロンプトの修正が必要。
-}
-
 func TestShouldHandleBroadcastCommand(t *testing.T) {
 	tests := []struct {
 		name             string
@@ -78,12 +69,9 @@ func TestShouldHandleBroadcastCommand(t *testing.T) {
 			}
 			bot := &Bot{
 				config:         cfg,
-				mastodonClient: &mastodon.Client{}, // Mock client (StripHTML is safe to call)
+				mastodonClient: &mastodon.Client{},
 			}
 
-			// Mock a status with HTML content if needed, but StripHTML handles plain text too
-			// or we simulate what ExtractUserMessage/internal logic sees.
-			// Bot.shouldHandleBroadcastCommand takes a status.
 			status := &gomastodon.Status{
 				Content: tt.content,
 			}
@@ -268,7 +256,7 @@ func TestResolveBroadcastRootID(t *testing.T) {
 			session := &model.Session{
 				Conversations: tt.conversations,
 			}
-			bot := &Bot{} // Stateless method, empty bot is fine
+			bot := &Bot{}
 
 			gotRootID := bot.resolveBroadcastRootID(session, tt.prevStatusID, tt.checkTime)
 			if gotRootID != tt.wantRootID {

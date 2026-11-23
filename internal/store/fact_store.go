@@ -40,7 +40,6 @@ func InitializeFactStore(cfg *config.Config, slackClient *slack.Client) *FactSto
 	return NewFactStore(storage, slackClient, finalPath)
 }
 
-// NewFactStore creates a new FactStore
 func NewFactStore(storage FactStorage, slackClient *slack.Client, filePath string) *FactStore {
 	return &FactStore{
 		storage:      storage,
@@ -68,14 +67,12 @@ func (s *FactStore) saveAsync() {
 		return
 	}
 
-	// Serialize
 	data, err := json.MarshalIndent(facts, "", "  ")
 	if err != nil {
 		log.Printf("Backup failed: marshal error: %v", err)
 		return
 	}
 
-	// Write Atomically
 	tmpFile := s.saveFilePath + ".tmp"
 	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
 		log.Printf("Backup failed: write error: %v", err)
@@ -87,7 +84,6 @@ func (s *FactStore) saveAsync() {
 	}
 }
 
-// GetFactsByTarget gets all facts for a specific target
 func (s *FactStore) GetFactsByTarget(target string) []model.Fact {
 	facts, err := s.storage.GetByTarget(context.Background(), target)
 	if err != nil {
@@ -97,7 +93,6 @@ func (s *FactStore) GetFactsByTarget(target string) []model.Fact {
 	return facts
 }
 
-// GetAllFacts returns a copy of all facts in the store (thread-safe)
 func (s *FactStore) GetAllFacts() []model.Fact {
 	facts, err := s.storage.GetAllFacts(context.Background())
 	if err != nil {
@@ -107,7 +102,6 @@ func (s *FactStore) GetAllFacts() []model.Fact {
 	return facts
 }
 
-// RemoveFactsByKey removes all facts matching the target and key
 func (s *FactStore) RemoveFactsByKey(target, key string) int {
 	count, err := s.storage.Remove(context.Background(), target, func(f model.Fact) bool {
 		return f.Key == key
@@ -122,7 +116,6 @@ func (s *FactStore) RemoveFactsByKey(target, key string) int {
 	return count
 }
 
-// Methods for maintenance.go and query.go support
 func (s *FactStore) GetStorage() FactStorage {
 	return s.storage
 }

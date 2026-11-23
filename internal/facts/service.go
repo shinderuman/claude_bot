@@ -14,26 +14,21 @@ import (
 )
 
 const (
-	// Validation
 	MinFactValueLength    = 2
 	BlockedBotFactKeyword = "bot"
 
-	// Archive
 	ArchiveFactThreshold = 50
 	ArchiveMinFactCount  = 10
 	ArchiveAgeDays       = 30
 	FactArchiveBatchSize = 200
 
-	// Archive Reasons
 	ArchiveReasonThresholdMet = "割り当て件数が閾値を超えていたため"
 	ArchiveReasonOldData      = "古いデータが含まれており、かつ最低件数を満たしたため"
 	ArchiveReasonInsufficient = "条件を満たさなかったため"
 
-	// Query
 	RecentFactsCount = 5
 )
 
-// LLMClient defines the interface for LLM operations
 type LLMClient interface {
 	GenerateText(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, currentImages []model.Image, temperature float64) string
 }
@@ -58,7 +53,6 @@ func NewFactService(cfg *config.Config, store *store.FactStore, llm LLMClient, m
 	}
 }
 
-// formatTarget formats the Target field with optional TargetUserName
 func formatTarget(fact model.Fact) string {
 	if fact.TargetUserName != "" {
 		return fmt.Sprintf("Target=%s(%s)", fact.Target, fact.TargetUserName)
@@ -66,7 +60,6 @@ func formatTarget(fact model.Fact) string {
 	return fmt.Sprintf("Target=%s", fact.Target)
 }
 
-// formatAuthor formats the Author or PostAuthor field based on source type
 func formatAuthor(fact model.Fact) string {
 	switch fact.SourceType {
 	case model.SourceTypeMention, model.SourceTypeTest:

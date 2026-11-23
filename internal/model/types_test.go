@@ -56,7 +56,6 @@ func TestStringArray_UnmarshalJSON(t *testing.T) {
 }
 
 func TestSearchQuery_Unmarshal(t *testing.T) {
-	// Test actual struct usage
 	jsonStr := `{
 		"target_candidates": "one_target",
 		"keys": ["key1", "key2"]
