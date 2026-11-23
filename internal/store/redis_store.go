@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -87,6 +88,37 @@ func (s *RedisFactStore) Add(ctx context.Context, fact model.Fact) error {
 	}
 
 	return nil
+}
+
+func (s *RedisFactStore) DeleteAllFacts(ctx context.Context) (int, error) {
+	escapeGlob := strings.NewReplacer("\\", "\\\\", "*", "\\*", "?", "\\?", "[", "\\[")
+	pattern := escapeGlob.Replace(s.prefix) + ":*"
+	var factKeys []string
+	var cursor uint64
+	for {
+		keys, nextCursor, err := s.client.Scan(ctx, cursor, pattern, 100).Result()
+		if err != nil {
+			return 0, fmt.Errorf("Scan failed: %w", err)
+		}
+		factKeys = append(factKeys, keys...)
+		if nextCursor == 0 {
+			break
+		}
+		cursor = nextCursor
+	}
+
+	if err := s.client.Del(ctx, s.prefix+TimelineKey, s.prefix+TargetsKey, s.prefix+":fact_hashes").Err(); err != nil {
+		return 0, fmt.Errorf("failed to delete Redis fact indexes: %w", err)
+	}
+	var deleted int
+	for batch := range slices.Chunk(factKeys, 100) {
+		count, err := s.client.Del(ctx, batch...).Result()
+		if err != nil {
+			return deleted, fmt.Errorf("failed to delete Redis fact keys: %w", err)
+		}
+		deleted += int(count)
+	}
+	return deleted, nil
 }
 
 func (s *RedisFactStore) GetByTarget(ctx context.Context, target string) ([]model.Fact, error) {

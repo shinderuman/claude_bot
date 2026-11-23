@@ -27,6 +27,30 @@ func setupRedisStore(t *testing.T) (*RedisFactStore, *miniredis.Miniredis) {
 	return store, mr
 }
 
+func TestRedisFactStoreDeleteAllFacts(t *testing.T) {
+	store, server := setupRedisStore(t)
+	defer store.Close()
+	defer server.Close()
+
+	store.prefix = "test*prefix"
+	const factKeyCount = 205
+	for i := range factKeyCount {
+		server.HSet(fmt.Sprintf("%s:user-%03d", store.prefix, i), "fact", "value")
+	}
+	server.Set(store.prefix+TimelineKey, "index")
+	server.Set(store.prefix+TargetsKey, "index")
+	server.Set(store.prefix+":fact_hashes", "legacy index")
+	server.Set("test_other_prefix:keep", "other namespace")
+
+	deleted, err := store.DeleteAllFacts(t.Context())
+	if err != nil || deleted != factKeyCount {
+		t.Fatalf("DeleteAllFacts() = %d, %v, want %d, nil", deleted, err, factKeyCount)
+	}
+	if keys := server.Keys(); len(keys) != 1 || keys[0] != "test_other_prefix:keep" {
+		t.Fatalf("remaining Redis keys = %q, want only the other namespace", keys)
+	}
+}
+
 func TestRedisFactStore_Workflow(t *testing.T) {
 	store, mr := setupRedisStore(t)
 	defer store.Close()

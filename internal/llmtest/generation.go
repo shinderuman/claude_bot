@@ -1,0 +1,166 @@
+package llmtest
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+
+	"claude_bot/internal/config"
+	"claude_bot/internal/llm"
+	"claude_bot/internal/model"
+	"claude_bot/internal/slack"
+	"claude_bot/internal/store"
+)
+
+func runSummary(cfg *config.Config, client *llm.Client, newMessages, existingSummary string) error {
+	log.Printf("=== 要約生成テスト ===")
+	log.Println()
+
+	if cfg.AnthropicAuthToken == "" {
+		return errMissingAnthropicToken
+	}
+
+	summaryPrompt := llm.BuildSummaryPrompt(newMessages, existingSummary)
+
+	log.Println("--- 要約プロンプト ---")
+	log.Println(summaryPrompt)
+	log.Println("--------------------")
+	log.Println()
+
+	messages := []model.Message{{Role: model.RoleUser, Content: summaryPrompt}}
+	ctx := context.Background()
+	summary := client.GenerateSummary(ctx, messages, existingSummary)
+
+	if summary == "" {
+		return errors.New("エラー: 要約生成に失敗しました")
+	}
+
+	log.Println("成功: 要約を生成しました")
+	log.Println()
+	log.Println("--- 生成された要約 ---")
+	log.Println(summary)
+	log.Println("---------------------")
+	log.Printf("要約の長さ: %d文字", len(summary))
+	return nil
+}
+
+func runFactExtraction(cfg *config.Config, client *llm.Client, message string) error {
+	log.Printf("=== 事実抽出テスト ===")
+	log.Printf("テストメッセージ: %s", message)
+	log.Println()
+
+	if cfg.AnthropicAuthToken == "" {
+		return errMissingAnthropicToken
+	}
+
+	authorUserName := "testuser"
+	author := "testuser@example.com"
+	prompt := llm.BuildFactExtractionPrompt(authorUserName, author, message, "test_bot", false)
+
+	log.Println("--- 事実抽出プロンプト ---")
+	log.Println(prompt)
+	log.Println("------------------------")
+	log.Println()
+
+	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
+	ctx := context.Background()
+	response := client.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, cfg.MaxResponseTokens, nil, llm.TemperatureSystem)
+
+	if response == "" {
+		return errors.New("エラー: 事実抽出に失敗しました")
+	}
+
+	log.Println("成功: 事実を抽出しました")
+	log.Println()
+	log.Println("--- 抽出された事実 (JSON) ---")
+	log.Println(response)
+	log.Println("----------------------------")
+	return nil
+}
+
+func runAutoPost(cfg *config.Config, client *llm.Client) error {
+	log.Printf("=== 自動投稿テスト ===")
+	log.Println()
+
+	if cfg.AnthropicAuthToken == "" {
+		return errMissingAnthropicToken
+	}
+
+	_ = store.InitializeHistory(cfg)
+	slackClient := slack.NewClient(cfg.SlackBotToken, cfg.SlackChannelID, cfg.SlackErrorChannelID, cfg.BotUsername)
+	factStore := store.InitializeFactStore(cfg, slackClient)
+
+	facts, err := factStore.GetRandomGeneralFactBundle(5)
+	if err != nil {
+		return fmt.Errorf("ファクト取得エラー: %w", err)
+	}
+	if len(facts) == 0 {
+		return errors.New("エラー: 一般知識のファクトが見つかりません。facts.jsonを確認してください。")
+	}
+
+	log.Printf("取得したファクト数: %d件", len(facts))
+	log.Printf("情報源: %s", facts[0].TargetUserName)
+	for _, f := range facts {
+		log.Printf("- %s: %v", f.Key, f.Value)
+	}
+	log.Println()
+
+	prompt := llm.BuildAutoPostPrompt(facts)
+	log.Println("--- 生成されたプロンプト ---")
+	log.Println(prompt)
+	log.Println("--------------------------")
+	log.Println()
+
+	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
+	response, err := generateInCharacter(cfg, client, messages, int64(cfg.MaxPostChars))
+	if err != nil {
+		return err
+	}
+
+	log.Println("成功: 自動投稿文を生成しました")
+	log.Println()
+	log.Println("--- 生成された投稿文 ---")
+	log.Println(response)
+	log.Println("----------------------")
+	log.Printf("文字数: %d文字", len([]rune(response)))
+	return nil
+}
+
+func runErrorMessageGeneration(cfg *config.Config, client *llm.Client, errorDetail string) error {
+	log.Printf("=== エラーメッセージ生成テスト ===")
+	log.Printf("エラー詳細: %s", errorDetail)
+	log.Println()
+
+	if cfg.AnthropicAuthToken == "" {
+		return errMissingAnthropicToken
+	}
+
+	prompt := llm.BuildErrorMessagePrompt(errorDetail)
+	log.Println("--- 生成されたプロンプト ---")
+	log.Println(prompt)
+	log.Println("--------------------------")
+	log.Println()
+
+	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
+	response, err := generateInCharacter(cfg, client, messages, cfg.MaxResponseTokens)
+	if err != nil {
+		return err
+	}
+
+	log.Println("成功: エラーメッセージを生成しました")
+	log.Println()
+	log.Println("--- 生成されたメッセージ ---")
+	log.Println(response)
+	log.Println("--------------------------")
+	return nil
+}
+
+func generateInCharacter(cfg *config.Config, client *llm.Client, messages []model.Message, maxTokens int64) (string, error) {
+	systemPrompt := llm.BuildSystemPrompt(cfg, "", "", "", true, cfg.CharacterPriority)
+	response := client.GenerateText(context.Background(), messages, systemPrompt, maxTokens, nil, cfg.LLMTemperature)
+	if response == "" {
+		return "", errEmptyClaudeReply
+	}
+	return response, nil
+}

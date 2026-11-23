@@ -1,33 +1,14 @@
 package main
 
 import (
-	"context"
 	"log"
 	"os"
-	"os/signal"
-	"syscall"
-
-	"flag"
 
 	"claude_bot/internal/bot"
-	"claude_bot/internal/config"
 )
 
 func main() {
-	envFile := flag.String("env", "", "Path to .env file (default: .env)")
-	flag.Parse()
-
-	config.LoadEnvironment(*envFile)
-	cfg := config.LoadConfig()
-
-	b := bot.NewBot(cfg)
-
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
-
-	log.Println("Botを開始します...")
-	if err := b.Run(ctx); err != nil && err != context.Canceled {
-		log.Printf("Bot停止エラー: %v", err)
+	if err := bot.RunCommand(os.Args[1:]); err != nil {
+		log.Print(err)
 	}
-	log.Println("Botを停止しました (Shutdown signal received)")
 }
