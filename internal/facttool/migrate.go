@@ -8,19 +8,23 @@ import (
 	"os"
 	"time"
 
+	"claude_bot/internal/cli"
 	"claude_bot/internal/config"
 	"claude_bot/internal/model"
 	"claude_bot/internal/store"
+	"claude_bot/internal/util"
 )
 
 func Migrate(args []string) error {
-	flags := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-	envFile := flags.String("env", "", "Path to .env file")
+	flags := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+	envFile := flags.String("env", "", "Path to the instance environment file (required)")
 	factsFile := flags.String("facts", "", "Path to facts.json (required)")
-	if err := flags.Parse(args); err != nil {
+	if err := cli.Parse(flags, args); err != nil {
 		return err
 	}
-	config.LoadEnvironment(*envFile)
+	if err := config.LoadEnvironment(*envFile); err != nil {
+		return err
+	}
 
 	redisURL := os.Getenv("REDIS_URL")
 	if redisURL == "" {
@@ -35,7 +39,7 @@ func Migrate(args []string) error {
 	}
 
 	log.Printf("Loading facts from %s...", *factsFile)
-	facts, err := ReadFile[model.Fact](*factsFile)
+	facts, err := util.ReadJSONArray[model.Fact](*factsFile)
 	if err != nil {
 		return err
 	}
@@ -47,27 +51,11 @@ func Migrate(args []string) error {
 	}
 	defer redisStore.Close()
 
-	ctx := context.Background()
-	log.Printf("Cleaning up existing Redis data (prefix: %s)...", prefix)
-	deleted, err := redisStore.DeleteAllFacts(ctx)
-	if err != nil {
+	log.Printf("Migrating facts to Redis (prefix: %s)...", prefix)
+	start := time.Now()
+	if err := redisStore.ReplaceAllFacts(context.Background(), facts); err != nil {
 		return err
 	}
-	log.Printf("Deleted %d fact hash keys and global sets.", deleted)
-
-	log.Println("Migrating facts to Redis...")
-	start := time.Now()
-	successCount := 0
-	for i, fact := range facts {
-		if i > 0 && i%500 == 0 {
-			log.Printf("Processed %d/%d facts...", i, len(facts))
-		}
-		if err := redisStore.Add(ctx, fact); err != nil {
-			log.Printf("Failed to add fact %d: %v", i, err)
-		} else {
-			successCount++
-		}
-	}
-	log.Printf("Migration completed in %v. Success: %d/%d.", time.Since(start), successCount, len(facts))
+	log.Printf("Migration completed in %v. Success: %d/%d.", time.Since(start), len(facts), len(facts))
 	return nil
 }

@@ -2,10 +2,21 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
+
+	"claude_bot/internal/llm/provider"
 )
+
+type ErrorNotifierFunc func(message, details string)
+
+var errorNotifier ErrorNotifierFunc
+
+func SetErrorNotifier(notifier ErrorNotifierFunc) {
+	errorNotifier = notifier
+}
 
 func (c *Client) reportGenerationError(err error, payload string) {
 	log.Printf("LLM生成エラー (最終): %v", err)
@@ -53,23 +64,31 @@ func (c *Client) executeWithRetry(ctx context.Context, operation func() (string,
 	var payload string
 	var err error
 	maxRetries := c.config.LLMMaxRetries
-	baseDelay := 1 * time.Second
+	backoff := time.Second
 
 	for i := 0; i <= maxRetries; i++ {
+		if err := ctx.Err(); err != nil {
+			return "", payload, err
+		}
 		content, payload, err = operation()
 		if err == nil {
 			return content, payload, nil
 		}
 
-		isRetryable := c.provider.IsRetryable(err)
+		short := errors.Is(err, provider.ErrResponseTooShort)
+		isRetryable := short || c.provider.IsRetryable(err)
 
 		if !isRetryable {
 			return "", payload, err
 		}
 
 		if i < maxRetries {
-			delay := baseDelay * (1 << i)
-			log.Printf("LLM生成エラー (5xx) - リトライ %d/%d 待機: %v. エラー: %v", i+1, maxRetries, delay, err)
+			delay := backoff
+			if short {
+				delay = min(10*backoff, time.Minute)
+			}
+			backoff = min(2*backoff, time.Minute)
+			log.Printf("LLM生成エラー - リトライ %d/%d 待機: %v. エラー: %v", i+1, maxRetries, delay, err)
 
 			select {
 			case <-time.After(delay):

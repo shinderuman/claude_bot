@@ -2,10 +2,10 @@ package llm
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"claude_bot/internal/config"
@@ -13,6 +13,7 @@ import (
 	"claude_bot/internal/llm/provider/anthropic"
 	"claude_bot/internal/llm/provider/gemini"
 	"claude_bot/internal/model"
+	"claude_bot/internal/prompts"
 )
 
 const (
@@ -25,31 +26,35 @@ type Client struct {
 	config    *config.Config
 	semaphore chan struct{}
 
-	toolUseCheck    sync.Once
-	toolUseDisabled atomic.Bool
-
 	rateLimitMu        sync.Mutex
 	lastRateLimitNotif time.Time
 }
 
-func NewClient(cfg *config.Config) *Client {
+func NewClient(cfg *config.Config) (*Client, error) {
+	if cfg.LLMMaxConcurrency <= 0 || cfg.LLMMaxRetries < 0 {
+		return nil, fmt.Errorf("LLM_MAX_CONCURRENCY は1以上、LLM_MAX_RETRIES は0以上を指定してください")
+	}
 	var p provider.Provider
+	var err error
 
 	switch cfg.LLMProvider {
 	case config.LLMProviderClaude:
 		p = anthropic.NewClient(cfg)
 	case config.LLMProviderGemini:
-		p = gemini.NewClient(cfg)
+		p, err = gemini.NewClient(cfg)
 	default:
-		log.Fatalf("エラー: 未知のプロバイダー '%s' が指定されました。'%s' または '%s' を指定してください。",
+		return nil, fmt.Errorf("エラー: 未知のプロバイダー '%s' が指定されました。'%s' または '%s' を指定してください。",
 			cfg.LLMProvider, config.LLMProviderClaude, config.LLMProviderGemini)
 	}
 
+	if err != nil {
+		return nil, err
+	}
 	return &Client{
 		provider:  p,
 		config:    cfg,
 		semaphore: make(chan struct{}, cfg.LLMMaxConcurrency),
-	}
+	}, nil
 }
 
 func (c *Client) GenerateResponse(ctx context.Context, session *model.Session, conversation *model.Conversation, relevantFacts, botProfile string, currentImages []model.Image) string {
@@ -57,13 +62,13 @@ func (c *Client) GenerateResponse(ctx context.Context, session *model.Session, c
 	if session != nil {
 		sessionSummary = session.Summary
 	}
-	systemPrompt := BuildSystemPrompt(c.config, sessionSummary, relevantFacts, botProfile, true, c.config.CharacterPriority)
+	systemPrompt := prompts.BuildSystemPrompt(c.config, sessionSummary, relevantFacts, botProfile, true, c.config.CharacterPriority)
 
 	return c.GenerateText(ctx, conversation.Messages, systemPrompt, c.config.MaxResponseTokens, currentImages, c.config.LLMTemperature)
 }
 
 func (c *Client) GenerateSummary(ctx context.Context, messages []model.Message, summary string) string {
-	systemPrompt := BuildSystemPrompt(c.config, summary, "", "", false, 0.0)
+	systemPrompt := prompts.BuildSystemPrompt(c.config, summary, "", "", false, 0.0)
 	return c.GenerateText(ctx, messages, systemPrompt, c.config.MaxSummaryTokens, nil, TemperatureSystem)
 }
 
@@ -76,30 +81,25 @@ func (c *Client) GenerateText(ctx context.Context, messages []model.Message, sys
 		return ""
 	}
 
+	msgs, sysPrompt := c.adjustForGemma(messages, systemPrompt)
+	schema := structuredOutputSchema(systemPrompt)
 	content, payload, err := c.executeWithRetry(ctx, func() (string, string, error) {
-		msgs, sysPrompt := c.adjustForGemma(messages, systemPrompt)
-		if schema := structuredOutputSchema(systemPrompt); schema != nil && !c.toolUseDisabled.Load() {
-			var structuredContent, structuredPayload string
-			var structuredErr error
-			attempted := false
-			generateStructured := func() {
-				attempted = true
-				structuredContent, structuredPayload, structuredErr = c.provider.GenerateStructuredContent(ctx, msgs, sysPrompt, maxTokens, currentImages, temperature, schema)
-				if structuredErr != nil && c.toolUseDisabled.CompareAndSwap(false, true) {
-					log.Printf("Function Call利用不可、以降は通常呼び出しを使用: %v", structuredErr)
-				}
-			}
-			c.toolUseCheck.Do(generateStructured)
-			if !attempted && !c.toolUseDisabled.Load() {
-				generateStructured()
-			}
-			if attempted && structuredErr == nil {
-				return structuredContent, structuredPayload, nil
-			}
+		if schema == nil {
+			return c.provider.GenerateContent(ctx, msgs, sysPrompt, maxTokens, currentImages, temperature)
 		}
-		return c.provider.GenerateContent(ctx, msgs, sysPrompt, maxTokens, currentImages, temperature)
-	})
 
+		var content, payload string
+		var err error
+		if c.provider.SupportsStructuredOutput() {
+			content, payload, err = c.provider.GenerateStructuredContent(ctx, msgs, sysPrompt, maxTokens, currentImages, temperature, schema)
+		} else {
+			content, payload, err = c.provider.GenerateContent(ctx, msgs, sysPrompt, maxTokens, currentImages, temperature)
+		}
+		if err == nil && !schema.Accepts(content) {
+			return "", payload, provider.ErrInvalidStructuredOutput
+		}
+		return content, payload, err
+	})
 	if err != nil {
 		c.reportGenerationError(err, payload)
 		return ""
@@ -114,7 +114,7 @@ func (c *Client) adjustForGemma(messages []model.Message, systemPrompt string) (
 
 	newMessages := make([]model.Message, len(messages))
 	copy(newMessages, messages)
-	newMessages[0].Content = BuildGemmaWrapperPrompt(systemPrompt, messages[0].Content)
+	newMessages[0].Content = prompts.BuildGemmaWrapperPrompt(systemPrompt, messages[0].Content)
 	return newMessages, ""
 }
 

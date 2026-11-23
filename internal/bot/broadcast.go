@@ -1,12 +1,14 @@
 package bot
 
 import (
-	"claude_bot/internal/model"
 	"context"
 	"log"
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
+
+	"claude_bot/internal/model"
 
 	gomastodon "github.com/mattn/go-mastodon"
 )
@@ -23,25 +25,13 @@ func (b *Bot) isBroadcastCommand(content string) bool {
 
 	cmd := b.config.BroadcastCommand
 
-	if !strings.HasPrefix(content, cmd) {
+	rest, found := strings.CutPrefix(content, cmd)
+	if !found {
 		return false
 	}
 
-	rest := content[len(cmd):]
-	if len(rest) == 0 {
-		return false
-	}
-
-	firstChar := rune(rest[0])
-	if !unicode.IsSpace(firstChar) {
-		return false
-	}
-
-	if strings.TrimSpace(rest) == "" {
-		return false
-	}
-
-	return true
+	firstChar, _ := utf8.DecodeRuneInString(rest)
+	return unicode.IsSpace(firstChar) && strings.TrimSpace(rest) != ""
 }
 
 func (b *Bot) handleBroadcastCommand(ctx context.Context, status *gomastodon.Status, prevStatusID string) {
@@ -57,14 +47,11 @@ func (b *Bot) handleBroadcastCommand(ctx context.Context, status *gomastodon.Sta
 		Account: status.Account,
 	}
 
-	session := b.history.GetOrCreateSession(status.Account.Acct)
-	forcedRootID := b.resolveBroadcastRootID(session, prevStatusID, time.Now())
-
-	b.handleNotification(ctx, notification, forcedRootID)
+	b.handleNotification(ctx, notification, prevStatusID)
 }
 
 func (b *Bot) resolveBroadcastRootID(session *model.Session, prevStatusID string, now time.Time) string {
-	if len(session.Conversations) == 0 {
+	if prevStatusID == "" || len(session.Conversations) == 0 {
 		return ""
 	}
 
@@ -75,7 +62,7 @@ func (b *Bot) resolveBroadcastRootID(session *model.Session, prevStatusID string
 	}
 
 	lastUserStatusID := lastConv.GetLastUserStatusID()
-	if prevStatusID != "" && lastUserStatusID == prevStatusID {
+	if lastUserStatusID == prevStatusID {
 		return lastConv.RootStatusID
 	}
 

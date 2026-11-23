@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 
 	"claude_bot/internal/config"
 	"claude_bot/internal/mastodon"
@@ -40,6 +41,7 @@ type FactService struct {
 	mastodonClient *mastodon.Client
 	slackClient    *slack.Client
 	knownBots      map[string]struct{}
+	maintenanceMu  sync.Mutex
 }
 
 func NewFactService(cfg *config.Config, store *store.FactStore, llm LLMClient, mastodon *mastodon.Client, slack *slack.Client, knownBots map[string]struct{}) *FactService {
@@ -85,7 +87,10 @@ func (s *FactService) AddFact(fact model.Fact) {
 		return
 	}
 
-	s.factStore.AddFact(fact)
+	if err := s.factStore.AddFact(fact); err != nil {
+		log.Printf("ファクト保存エラー: %v", err)
+		return
+	}
 	s.logFactSaved(fact)
 }
 
@@ -95,25 +100,21 @@ func (s *FactService) isValidFact(fact model.Fact) bool {
 		return false
 	}
 
-	if fact.Value == nil {
-		return false
-	}
-	valStr := fmt.Sprint(fact.Value)
-	if strings.TrimSpace(valStr) == "" {
-		return false
-	}
-
-	if strings.TrimSpace(fact.Key) == "" {
+	if !hasFactKeyAndValue(fact) {
 		return false
 	}
 
 	if _, isBot := s.knownBots[fact.Target]; isBot {
-		if strings.Contains(strings.ToLower(valStr), BlockedBotFactKeyword) {
+		if strings.Contains(strings.ToLower(fact.Value), BlockedBotFactKeyword) {
 			return false
 		}
 	}
 
 	return true
+}
+
+func hasFactKeyAndValue(fact model.Fact) bool {
+	return strings.TrimSpace(fact.Key) != "" && strings.TrimSpace(fact.Value) != ""
 }
 
 func (s *FactService) logFactSaved(fact model.Fact) {

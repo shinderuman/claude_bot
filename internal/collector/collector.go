@@ -2,10 +2,7 @@ package collector
 
 import (
 	"context"
-	"fmt"
 	"log"
-	"net/url"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -13,20 +10,14 @@ import (
 	"claude_bot/internal/config"
 	"claude_bot/internal/discovery"
 	"claude_bot/internal/facts"
-	"claude_bot/internal/fetcher"
-	"claude_bot/internal/llm"
 	"claude_bot/internal/mastodon"
 	"claude_bot/internal/model"
-	"claude_bot/internal/store"
 
 	gomastodon "github.com/mattn/go-mastodon"
-	"mvdan.cc/xurls/v2"
 )
 
 type FactCollector struct {
 	config         *config.Config
-	factStore      *store.FactStore
-	llmClient      *llm.Client
 	mastodonClient *mastodon.Client
 	peerDiscoverer *discovery.PeerDiscoverer
 	factService    *facts.FactService
@@ -34,7 +25,6 @@ type FactCollector struct {
 	semaphore      chan struct{}
 	processedTimes []time.Time
 	processMu      sync.Mutex
-	urlExtractor   *regexp.Regexp
 
 	processedURLs sync.Map
 
@@ -46,55 +36,46 @@ const (
 	CacheCleanupInterval = 1 * time.Hour
 )
 
-func NewFactCollector(cfg *config.Config, factStore *store.FactStore, llmClient *llm.Client, mastodonClient *mastodon.Client, factService *facts.FactService) *FactCollector {
+func NewFactCollector(cfg *config.Config, mastodonClient *mastodon.Client, factService *facts.FactService) *FactCollector {
 	fc := &FactCollector{
 		config:         cfg,
-		factStore:      factStore,
-		llmClient:      llmClient,
 		mastodonClient: mastodonClient,
 		peerDiscoverer: discovery.NewPeerDiscoverer(mastodonClient, cfg.BotUsername),
 		factService:    factService,
-		semaphore:      make(chan struct{}, cfg.FactCollectionMaxWorkers),
+		semaphore:      make(chan struct{}, max(1, cfg.FactCollectionMaxWorkers)),
 		processedTimes: make([]time.Time, 0),
-		urlExtractor:   xurls.Strict(),
 	}
-
-	go fc.cleanupCacheLoop()
 
 	return fc
 }
 
-func (fc *FactCollector) cleanupCacheLoop() {
+func (fc *FactCollector) cleanupCacheLoop(ctx context.Context) {
 	ticker := time.NewTicker(CacheCleanupInterval)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		now := time.Now()
-		fc.cleanupExpiredSets(now)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			fc.cleanupExpiredSets(now)
+		}
 	}
 }
 
 func (fc *FactCollector) cleanupExpiredSets(now time.Time) {
-	fc.processedURLs.Range(func(key, value interface{}) bool {
-		if t, ok := value.(time.Time); ok {
-			if now.Sub(t) > CacheTTL {
-				fc.processedURLs.Delete(key)
+	for _, cache := range []*sync.Map{&fc.processedURLs, &fc.fediverseDomains} {
+		cache.Range(func(key, value any) bool {
+			if timestamp, ok := value.(time.Time); ok && now.Sub(timestamp) > CacheTTL {
+				cache.CompareAndDelete(key, value)
 			}
-		}
-		return true
-	})
-
-	fc.fediverseDomains.Range(func(key, value interface{}) bool {
-		if t, ok := value.(time.Time); ok {
-			if now.Sub(t) > CacheTTL {
-				fc.fediverseDomains.Delete(key)
-			}
-		}
-		return true
-	})
+			return true
+		})
+	}
 }
 
 func (fc *FactCollector) Start(ctx context.Context) {
+	go fc.cleanupCacheLoop(ctx)
 	if !fc.config.IsGlobalCollectionEnabled() {
 		log.Println("ファクト収集機能は無効です")
 		return
@@ -104,9 +85,12 @@ func (fc *FactCollector) Start(ctx context.Context) {
 		return
 	}
 
-	eventChan := make(chan gomastodon.Event, 100)
-	go fc.mastodonClient.StreamPublic(ctx, eventChan)
-	go fc.processEvents(ctx, eventChan)
+	events, err := fc.mastodonClient.StreamPublic(ctx)
+	if err != nil {
+		log.Printf("連合ストリーミング開始エラー: %v", err)
+		return
+	}
+	go fc.processEvents(ctx, events)
 }
 
 func (fc *FactCollector) DiscoverAndCollectPeerFacts(ctx context.Context) {
@@ -115,18 +99,28 @@ func (fc *FactCollector) DiscoverAndCollectPeerFacts(ctx context.Context) {
 	}
 }
 
-func (fc *FactCollector) ProcessHomeEvent(event *gomastodon.UpdateEvent) {
+func (fc *FactCollector) ProcessHomeEvent(ctx context.Context, event *gomastodon.UpdateEvent) {
 	if !fc.config.FactCollectionHome {
 		return
 	}
 
-	fc.handleStatus(context.Background(), event.Status, model.SourceTypeHome)
+	fc.handleStatus(ctx, event.Status, model.SourceTypeHome)
 }
 
 func (fc *FactCollector) processEvents(ctx context.Context, eventChan <-chan gomastodon.Event) {
+	var lastError time.Time
 	for event := range eventChan {
-		status := mastodon.ExtractStatusFromEvent(event)
-		fc.handleStatus(ctx, status, model.SourceTypeFederated)
+		if ctx.Err() != nil {
+			continue
+		}
+		if event, ok := event.(*gomastodon.ErrorEvent); ok {
+			if time.Since(lastError) >= time.Minute {
+				log.Printf("連合ストリーミングエラー: %v", event.Err)
+				lastError = time.Now()
+			}
+			continue
+		}
+		fc.handleStatus(ctx, mastodon.ExtractStatusFromEvent(event), model.SourceTypeFederated)
 	}
 }
 
@@ -172,170 +166,41 @@ func (fc *FactCollector) reserveHourlyProcessingSlot() bool {
 }
 
 func (fc *FactCollector) processStatus(ctx context.Context, status *gomastodon.Status, sourceType string, isPeer bool) {
-	sourceURL := string(status.URL)
-	postAuthor := string(status.Account.Acct)
-	postAuthorUserName := status.Account.DisplayName
-	if postAuthorUserName == "" {
-		postAuthorUserName = status.Account.Username
+	displayName := status.Account.DisplayName
+	if displayName == "" {
+		displayName = status.Account.Username
+	}
+	source := model.Fact{
+		Author: status.Account.Acct, AuthorUserName: displayName,
+		SourceType: sourceType, SourceURL: status.URL,
+		PostAuthor: status.Account.Acct, PostAuthorUserName: displayName,
 	}
 
 	if fc.config.FactCollectionFromPostContent || isPeer {
-		fc.extractFactsFromContent(ctx, status, sourceType, sourceURL, postAuthor, postAuthorUserName)
+		fc.extractFactsFromContent(ctx, status, source)
 	}
-
-	fc.extractFactsFromURLs(ctx, status, sourceType, postAuthor, postAuthorUserName)
+	fc.extractFactsFromURLs(ctx, status.Content, source)
 }
 
-func (fc *FactCollector) extractFactsFromContent(ctx context.Context, status *gomastodon.Status, sourceType, sourceURL, postAuthor, postAuthorUserName string) {
-	content, _, _ := fc.mastodonClient.ExtractContentFromStatus(status)
-
-	if content == "" {
+func (fc *FactCollector) extractFactsFromContent(ctx context.Context, status *gomastodon.Status, source model.Fact) {
+	content := mastodon.ExtractStatusText(status)
+	if content == "" || !fc.acquireWorker(ctx) {
 		return
 	}
-
-	fc.semaphore <- struct{}{}
 	defer func() { <-fc.semaphore }()
-
-	prompt := llm.BuildFactExtractionPrompt(postAuthorUserName, postAuthor, content, fc.config.BotUsername, false)
-	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
-
-	response := fc.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, fc.config.MaxFactTokens, nil, llm.TemperatureSystem)
-	if response == "" {
-		return
-	}
-
-	var extracted []model.Fact
-	jsonStr := llm.ExtractJSON(response)
-	if err := llm.UnmarshalWithRepair(jsonStr, &extracted, fmt.Sprintf("投稿: %s", postAuthor)); err != nil {
-		log.Printf("警告: 投稿からのファクト抽出JSONエラー(修復失敗): %v", err)
-		return
-	}
-
-	if len(extracted) == 0 {
-		return
-	}
-
-	for _, item := range extracted {
-		target := item.Target
-		targetUserName := item.TargetUserName
-		if target == "" {
-			target = postAuthor
-			targetUserName = postAuthorUserName
-		}
-
-		fact := model.Fact{
-			Target:             target,
-			TargetUserName:     targetUserName,
-			Author:             postAuthor,
-			AuthorUserName:     postAuthorUserName,
-			Key:                item.Key,
-			Value:              item.Value,
-			Timestamp:          time.Now(),
-			SourceType:         sourceType,
-			SourceURL:          sourceURL,
-			PostAuthor:         postAuthor,
-			PostAuthorUserName: postAuthorUserName,
-		}
-
-		fc.factService.AddFact(fact)
-	}
-
+	fc.factService.CollectPostFacts(ctx, content, source)
 }
 
-func (fc *FactCollector) extractFactsFromURLs(ctx context.Context, status *gomastodon.Status, sourceType, postAuthor, postAuthorUserName string) {
-	content := string(status.Content)
-	urls := fc.urlExtractor.FindAllString(content, -1)
-
-	authorDomain := fc.extractDomain(postAuthor)
-
-	for _, urlStr := range urls {
-		if _, loaded := fc.processedURLs.LoadOrStore(urlStr, time.Now()); loaded {
-			continue
-		}
-
-		if err := fetcher.IsValidURL(urlStr, fc.config.URLBlacklist.Get()); err != nil {
-			continue
-		}
-
-		urlDomain := fc.extractDomainFromURL(urlStr)
-		if urlDomain != "" && urlDomain == authorDomain {
-			continue
-		}
-
-		if urlDomain != "" && fc.isFediverseDomain(urlDomain) {
-			continue
-		}
-
-		if fc.isNoiseURL(urlStr) {
-			continue
-		}
-
-		go fc.processURL(ctx, urlStr, urlDomain, sourceType, postAuthor, postAuthorUserName)
+func (fc *FactCollector) acquireWorker(ctx context.Context) bool {
+	if ctx.Err() != nil {
+		return false
 	}
-}
-
-func (fc *FactCollector) processURL(ctx context.Context, urlStr, urlDomain, sourceType, postAuthor, postAuthorUserName string) {
-	fc.semaphore <- struct{}{}
-	defer func() { <-fc.semaphore }()
-
-	meta, err := fetcher.FetchPageContent(ctx, urlStr, fc.config.URLBlacklist.Get())
-	if err != nil {
-		return
+	select {
+	case <-ctx.Done():
+		return false
+	case fc.semaphore <- struct{}{}:
+		return true
 	}
-
-	urlContent := fetcher.FormatPageContent(meta)
-
-	prompt := llm.BuildURLContentFactExtractionPrompt(urlContent)
-	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
-
-	response := fc.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, fc.config.MaxFactTokens, nil, llm.TemperatureSystem)
-	if response == "" {
-		return
-	}
-
-	var extracted []model.Fact
-	jsonStr := llm.ExtractJSON(response)
-	if err := llm.UnmarshalWithRepair(jsonStr, &extracted, fmt.Sprintf("URL: %s", urlStr)); err != nil {
-		log.Printf("警告: URLからのファクト抽出JSONエラー(修復失敗): %v", err)
-		return
-	}
-
-	if len(extracted) == 0 {
-		return
-	}
-
-	for _, item := range extracted {
-		target := item.Target
-		targetUserName := item.TargetUserName
-		if target == "" {
-			target = model.GeneralTarget
-			targetUserName = "Web Knowledge"
-			if urlDomain != "" {
-				targetUserName = urlDomain
-			}
-		}
-
-		fact := model.Fact{
-			Target:             target,
-			TargetUserName:     targetUserName,
-			Author:             postAuthor,
-			AuthorUserName:     postAuthorUserName,
-			Key:                item.Key,
-			Value:              item.Value,
-			Timestamp:          time.Now(),
-			SourceType:         sourceType,
-			SourceURL:          meta.URL,
-			PostAuthor:         postAuthor,
-			PostAuthorUserName: postAuthorUserName,
-		}
-
-		fc.factService.AddFact(fact)
-	}
-
-}
-
-func (fc *FactCollector) isNoiseURL(urlStr string) bool {
-	return fetcher.IsNoiseURL(urlStr)
 }
 
 func (fc *FactCollector) extractDomain(acct string) string {
@@ -346,41 +211,8 @@ func (fc *FactCollector) extractDomain(acct string) string {
 	return ""
 }
 
-func (fc *FactCollector) extractDomainFromURL(urlStr string) string {
-	parsedURL, err := url.Parse(urlStr)
-	if err != nil {
-		return ""
-	}
-	return parsedURL.Host
-}
-
-func (fc *FactCollector) isFediverseDomain(domain string) bool {
-	if _, ok := fc.fediverseDomains.Load(domain); ok {
-		return true
-	}
-
-	if fetcher.IsFediverseServer(domain) {
-		fc.fediverseDomains.Store(domain, time.Now())
-		return true
-	}
-
-	return false
-}
-
 func (fc *FactCollector) isCollectableStatus(status *gomastodon.Status, isPeer bool) bool {
-	if status == nil {
-		return false
-	}
-
-	if !mastodon.ShouldCollectFactsFromStatus(status, isPeer) {
-		return false
-	}
-
-	if isPeer {
-		return true
-	}
-
-	return fc.config.IsGlobalCollectionEnabled()
+	return (isPeer || fc.config.IsGlobalCollectionEnabled()) && shouldCollectFactsFromStatus(status, isPeer)
 }
 
 func (fc *FactCollector) CollectColleagueFact(ctx context.Context, account *gomastodon.Account) {

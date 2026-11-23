@@ -5,83 +5,17 @@ import (
 	"testing"
 )
 
-func TestFactUnmarshal(t *testing.T) {
-	tests := []struct {
-		name     string
-		jsonStr  string
-		wantKey  string
-		wantType string
-	}{
-		{
-			name: "String Value",
-			jsonStr: `[
-				{
-					"target": "user1",
-					"key": "hobby",
-					"value": "coding"
-				}
-			]`,
-			wantKey:  "hobby",
-			wantType: "string",
-		},
-		{
-			name: "Boolean Value",
-			jsonStr: `[
-				{
-					"target": "user1",
-					"key": "is_active",
-					"value": true
-				}
-			]`,
-			wantKey:  "is_active",
-			wantType: "bool",
-		},
-		{
-			name: "Number Value",
-			jsonStr: `[
-				{
-					"target": "user1",
-					"key": "age",
-					"value": 25
-				}
-			]`,
-			wantKey:  "age",
-			wantType: "float64",
-		},
+func TestFactValueUsesString(t *testing.T) {
+	var fact Fact
+	if err := json.Unmarshal([]byte(`{"key":"hobby","value":"coding"}`), &fact); err != nil {
+		t.Fatal(err)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var facts []Fact
-			if err := json.Unmarshal([]byte(tt.jsonStr), &facts); err != nil {
-				t.Fatalf("Failed to unmarshal: %v", err)
-			}
-
-			if len(facts) != 1 {
-				t.Fatalf("Expected 1 fact, got %d", len(facts))
-			}
-
-			fact := facts[0]
-			if fact.Key != tt.wantKey {
-				t.Errorf("Expected key %s, got %s", tt.wantKey, fact.Key)
-			}
-
-			switch v := fact.Value.(type) {
-			case string:
-				if tt.wantType != "string" {
-					t.Errorf("Expected type %s, got string", tt.wantType)
-				}
-			case bool:
-				if tt.wantType != "bool" {
-					t.Errorf("Expected type %s, got bool", tt.wantType)
-				}
-			case float64:
-				if tt.wantType != "float64" {
-					t.Errorf("Expected type %s, got float64", tt.wantType)
-				}
-			default:
-				t.Errorf("Unexpected type: %T", v)
-			}
-		})
+	if fact.Value != "coding" {
+		t.Fatalf("value = %q", fact.Value)
+	}
+	for _, input := range []string{`{"value":true}`, `{"value":25}`, `{"value":["coding"]}`, `{"value":{"hobby":"coding"}}`} {
+		if err := json.Unmarshal([]byte(input), &fact); err == nil {
+			t.Fatalf("accepted non-string value: %s", input)
+		}
 	}
 }

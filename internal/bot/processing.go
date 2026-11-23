@@ -1,55 +1,26 @@
 package bot
 
 import (
-	"claude_bot/internal/fetcher"
-	"claude_bot/internal/llm"
-	"claude_bot/internal/model"
-	"claude_bot/internal/store"
-	"claude_bot/internal/util"
 	"context"
 	"fmt"
 	"log"
 	"net/url"
 	"path"
-	"slices"
 	"strings"
 
+	chat "claude_bot/internal/conversation"
+	"claude_bot/internal/fetcher"
+	"claude_bot/internal/mastodon"
+	"claude_bot/internal/model"
+	"claude_bot/internal/prompts"
+
 	gomastodon "github.com/mattn/go-mastodon"
-	"golang.org/x/net/html"
 )
 
-func analysisURLCandidates(content string) []string {
-	doc, err := html.Parse(strings.NewReader(content))
-	if err != nil {
-		return nil
-	}
-
-	var links []string
-	for node := range doc.Descendants() {
-		switch {
-		case node.Type == html.ElementNode && node.Data == "a":
-			for _, attr := range node.Attr {
-				if attr.Key == "href" {
-					links = append(links, attr.Val)
-				}
-			}
-		case node.Type == html.TextNode:
-			insideLink := false
-			for parent := range node.Ancestors() {
-				if parent.Data == "a" {
-					insideLink = true
-					break
-				}
-			}
-			if !insideLink {
-				links = append(links, urlRegex.FindAllString(node.Data, -1)...)
-			}
-		}
-	}
-
+func analysisURLCandidates(links []string) []string {
 	var candidates []string
 	for _, link := range links {
-		if analysisStatusID(link) != "" && !fetcher.IsNoiseURL(link) && !slices.Contains(candidates, link) {
+		if analysisStatusID(link) != "" {
 			candidates = append(candidates, link)
 		}
 	}
@@ -67,20 +38,24 @@ func analysisStatusID(link string) string {
 	if !isAccountPost && path.Base(parent) != "statuses" {
 		return ""
 	}
-	return util.ExtractIDFromURL(statusPath)
+	id := path.Base(statusPath)
+	if strings.Trim(id, "0123456789") != "" {
+		return ""
+	}
+	return id
 }
 
-func (b *Bot) prepareConversation(ctx context.Context, conversation *model.Conversation, notification *gomastodon.Notification, userMessage, statusID string) string {
+func (b *Bot) prepareConversation(ctx context.Context, conversation *model.Conversation, notification *gomastodon.Notification, userMessage, statusID string, pages *mentionPages) string {
 	if updatedMsg, enriched := b.enrichContextWithParent(ctx, conversation, notification, userMessage); enriched {
 		userMessage = updatedMsg
 	}
 
-	if urlContext := b.extractURLContext(ctx, notification, userMessage); urlContext != "" {
+	if urlContext := pages.reference(ctx, notification.Status.Card); urlContext != "" {
 		userMessage += urlContext
 	}
 
 	userStatusIDs := []string{statusID}
-	store.AddMessage(conversation, model.RoleUser, userMessage, userStatusIDs)
+	chat.AddMessage(conversation, model.RoleUser, userMessage, userStatusIDs)
 
 	return userMessage
 }
@@ -96,7 +71,7 @@ func (b *Bot) enrichContextWithParent(ctx context.Context, conversation *model.C
 		return userMessage, false
 	}
 
-	parentContent, _, _ := b.mastodonClient.ExtractContentFromStatus(parentStatus)
+	parentContent := mastodon.ExtractStatusText(parentStatus)
 	if parentContent == "" {
 		return userMessage, false
 	}
@@ -105,9 +80,9 @@ func (b *Bot) enrichContextWithParent(ctx context.Context, conversation *model.C
 
 	var contextMessage string
 	if parentAuthor == b.config.BotUsername || parentStatus.Account.Username == b.config.BotUsername {
-		contextMessage = fmt.Sprintf(llm.Messages.System.SelfReferencePost, parentContent)
+		contextMessage = fmt.Sprintf(prompts.Messages.System.SelfReferencePost, parentContent)
 	} else {
-		contextMessage = fmt.Sprintf(llm.Messages.System.ReferencePost, parentAuthor, parentContent)
+		contextMessage = fmt.Sprintf(prompts.Messages.System.ReferencePost, parentAuthor, parentContent)
 	}
 
 	if len(conversation.Messages) == 0 || conversation.Messages[len(conversation.Messages)-1].Content != contextMessage {
@@ -117,7 +92,10 @@ func (b *Bot) enrichContextWithParent(ctx context.Context, conversation *model.C
 	return userMessage, false
 }
 
-func (b *Bot) triggerFactExtraction(ctx context.Context, notification *gomastodon.Notification, userMessage, statusID string) {
+func (b *Bot) triggerFactExtraction(ctx context.Context, notification *gomastodon.Notification, userMessage, statusID string, pages *mentionPages) {
+	if !b.config.EnableFactStore {
+		return
+	}
 	displayName := notification.Account.DisplayName
 	if displayName == "" {
 		displayName = notification.Account.Username
@@ -148,76 +126,48 @@ func (b *Bot) triggerFactExtraction(ctx context.Context, notification *gomastodo
 	}
 	go b.factService.ExtractAndSaveFacts(ctx, userMessage, baseFact)
 
-	b.extractFactsFromMentionURLs(ctx, notification, displayName)
-}
-
-func (b *Bot) extractFactsFromMentionURLs(ctx context.Context, notification *gomastodon.Notification, displayName string) {
-	content := string(notification.Status.Content)
-	urls := urlRegex.FindAllString(content, -1)
-
-	if len(urls) == 0 {
-		return
-	}
-
-	author := notification.Account.Acct
-
-	for _, u := range urls {
-		if err := fetcher.IsValidURLBasic(u); err != nil {
-			continue
-		}
-
-		if fetcher.IsNoiseURL(u) {
-			continue
-		}
-
-		go func(url string) {
-			meta, err := fetcher.FetchPageContent(ctx, url, nil)
+	for _, link := range pages.links {
+		go func() {
+			meta, err := pages.forLearning(ctx, link)
 			if err != nil {
 				return
 			}
-
-			urlContent := fetcher.FormatPageContent(meta)
-
-			baseFact := model.Fact{
+			b.factService.ExtractAndSaveFactsFromURLContent(ctx, prompts.BuildPageReference(meta.URL, meta.Title, meta.Description, meta.Content), model.Fact{
 				SourceType:         model.SourceTypeMentionURL,
 				SourceURL:          meta.URL,
-				PostAuthor:         author,
-				PostAuthorUserName: displayName,
-			}
-			b.factService.ExtractAndSaveFactsFromURLContent(ctx, urlContent, baseFact)
-		}(u)
+				PostAuthor:         baseFact.PostAuthor,
+				PostAuthorUserName: baseFact.PostAuthorUserName,
+			})
+		}()
 	}
 }
 
-func (b *Bot) extractURLContext(ctx context.Context, notification *gomastodon.Notification, content string) string {
-	if notification.Status.Card != nil {
-		return llm.BuildCardPrompt(notification.Status.Card)
-	}
+type mentionPages struct {
+	links          []string
+	referenceURL   string
+	referencePage  *fetcher.PageContent
+	referenceError error
+}
 
-	urls := urlRegex.FindAllString(content, -1)
-	if len(urls) == 0 {
+func (p *mentionPages) reference(ctx context.Context, card *gomastodon.Card) string {
+	if card != nil {
+		return prompts.BuildCardPrompt(card)
+	}
+	if len(p.links) == 0 {
 		return ""
 	}
-
-	for _, u := range urls {
-		u = util.CleanURL(u)
-
-		if err := fetcher.IsValidURLBasic(u); err != nil {
-			continue
-		}
-
-		if fetcher.IsNoiseURL(u) {
-			continue
-		}
-
-		meta, err := fetcher.FetchPageContent(ctx, u, nil)
-		if err != nil {
-			log.Printf("ページコンテンツ取得失敗 (%s): %v", u, err)
-			return fmt.Sprintf(llm.Messages.Error.URLContentFetch, u, err)
-		}
-
-		return fetcher.FormatPageContent(meta)
+	p.referenceURL = p.links[0]
+	p.referencePage, p.referenceError = fetcher.FetchPageContent(ctx, p.referenceURL, nil)
+	if p.referenceError != nil {
+		log.Printf("ページコンテンツ取得失敗 (%s): %v", p.referenceURL, p.referenceError)
+		return fmt.Sprintf(prompts.Messages.Error.URLContentFetch, p.referenceURL, p.referenceError)
 	}
+	return prompts.BuildPageReference(p.referencePage.URL, p.referencePage.Title, p.referencePage.Description, p.referencePage.Content)
+}
 
-	return ""
+func (p *mentionPages) forLearning(ctx context.Context, link string) (*fetcher.PageContent, error) {
+	if p.referenceURL == link {
+		return p.referencePage, p.referenceError
+	}
+	return fetcher.FetchPageContent(ctx, link, nil)
 }

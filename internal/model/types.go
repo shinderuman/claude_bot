@@ -1,7 +1,6 @@
 package model
 
 import (
-	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -16,7 +15,6 @@ const (
 	IntentFollowRequest   IntentType = "follow_request"
 
 	RoleUser      = "user"
-	RoleModel     = "model"
 	RoleAssistant = "assistant"
 
 	SourceTypeMention    = "mention"
@@ -66,13 +64,13 @@ type Session struct {
 }
 
 type Fact struct {
-	Target         string      `json:"target"`
-	TargetUserName string      `json:"target_username"`
-	Author         string      `json:"author"`
-	AuthorUserName string      `json:"author_username"`
-	Key            string      `json:"key"`
-	Value          interface{} `json:"value"`
-	Timestamp      time.Time   `json:"timestamp"`
+	Target         string    `json:"target"`
+	TargetUserName string    `json:"target_username"`
+	Author         string    `json:"author"`
+	AuthorUserName string    `json:"author_username"`
+	Key            string    `json:"key"`
+	Value          string    `json:"value"`
+	Timestamp      time.Time `json:"timestamp"`
 
 	SourceID           string `json:"source_id,omitempty"`
 	SourceType         string `json:"source_type,omitempty"`
@@ -83,30 +81,12 @@ type Fact struct {
 }
 
 func (f *Fact) ComputeUniqueKey() string {
-	return fmt.Sprintf("%s|%s|%v", f.Target, f.Key, f.Value)
-}
-
-type StringArray []string
-
-func (s *StringArray) UnmarshalJSON(data []byte) error {
-	var arr []string
-	if err := json.Unmarshal(data, &arr); err == nil {
-		*s = StringArray(arr)
-		return nil
-	}
-
-	var str string
-	if err := json.Unmarshal(data, &str); err == nil {
-		*s = StringArray{str}
-		return nil
-	}
-
-	return fmt.Errorf("StringArray: cannot unmarshal data")
+	return fmt.Sprintf("%s|%s|%s", f.Target, f.Key, f.Value)
 }
 
 type SearchQuery struct {
-	TargetCandidates StringArray `json:"target_candidates"`
-	Keys             StringArray `json:"keys"`
+	TargetCandidates []string `json:"target_candidates"`
+	Keys             []string `json:"keys"`
 }
 
 type Image struct {

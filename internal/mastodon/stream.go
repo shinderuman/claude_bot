@@ -2,41 +2,16 @@ package mastodon
 
 import (
 	"context"
-	"log"
 
 	gomastodon "github.com/mattn/go-mastodon"
 )
 
-func (c *Client) StreamUser(ctx context.Context, eventChan chan<- gomastodon.Event) {
-	events, err := c.client.StreamingUser(ctx)
-	if err != nil {
-		log.Printf("ユーザーストリーミング接続エラー: %v", err)
-		return
-	}
-
-	log.Println("ユーザーストリーミング接続成功")
-
-	for event := range events {
-		eventChan <- event
-	}
-
-	log.Println("ユーザーストリーミング接続が切断されました")
+func (c *Client) StreamUser(ctx context.Context) (<-chan gomastodon.Event, error) {
+	return c.client.StreamingUser(ctx)
 }
 
-func (c *Client) StreamPublic(ctx context.Context, eventChan chan<- gomastodon.Event) {
-	events, err := c.client.StreamingPublic(ctx, false)
-	if err != nil {
-		log.Printf("連合ストリーミング接続エラー: %v", err)
-		return
-	}
-
-	log.Println("連合ストリーミング接続成功")
-
-	for event := range events {
-		eventChan <- event
-	}
-
-	log.Println("連合ストリーミング接続が切断されました")
+func (c *Client) StreamPublic(ctx context.Context) (<-chan gomastodon.Event, error) {
+	return c.client.StreamingPublic(ctx, false)
 }
 
 func ExtractStatusFromEvent(event gomastodon.Event) *gomastodon.Status {

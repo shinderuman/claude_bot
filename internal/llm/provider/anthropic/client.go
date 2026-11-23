@@ -31,6 +31,7 @@ func NewClient(cfg *config.Config) provider.Provider {
 	opts := []option.RequestOption{
 		option.WithHeader("Authorization", "Bearer "+cfg.AnthropicAuthToken),
 		option.WithHTTPClient(httpClient),
+		option.WithMaxRetries(0),
 	}
 	if cfg.AnthropicBaseURL != "" {
 		opts = append(opts, option.WithBaseURL(cfg.AnthropicBaseURL))

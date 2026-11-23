@@ -1,14 +1,12 @@
 package main
 
 import (
-	"log"
 	"os"
 
 	"claude_bot/internal/bot"
+	"claude_bot/internal/cli"
 )
 
 func main() {
-	if err := bot.RunCommand(os.Args[1:]); err != nil {
-		log.Print(err)
-	}
+	os.Exit(cli.ExitCode(bot.RunCommand(os.Args[1:])))
 }

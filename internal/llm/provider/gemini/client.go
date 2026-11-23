@@ -3,58 +3,48 @@ package gemini
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"claude_bot/internal/config"
 	"claude_bot/internal/llm/provider"
 	"claude_bot/internal/model"
-	"claude_bot/internal/slack"
 
 	"github.com/google/generative-ai-go/genai"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
 )
 
-const (
-	MinProfileResponseLength = 50
-	MaxRetries               = 5
-)
-
-var (
-	retryBaseDelay = 10 * time.Second
-)
+const MinProfileResponseLength = 50
 
 type Client struct {
-	client      *genai.Client
-	model       *genai.GenerativeModel
-	config      *config.Config
-	slackClient *slack.Client
+	client *genai.Client
+	model  *genai.GenerativeModel
+	config *config.Config
 }
 
-func NewClient(cfg *config.Config) provider.Provider {
+func NewClient(cfg *config.Config) (provider.Provider, error) {
 	ctx := context.Background()
 
 	client, err := genai.NewClient(ctx,
 		option.WithAPIKey(cfg.GeminiAPIKey),
 	)
 	if err != nil {
-		log.Fatalf("Geminiクライアント作成エラー: %v", err)
+		return nil, fmt.Errorf("Geminiクライアント作成エラー: %w", err)
 	}
 
 	modelName := cfg.GeminiModel
 	model := client.GenerativeModel(modelName)
 
 	return &Client{
-		client:      client,
-		model:       model,
-		config:      cfg,
-		slackClient: slack.NewClient(cfg.SlackBotToken, cfg.SlackChannelID, cfg.SlackErrorChannelID, cfg.BotUsername),
-	}
+		client: client,
+		model:  model,
+		config: cfg,
+	}, nil
 }
 
 func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image, temperature float64) (string, string, error) {
@@ -65,26 +55,12 @@ func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, 
 		return "", "", err
 	}
 
-	for i := 0; i <= MaxRetries; i++ {
-		if i > 0 {
-			delay := retryBaseDelay * time.Duration(1<<(i-1))
-			log.Printf("Gemini リトライ実行 %d/%d (待機: %v)", i, MaxRetries, delay)
-			time.Sleep(delay)
-		}
-
-		resp, err := requestModel.GenerateContent(ctx, parts...)
-		if err != nil {
-			log.Printf("Gemini API呼び出しエラー: %v", err)
-			return "", "", err
-		}
-
-		responseText, err := c.validateResponse(ctx, resp)
-		if err == nil {
-			return responseText, "", nil
-		}
+	resp, err := requestModel.GenerateContent(ctx, parts...)
+	if err != nil {
+		return "", "", err
 	}
-
-	return "", "", fmt.Errorf("Gemini 生成応答が短すぎます (最大リトライ回数超過)")
+	response, err := c.validateResponse(ctx, resp)
+	return response, "", err
 }
 
 func (c *Client) requestModel(systemPrompt string, maxTokens int64, temperature float64) *genai.GenerativeModel {
@@ -198,35 +174,35 @@ func (c *Client) validateResponse(ctx context.Context, resp *genai.GenerateConte
 		finishReason = resp.Candidates[0].FinishReason
 	}
 
-	msg := fmt.Sprintf("⚠️ [生成異常] Geminiが短い応答を返しました (%d文字, Reason: %s)\n```\n%s\n```\nリトライします...", runeCount, finishReason, responseText)
-	c.slackClient.PostErrorMessageAsync(ctx, msg)
-
-	return "", fmt.Errorf("response too short (%d chars)", runeCount)
+	return "", fmt.Errorf("%w (%d chars, reason: %s)", provider.ErrResponseTooShort, runeCount, finishReason)
 }
 
 func (c *Client) IsRetryable(err error) bool {
-	if gerr, ok := err.(*googleapi.Error); ok {
+	var gerr *googleapi.Error
+	if errors.As(err, &gerr) {
 		return gerr.Code >= http.StatusInternalServerError
 	}
 	return false
 }
 
 func (c *Client) IsBadRequest(err error) bool {
-	if gerr, ok := err.(*googleapi.Error); ok {
+	var gerr *googleapi.Error
+	if errors.As(err, &gerr) {
 		return gerr.Code == http.StatusBadRequest
 	}
 	return false
 }
 
 func (c *Client) IsRateLimited(err error) bool {
-	if gerr, ok := err.(*googleapi.Error); ok {
+	var gerr *googleapi.Error
+	if errors.As(err, &gerr) {
 		return gerr.Code == http.StatusTooManyRequests
 	}
 	return false
 }
 
 func extractResponseText(resp *genai.GenerateContentResponse) string {
-	if len(resp.Candidates) > 0 {
+	if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
 		var result strings.Builder
 		for _, part := range resp.Candidates[0].Content.Parts {
 			if txt, ok := part.(genai.Text); ok {

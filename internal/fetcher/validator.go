@@ -34,28 +34,6 @@ func IsValidURL(urlStr string, blacklist []string) error {
 	return nil
 }
 
-func IsValidURLBasic(urlStr string) error {
-	u, err := url.Parse(urlStr)
-	if err != nil {
-		return errors.New("無効なURL形式です")
-	}
-
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return errors.New("許可されていないスキームです (http/httpsのみ許可)")
-	}
-
-	host := u.Hostname()
-	if host == "" {
-		return errors.New("ホスト名がありません")
-	}
-
-	if net.ParseIP(host) != nil {
-		return errors.New("IPアドレスへの直接アクセスは許可されていません")
-	}
-
-	return nil
-}
-
 func isBlacklisted(host string, blacklist []string) bool {
 	host = strings.ToLower(host)
 	for _, pattern := range blacklist {

@@ -1,10 +1,11 @@
-package llm
+package prompts
 
 import (
-	"claude_bot/internal/config"
 	"strings"
 	"testing"
 	"time"
+
+	"claude_bot/internal/config"
 
 	"github.com/mattn/go-mastodon"
 )

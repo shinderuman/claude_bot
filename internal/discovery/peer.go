@@ -2,9 +2,7 @@ package discovery
 
 import (
 	"context"
-	"encoding/json"
 	"log"
-	"os"
 
 	"claude_bot/internal/mastodon"
 	"claude_bot/internal/util"
@@ -47,21 +45,12 @@ func (pd *PeerDiscoverer) IsPeer(account *gomastodon.Account) bool {
 }
 
 func (pd *PeerDiscoverer) DiscoverPeersFromRegistry(ctx context.Context, onPeerFound func(ctx context.Context, account *gomastodon.Account)) error {
-	registryPath := util.GetFilePath(RegistryFileName)
-	data, err := os.ReadFile(registryPath)
+	registryPath, err := util.DataFilePath(RegistryFileName)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
 		return err
 	}
-
-	var registry struct {
-		Nodes []struct {
-			Username string `json:"username"`
-		} `json:"nodes"`
-	}
-	if err := json.Unmarshal(data, &registry); err != nil {
+	registry, err := readRegistry(registryPath)
+	if err != nil {
 		return err
 	}
 

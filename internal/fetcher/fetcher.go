@@ -195,19 +195,3 @@ func getAttr(n *html.Node, key string) string {
 	}
 	return ""
 }
-
-func FormatPageContent(meta *PageContent) string {
-	var sb strings.Builder
-	sb.WriteString("\n\n[参照URL情報]\n")
-	sb.WriteString(fmt.Sprintf("URL: %s\n", meta.URL))
-	if meta.Title != "" {
-		sb.WriteString(fmt.Sprintf("タイトル: %s\n", meta.Title))
-	}
-	if meta.Description != "" {
-		sb.WriteString(fmt.Sprintf("説明: %s\n", meta.Description))
-	}
-	if meta.Content != "" {
-		sb.WriteString(fmt.Sprintf("本文抜粋: %s\n", meta.Content))
-	}
-	return sb.String()
-}

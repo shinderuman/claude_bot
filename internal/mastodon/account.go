@@ -7,28 +7,6 @@ import (
 	gomastodon "github.com/mattn/go-mastodon"
 )
 
-func (c *Client) UpdateProfile(ctx context.Context, note string) error {
-	profile := &gomastodon.Profile{
-		Note: &note,
-	}
-	_, err := c.client.AccountUpdate(ctx, profile)
-	if err != nil && errorNotifier != nil {
-		go errorNotifier("プロフィール更新エラー (Note)", err.Error())
-	}
-	return err
-}
-
-func (c *Client) UpdateProfileFields(ctx context.Context, fields []gomastodon.Field) error {
-	profile := &gomastodon.Profile{
-		Fields: &fields,
-	}
-	_, err := c.client.AccountUpdate(ctx, profile)
-	if err != nil && errorNotifier != nil {
-		go errorNotifier("プロフィール更新エラー (Fields)", err.Error())
-	}
-	return err
-}
-
 func (c *Client) GetAccountCurrentUser(ctx context.Context) (*gomastodon.Account, error) {
 	return c.client.GetAccountCurrentUser(ctx)
 }

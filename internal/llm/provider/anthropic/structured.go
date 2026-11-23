@@ -16,15 +16,11 @@ const structuredResultToolName = "submit_json_result"
 
 const zAIAnthropicBaseURL = "https://api.z.ai/api/anthropic"
 
-func (c *Client) supportsToolCalling() bool {
+func (c *Client) SupportsStructuredOutput() bool {
 	return c.config.AnthropicBaseURL != zAIAnthropicBaseURL
 }
 
 func (c *Client) GenerateStructuredContent(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image, temperature float64, schema *provider.StructuredSchema) (string, string, error) {
-	if !c.supportsToolCalling() {
-		return c.GenerateContent(ctx, messages, systemPrompt, maxTokens, images, temperature)
-	}
-
 	params := anthropic.MessageNewParams{
 		Model:       anthropic.Model(c.config.AnthropicModel),
 		MaxTokens:   maxTokens,
@@ -43,7 +39,7 @@ func (c *Client) GenerateStructuredContent(ctx context.Context, messages []model
 			},
 		},
 		ToolChoice: anthropic.ToolChoiceUnionParam{
-			OfAuto: &anthropic.ToolChoiceAutoParam{},
+			OfTool: &anthropic.ToolChoiceToolParam{Name: structuredResultToolName},
 		},
 	}
 	if systemPrompt != "" {
@@ -67,7 +63,7 @@ func (c *Client) GenerateStructuredContent(ctx context.Context, messages []model
 
 func extractStructuredResult(msg *anthropic.Message) (string, error) {
 	for _, content := range msg.Content {
-		if content.Name != structuredResultToolName || len(content.Input) == 0 {
+		if content.Name != structuredResultToolName {
 			continue
 		}
 
@@ -75,12 +71,12 @@ func extractStructuredResult(msg *anthropic.Message) (string, error) {
 			Result json.RawMessage `json:"result"`
 		}
 		if err := json.Unmarshal(content.Input, &input); err != nil {
-			return "", fmt.Errorf("decode structured tool input: %w", err)
+			return "", fmt.Errorf("%w: decode structured tool input: %v", provider.ErrInvalidStructuredOutput, err)
 		}
 		if len(input.Result) == 0 || bytes.Equal(bytes.TrimSpace(input.Result), []byte("null")) {
-			return "", fmt.Errorf("structured tool returned no result")
+			return "", fmt.Errorf("%w: tool returned no result", provider.ErrInvalidStructuredOutput)
 		}
 		return string(input.Result), nil
 	}
-	return "", fmt.Errorf("structured tool call was not returned")
+	return "", fmt.Errorf("%w: tool call was not returned", provider.ErrInvalidStructuredOutput)
 }

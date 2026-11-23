@@ -5,12 +5,14 @@ import (
 	"io"
 	"sort"
 	"strings"
+
+	"claude_bot/internal/util"
 )
 
 type reportFact struct {
 	Target    string `json:"target"`
 	Key       string `json:"key"`
-	Value     any    `json:"value"`
+	Value     string `json:"value"`
 	Timestamp string `json:"timestamp"`
 }
 
@@ -25,7 +27,7 @@ type duplicateGroup struct {
 }
 
 func Analyze(path string, out io.Writer) error {
-	facts, err := ReadFile[reportFact](path)
+	facts, err := util.ReadJSONArray[reportFact](path)
 	if err != nil {
 		return err
 	}
@@ -38,14 +40,18 @@ func Analyze(path string, out io.Writer) error {
 	counts := make(map[targetKey]int)
 	for _, fact := range facts {
 		pair := targetKey{target: fact.Target, key: fact.Key}
-		value := strings.TrimSpace(fmt.Sprint(fact.Value))
+		value := strings.TrimSpace(fact.Value)
 		uniqueFacts[factValue{targetKey: pair, value: value}] = struct{}{}
 		counts[pair]++
 	}
 
 	fmt.Fprintf(out, "Total Facts: %d\n", len(facts))
 	fmt.Fprintf(out, "Unique Facts (Target+Key+Value): %d\n", len(uniqueFacts))
-	fmt.Fprintf(out, "Duplication Rate: %.2f%%\n", (1-float64(len(uniqueFacts))/float64(len(facts)))*100)
+	var duplicationRate float64
+	if len(facts) > 0 {
+		duplicationRate = float64(len(facts)-len(uniqueFacts)) / float64(len(facts)) * 100
+	}
+	fmt.Fprintf(out, "Duplication Rate: %.2f%%\n", duplicationRate)
 	fmt.Fprintf(out, "Unique Target+Key pairs: %d\n", len(counts))
 	fmt.Fprintln(out, "\n=== Top Keys with Multiple Values (Target | Key) ===")
 
@@ -56,7 +62,14 @@ func Analyze(path string, out io.Writer) error {
 		}
 	}
 	sort.Slice(groups, func(i, j int) bool {
-		return groups[i].count > groups[j].count
+		left, right := groups[i], groups[j]
+		if left.count != right.count {
+			return left.count > right.count
+		}
+		if left.target != right.target {
+			return left.target < right.target
+		}
+		return left.key < right.key
 	})
 	for i, group := range groups[:min(20, len(groups))] {
 		fmt.Fprintf(out, "%d: %s (Key: %s) - %d entries\n", i+1, group.target, group.key, group.count)

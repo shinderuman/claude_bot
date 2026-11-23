@@ -1,10 +1,13 @@
 package llm
 
-import "claude_bot/internal/llm/provider"
+import (
+	"claude_bot/internal/llm/provider"
+	"claude_bot/internal/prompts"
+)
 
 func structuredOutputSchema(systemPrompt string) *provider.StructuredSchema {
 	switch systemPrompt {
-	case Messages.System.FactExtraction:
+	case prompts.Messages.System.FactExtraction:
 		return arraySchema(objectSchema(
 			map[string]*provider.StructuredSchema{
 				"target":          stringSchema(),
@@ -16,7 +19,7 @@ func structuredOutputSchema(systemPrompt string) *provider.StructuredSchema {
 			},
 			"target", "key", "value",
 		))
-	case Messages.System.FactQuery:
+	case prompts.Messages.System.FactQuery:
 		return objectSchema(
 			map[string]*provider.StructuredSchema{
 				"target_candidates": arraySchema(stringSchema()),
@@ -24,7 +27,7 @@ func structuredOutputSchema(systemPrompt string) *provider.StructuredSchema {
 			},
 			"target_candidates", "keys",
 		)
-	case Messages.System.IntentClassification:
+	case prompts.Messages.System.IntentClassification:
 		intent := stringSchema()
 		intent.Enum = []string{"chat", "image_generation", "analysis", "daily_summary", "follow_request"}
 		return objectSchema(
@@ -36,7 +39,7 @@ func structuredOutputSchema(systemPrompt string) *provider.StructuredSchema {
 			},
 			"intent", "image_prompt", "analysis_urls", "target_date",
 		)
-	case Messages.System.ImageGeneration:
+	case prompts.Messages.System.ImageGeneration:
 		return objectSchema(
 			map[string]*provider.StructuredSchema{"svg": stringSchema()},
 			"svg",

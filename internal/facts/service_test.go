@@ -7,21 +7,9 @@ import (
 	"time"
 
 	"claude_bot/internal/config"
-	"claude_bot/internal/mastodon"
 	"claude_bot/internal/model"
 	"claude_bot/internal/store"
-
-	gomastodon "github.com/mattn/go-mastodon"
 )
-
-func getTestService() (*FactService, *mastodon.Client) {
-	m := &mastodon.Client{}
-	s := &FactService{
-		mastodonClient: m,
-		config:         &config.Config{},
-	}
-	return s, m
-}
 
 func TestShardingDistribution(t *testing.T) {
 	totalInstances := 4
@@ -39,7 +27,7 @@ func TestShardingDistribution(t *testing.T) {
 
 	counts := make(map[int]int)
 	processedFacts := make(map[string]bool)
-	service, _ := getTestService()
+	service := &FactService{}
 
 	for i := 0; i < totalInstances; i++ {
 		assigned := service.shardFacts(facts, i, totalInstances)
@@ -87,7 +75,7 @@ func TestSmallBatchSkipping(t *testing.T) {
 	t.Log("Simulating 5 facts distribution (Threshold per bot: 5):")
 
 	anyArchived := false
-	service, _ := getTestService()
+	service := &FactService{}
 	for i := range totalInstances {
 		assigned := service.shardFacts(facts, i, totalInstances)
 		shouldArchive := len(assigned) >= threshold
@@ -105,176 +93,8 @@ func TestSmallBatchSkipping(t *testing.T) {
 	}
 }
 
-func TestBuildProfileFields(t *testing.T) {
-	tests := []struct {
-		name             string
-		allowRemote      bool
-		existingFields   []gomastodon.Field
-		authKey          string
-		wantMentionValue string
-		wantSystemID     string
-		timezone         string
-	}{
-		{
-			name:        "Allow Remote Users: True",
-			allowRemote: true,
-			existingFields: []gomastodon.Field{
-				{Name: "Other", Value: "Value"},
-			},
-			authKey:          "test-auth-key",
-			wantMentionValue: mastodon.MentionStatusPublic,
-			wantSystemID:     "test-auth-key",
-			timezone:         "UTC",
-		},
-		{
-			name:        "Allow Remote Users: False",
-			allowRemote: false,
-			existingFields: []gomastodon.Field{
-				{Name: "Other", Value: "Value"},
-			},
-			authKey:          "test-auth-key",
-			wantMentionValue: mastodon.MentionStatusStopped,
-			wantSystemID:     "test-auth-key",
-			timezone:         "UTC",
-		},
-		{
-			name:        "Update Existing Managed Fields & Preserve Others",
-			allowRemote: true,
-			existingFields: []gomastodon.Field{
-				{Name: "First", Value: "1"},
-				{Name: mastodon.ProfileFieldSystemID, Value: "old-key"},
-				{Name: mastodon.ProfileFieldLastUpdated, Value: "old-time"},
-				{Name: "Second", Value: "2"},
-				{Name: mastodon.ProfileFieldMentionStatus, Value: "old-status"},
-			},
-			authKey:          "new-auth-key",
-			wantMentionValue: mastodon.MentionStatusPublic,
-			wantSystemID:     "new-auth-key",
-			timezone:         "UTC",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			s, m := getTestService()
-			cfg := &config.Config{
-				AllowRemoteUsers: tt.allowRemote,
-				Timezone:         tt.timezone,
-			}
-			s.config = cfg
-
-			got := m.BuildProfileFields(cfg, tt.existingFields, tt.authKey)
-
-			managedFound := map[string]bool{
-				mastodon.ProfileFieldSystemID:      false,
-				mastodon.ProfileFieldMentionStatus: false,
-				mastodon.ProfileFieldLastUpdated:   false,
-			}
-
-			for _, f := range got {
-				if f.Name == mastodon.ProfileFieldSystemID {
-					if f.Value != tt.wantSystemID {
-						t.Errorf("SystemID = %v, want %v", f.Value, tt.wantSystemID)
-					}
-					managedFound[mastodon.ProfileFieldSystemID] = true
-				}
-				if f.Name == mastodon.ProfileFieldMentionStatus {
-					if f.Value != tt.wantMentionValue {
-						t.Errorf("MentionStatus = %v, want %v", f.Value, tt.wantMentionValue)
-					}
-					managedFound[mastodon.ProfileFieldMentionStatus] = true
-				}
-				if f.Name == mastodon.ProfileFieldLastUpdated {
-					if len(f.Value) == 0 {
-						t.Error("LastUpdated field is empty")
-					}
-					managedFound[mastodon.ProfileFieldLastUpdated] = true
-				}
-			}
-
-			for k, found := range managedFound {
-				if !found {
-					t.Errorf("Managed field %s not found", k)
-				}
-			}
-
-			var idxSystemID, idxMention, idxLastUpdated = -1, -1, -1
-			for i, f := range got {
-				switch f.Name {
-				case mastodon.ProfileFieldSystemID:
-					idxSystemID = i
-				case mastodon.ProfileFieldMentionStatus:
-					idxMention = i
-				case mastodon.ProfileFieldLastUpdated:
-					idxLastUpdated = i
-				}
-			}
-
-			if idxSystemID == -1 || idxMention == -1 || idxLastUpdated == -1 {
-				t.Fatal("One or more managed fields missing, cannot verify order")
-			}
-
-			if idxSystemID > idxMention {
-				t.Errorf("Order invalid: SystemID (%d) should be before MentionStatus (%d)", idxSystemID, idxMention)
-			}
-			if idxMention > idxLastUpdated {
-				t.Errorf("Order invalid: MentionStatus (%d) should be before LastUpdated (%d)", idxMention, idxLastUpdated)
-			}
-
-			for i, f := range got {
-				if _, isManaged := managedFound[f.Name]; !isManaged {
-					if i > idxSystemID {
-						t.Errorf("User field %s found at index %d, expected before SystemID (%d)", f.Name, i, idxSystemID)
-					}
-				}
-			}
-		})
-	}
-}
-
-func TestBuildProfileFields_OrderGuarantee(t *testing.T) {
-	_, m := getTestService()
-	cfg := &config.Config{
-		AllowRemoteUsers: true,
-		Timezone:         "UTC",
-	}
-
-	input := []gomastodon.Field{
-		{Name: mastodon.ProfileFieldLastUpdated, Value: "old-time"},
-		{Name: "UserField1", Value: "1"},
-		{Name: mastodon.ProfileFieldMentionStatus, Value: "old-status"},
-		{Name: "UserField2", Value: "2"},
-		{Name: mastodon.ProfileFieldSystemID, Value: "old-key"},
-	}
-
-	authKey := "new-auth-key"
-	got := m.BuildProfileFields(cfg, input, authKey)
-
-	if len(got) != 5 {
-		t.Fatalf("Expected 5 fields, got %d", len(got))
-	}
-
-	expectedNames := []string{
-		"UserField1",
-		"UserField2",
-		mastodon.ProfileFieldSystemID,
-		mastodon.ProfileFieldMentionStatus,
-		mastodon.ProfileFieldLastUpdated,
-	}
-
-	for i, name := range expectedNames {
-		if got[i].Name != name {
-			t.Errorf("Index %d: expected name %s, got %s", i, name, got[i].Name)
-		}
-	}
-
-	if got[2].Value != authKey {
-		t.Errorf("SystemID value mismatch: got %s, want %s", got[2].Value, authKey)
-	}
-}
-
 func TestShouldArchiveFacts(t *testing.T) {
-	s, _ := getTestService()
+	s := &FactService{}
 
 	now := time.Now()
 	oldTime := now.AddDate(0, 0, -31)
@@ -383,11 +203,6 @@ func TestFactService_isValidFact(t *testing.T) {
 		},
 
 		{
-			name: "Nil Value",
-			fact: model.Fact{Target: "valid_target", Key: "k", Value: nil},
-			want: false,
-		},
-		{
 			name: "Empty Key",
 			fact: model.Fact{Target: "valid_target", Key: "", Value: "v"},
 			want: false,
@@ -428,7 +243,7 @@ func TestFactService_isValidFact(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			factStore := store.NewFactStore(&MockFactStorage{}, nil, "")
+			factStore := store.NewFactStore(&MockFactStorage{}, "")
 
 			knownBots := map[string]struct{}{"known_bot": {}}
 			service := NewFactService(&config.Config{}, factStore, mockLLM, nil, nil, knownBots)
@@ -452,7 +267,7 @@ func TestFactService_AddFact_Save(t *testing.T) {
 			return nil, nil
 		},
 	}
-	factStore := store.NewFactStore(mockStorage, nil, "")
+	factStore := store.NewFactStore(mockStorage, "")
 	service := NewFactService(&config.Config{}, factStore, mockLLM, nil, nil, nil)
 
 	validFact := model.Fact{Target: "valid", Key: "k", Value: "v"}

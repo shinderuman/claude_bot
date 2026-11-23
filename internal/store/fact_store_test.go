@@ -1,60 +1,12 @@
 package store
 
 import (
-	"claude_bot/internal/model"
 	"context"
 	"testing"
 	"time"
+
+	"claude_bot/internal/model"
 )
-
-type mockFactStorage struct {
-	facts map[string][]model.Fact
-}
-
-func (m *mockFactStorage) Add(ctx context.Context, fact model.Fact) error {
-	m.facts[fact.Target] = append(m.facts[fact.Target], fact)
-	return nil
-}
-
-func (m *mockFactStorage) GetByTarget(ctx context.Context, target string) ([]model.Fact, error) {
-	return m.facts[target], nil
-}
-
-func (m *mockFactStorage) GetAllFacts(ctx context.Context) ([]model.Fact, error) {
-	var all []model.Fact
-	for _, facts := range m.facts {
-		all = append(all, facts...)
-	}
-	return all, nil
-}
-
-func (m *mockFactStorage) GetRecent(ctx context.Context, n int) ([]model.Fact, error) {
-	return nil, nil
-}
-
-func (m *mockFactStorage) SearchFuzzy(ctx context.Context, targets, keys []string) ([]model.Fact, error) {
-	return nil, nil
-}
-
-func (m *mockFactStorage) Remove(ctx context.Context, target string, match func(model.Fact) bool) (int, error) {
-	return 0, nil
-}
-
-func (m *mockFactStorage) Replace(ctx context.Context, target string, remove []model.Fact, add []model.Fact) error {
-	return nil
-}
-
-func (m *mockFactStorage) EnforceMaxFacts(ctx context.Context, maxFacts int) (int, error) {
-	return 0, nil
-}
-
-func (m *mockFactStorage) Backup(ctx context.Context, filename string) error {
-	return nil
-}
-
-func (m *mockFactStorage) Close() error {
-	return nil
-}
 
 func TestFactStore_SearchFuzzy_TargetUserName(t *testing.T) {
 	store := NewMemoryFactStore()
@@ -123,7 +75,7 @@ func TestFactStore_SearchFuzzy_TargetUserName(t *testing.T) {
 	}
 }
 
-func TestFactStore_RemoveFacts(t *testing.T) {
+func TestMemoryFactStoreRemove(t *testing.T) {
 	store := NewMemoryFactStore()
 
 	target := "target@example.com"
@@ -176,7 +128,7 @@ func TestFactStore_RemoveFacts(t *testing.T) {
 	}
 }
 
-func TestFactStore_Cleanup_Logic(t *testing.T) {
+func TestFactStoreCleanupRemovesExpiredFacts(t *testing.T) {
 	store := NewMemoryFactStore()
 
 	now := time.Now()
@@ -185,10 +137,11 @@ func TestFactStore_Cleanup_Logic(t *testing.T) {
 	store.Add(context.Background(), model.Fact{Value: "new", Timestamp: now, Target: "t", Key: "k1"})
 	store.Add(context.Background(), model.Fact{Value: "old", Timestamp: oldTime, Target: "t", Key: "k2"})
 
-	threshold := now.Add(-30 * 24 * time.Hour)
-	removed, _ := store.Remove(context.Background(), "t", func(f model.Fact) bool {
-		return f.Timestamp.Before(threshold)
-	})
+	factStore := NewFactStore(store, "")
+	removed, err := factStore.Cleanup(t.Context(), 30*24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if removed != 1 {
 		t.Errorf("Cleanup removed %d, want 1", removed)
@@ -204,7 +157,7 @@ func TestFactStore_Cleanup_Logic(t *testing.T) {
 	}
 }
 
-func TestFactStore_GetRecentFacts(t *testing.T) {
+func TestMemoryFactStoreGetRecent(t *testing.T) {
 	store := NewMemoryFactStore()
 	now := time.Now()
 
@@ -226,7 +179,7 @@ func TestFactStore_GetRecentFacts(t *testing.T) {
 	}
 }
 
-func TestFactStore_RemoveFactsByKey_Simulation(t *testing.T) {
+func TestFactStoreReplaceFactForKey(t *testing.T) {
 	store := NewMemoryFactStore()
 
 	target := "target@example.com"
@@ -241,22 +194,19 @@ func TestFactStore_RemoveFactsByKey_Simulation(t *testing.T) {
 		store.Add(context.Background(), f)
 	}
 
-	count, _ := store.Remove(context.Background(), target, func(f model.Fact) bool {
-		return f.Key == key
-	})
-
-	if count != 2 {
-		t.Errorf("Removed count = %d, want 2", count)
+	factStore := NewFactStore(store, "")
+	replacement := model.Fact{Target: target, Key: key, Value: "replacement"}
+	if err := factStore.ReplaceFactForKey(t.Context(), replacement); err != nil {
+		t.Fatal(err)
 	}
 
-	allFacts, _ := store.GetAllFacts(context.Background())
-	if len(allFacts) != 2 {
-		t.Errorf("Remaining facts = %d, want 2", len(allFacts))
+	allFacts, err := store.GetAllFacts(t.Context())
+	if err != nil || len(allFacts) != 3 {
+		t.Fatalf("remaining facts = %+v, %v", allFacts, err)
 	}
-
-	for _, f := range allFacts {
-		if f.Target == target && f.Key == key {
-			t.Error("Found fact that should be removed")
+	for _, fact := range allFacts {
+		if fact.Target == target && fact.Key == key && fact.Value != replacement.Value {
+			t.Errorf("found stale fact %+v", fact)
 		}
 	}
 }

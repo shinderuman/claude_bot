@@ -1,4 +1,4 @@
-package llm
+package prompts
 
 const MinFactsRetentionRatio = 0.05
 

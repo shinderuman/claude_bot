@@ -1,12 +1,14 @@
 package store
 
 import (
-	"claude_bot/internal/model"
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"testing"
 	"time"
+
+	"claude_bot/internal/model"
 
 	"github.com/alicebob/miniredis/v2"
 )
@@ -39,12 +41,11 @@ func TestRedisFactStoreDeleteAllFacts(t *testing.T) {
 	}
 	server.Set(store.prefix+TimelineKey, "index")
 	server.Set(store.prefix+TargetsKey, "index")
-	server.Set(store.prefix+":fact_hashes", "legacy index")
 	server.Set("test_other_prefix:keep", "other namespace")
 
-	deleted, err := store.DeleteAllFacts(t.Context())
-	if err != nil || deleted != factKeyCount {
-		t.Fatalf("DeleteAllFacts() = %d, %v, want %d, nil", deleted, err, factKeyCount)
+	deleted, err := store.deleteAllFacts(t.Context())
+	if err != nil || deleted != factKeyCount+2 {
+		t.Fatalf("DeleteAllFacts() = %d, %v, want %d, nil", deleted, err, factKeyCount+2)
 	}
 	if keys := server.Keys(); len(keys) != 1 || keys[0] != "test_other_prefix:keep" {
 		t.Fatalf("remaining Redis keys = %q, want only the other namespace", keys)
@@ -185,5 +186,112 @@ func TestRedisFactStore_GetAllFacts(t *testing.T) {
 	}
 	if len(all) != 2 {
 		t.Errorf("GetAllFacts returned %d, want 2", len(all))
+	}
+}
+
+func TestRedisFactStoreReplaceAllFacts(t *testing.T) {
+	storage, server := setupRedisStore(t)
+	t.Cleanup(server.Close)
+	t.Cleanup(func() { _ = storage.Close() })
+	ctx := t.Context()
+	old := model.Fact{Target: "old", Key: "topic", Value: "previous"}
+	newFact := model.Fact{Target: "new:target", Key: "topic", Value: "replacement"}
+	if err := storage.Add(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	server.Set("different:keep", "unrelated")
+
+	if err := storage.ReplaceAllFacts(ctx, []model.Fact{newFact, {Target: "timeline", Key: "topic", Value: "reserved"}}); err == nil {
+		t.Fatal("import with a reserved target succeeded")
+	}
+	all, err := storage.GetAllFacts(ctx)
+	if err != nil || len(all) != 1 || all[0].Value != old.Value {
+		t.Fatalf("existing facts after failed import = %+v, %v", all, err)
+	}
+	for _, key := range server.Keys() {
+		if strings.HasPrefix(key, "claude-migrate-") {
+			t.Fatalf("failed import leaked staging key %q", key)
+		}
+	}
+
+	if err := storage.ReplaceAllFacts(ctx, []model.Fact{newFact, newFact}); err != nil {
+		t.Fatal(err)
+	}
+	recent, err := storage.GetRecent(ctx, 10)
+	if err != nil || len(recent) != 1 || recent[0].Target != newFact.Target || recent[0].Value != newFact.Value {
+		t.Fatalf("timeline after import = %+v, %v", recent, err)
+	}
+	if !server.Exists("different:keep") || server.Exists(storage.targetKey(old.Target)) {
+		t.Fatalf("unexpected keys after import: %q", server.Keys())
+	}
+	for _, key := range server.Keys() {
+		if strings.HasPrefix(key, "claude-migrate-") || server.TTL(key) > 0 {
+			t.Fatalf("key %q retained staging state", key)
+		}
+	}
+}
+
+func TestRedisFactStoreRetentionKeepsIndexesInSync(t *testing.T) {
+	storage, server := setupRedisStore(t)
+	t.Cleanup(server.Close)
+	t.Cleanup(func() { _ = storage.Close() })
+	ctx := t.Context()
+
+	facts := []model.Fact{
+		{Target: "user:remote", Key: "topic", Value: "older", Timestamp: time.Now().Add(-time.Hour)},
+		{Target: "user:remote", Key: "topic", Value: "newer", Timestamp: time.Now()},
+	}
+	for _, fact := range facts {
+		if err := storage.Add(ctx, fact); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if removed, err := storage.EnforceMaxFacts(ctx, 1); removed != 1 || err != nil {
+		t.Fatalf("EnforceMaxFacts = %d, %v", removed, err)
+	}
+	byTarget, err := storage.GetByTarget(ctx, facts[0].Target)
+	if err != nil || len(byTarget) != 1 || byTarget[0].Value != "newer" {
+		t.Fatalf("facts after retention = %+v, %v", byTarget, err)
+	}
+	if removed, err := storage.Remove(ctx, facts[0].Target, func(model.Fact) bool { return true }); removed != 1 || err != nil {
+		t.Fatalf("Remove = %d, %v", removed, err)
+	}
+	recent, err := storage.GetRecent(ctx, 10)
+	if err != nil || len(recent) != 0 {
+		t.Fatalf("timeline after deletion = %+v, %v", recent, err)
+	}
+}
+
+func TestMaintenanceStopsWhenFactsCannotBeListed(t *testing.T) {
+	storage, server := setupRedisStore(t)
+	t.Cleanup(server.Close)
+	t.Cleanup(func() { _ = storage.Close() })
+	for _, value := range []string{"first", "second"} {
+		if err := storage.Add(t.Context(), model.Fact{Target: "user", Key: "topic", Value: value}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	server.Del(storage.prefix + TargetsKey)
+	if err := server.Set(storage.prefix+TargetsKey, "invalid targets index"); err != nil {
+		t.Fatal(err)
+	}
+
+	factStore := NewFactStore(storage, "")
+	if deleted, err := factStore.PerformMaintenance(t.Context(), 30, 1); deleted != 0 || err == nil {
+		t.Fatalf("maintenance = %d deletions, %v", deleted, err)
+	}
+	if facts, err := storage.GetByTarget(t.Context(), "user"); err != nil || len(facts) != 2 {
+		t.Fatalf("facts after failed maintenance = %+v, %v", facts, err)
+	}
+}
+
+func TestRedisRejectsNonStringFactValues(t *testing.T) {
+	storage, server := setupRedisStore(t)
+	t.Cleanup(server.Close)
+	t.Cleanup(func() { _ = storage.Close() })
+
+	server.HSet(storage.targetKey("user"), "hash", `{"target":"user","key":"score","value":42}`)
+	if _, err := storage.GetByTarget(t.Context(), "user"); err == nil {
+		t.Fatal("read returned successfully with a non-string fact value")
 	}
 }

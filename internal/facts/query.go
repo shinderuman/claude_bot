@@ -2,12 +2,14 @@ package facts
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
 
 	"claude_bot/internal/llm"
 	"claude_bot/internal/model"
+	"claude_bot/internal/prompts"
 )
 
 func (s *FactService) QueryRelevantFacts(ctx context.Context, author, authorUserName, message string) string {
@@ -15,69 +17,67 @@ func (s *FactService) QueryRelevantFacts(ctx context.Context, author, authorUser
 		return ""
 	}
 
-	prompt := llm.BuildFactQueryPrompt(authorUserName, author, message)
+	prompt := prompts.BuildFactQueryPrompt(authorUserName, author, message)
 	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 
-	response := s.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactQuery, s.config.MaxResponseTokens, nil, llm.TemperatureSystem)
+	response := s.llmClient.GenerateText(ctx, messages, prompts.Messages.System.FactQuery, s.config.MaxResponseTokens, nil, llm.TemperatureSystem)
 	if response == "" {
 		return ""
 	}
 
 	var q model.SearchQuery
-	jsonStr := llm.ExtractJSON(response)
-	if err := llm.UnmarshalWithRepair(jsonStr, &q, "検索クエリ"); err != nil {
-		log.Printf("検索クエリパースエラー: %v\nJSON: %s", err, jsonStr)
+	if err := json.Unmarshal([]byte(response), &q); err != nil {
+		log.Printf("検索クエリパースエラー: %v", err)
 		return ""
 	}
 
-	var builder strings.Builder
-	if len(q.Keys) > 0 {
-		if len(q.TargetCandidates) == 0 {
-			q.TargetCandidates = []string{author}
-		}
+	if len(q.Keys) == 0 {
+		return ""
+	}
+	if len(q.TargetCandidates) == 0 {
+		q.TargetCandidates = []string{author}
+	}
+	if s.config.BotUsername != "" {
+		q.TargetCandidates = append(q.TargetCandidates, s.config.BotUsername)
+	}
+	q.TargetCandidates = append(q.TargetCandidates, model.GeneralTarget)
 
-		if s.config.BotUsername != "" {
-			q.TargetCandidates = append(q.TargetCandidates, s.config.BotUsername)
-		}
-
-		q.TargetCandidates = append(q.TargetCandidates, model.GeneralTarget)
-
-		facts := s.factStore.SearchFuzzy(q.TargetCandidates, q.Keys)
-
-		recentFacts := s.factStore.GetRecentFacts(RecentFactsCount)
-
-		seen := make(map[string]bool)
-		for _, f := range facts {
-			key := fmt.Sprintf("%s:%s", f.Target, f.Key)
+	facts, err := s.factStore.SearchFuzzy(ctx, q.TargetCandidates, q.Keys)
+	if err != nil {
+		log.Printf("関連ファクト検索エラー: %v", err)
+		return ""
+	}
+	recent, err := s.factStore.GetRecentFacts(ctx, RecentFactsCount)
+	if err != nil {
+		log.Printf("最近のファクト取得エラー: %v", err)
+	}
+	type targetKey struct{ target, key string }
+	seen := make(map[targetKey]bool, len(facts))
+	for _, fact := range facts {
+		seen[targetKey{fact.Target, fact.Key}] = true
+	}
+	for _, fact := range recent {
+		key := targetKey{fact.Target, fact.Key}
+		if !seen[key] {
+			facts = append(facts, fact)
 			seen[key] = true
-		}
-
-		for _, f := range recentFacts {
-			key := fmt.Sprintf("%s:%s", f.Target, f.Key)
-			if !seen[key] {
-				facts = append(facts, f)
-				seen[key] = true
-			}
-		}
-
-		if len(facts) > 0 {
-			for _, f := range facts {
-				target := f.Target
-				if f.TargetUserName != "" && f.TargetUserName != f.Target {
-					target = fmt.Sprintf("%s (対象ID: %s)", f.TargetUserName, f.Target)
-				}
-				fmt.Fprintf(&builder, "- %s についての %s: %v", target, f.Key, f.Value)
-				if f.SourceType != "" {
-					fmt.Fprintf(&builder, " (source: %s)", f.SourceType)
-				}
-				if f.Author != "" {
-					fmt.Fprintf(&builder, " (情報提供者ID: %s)", f.Author)
-				}
-				builder.WriteByte('\n')
-			}
-			return builder.String()
 		}
 	}
 
-	return ""
+	var builder strings.Builder
+	for _, fact := range facts {
+		target := fact.Target
+		if fact.TargetUserName != "" && fact.TargetUserName != fact.Target {
+			target = fmt.Sprintf("%s (対象ID: %s)", fact.TargetUserName, fact.Target)
+		}
+		fmt.Fprintf(&builder, "- %s についての %s: %v", target, fact.Key, fact.Value)
+		if fact.SourceType != "" {
+			fmt.Fprintf(&builder, " (source: %s)", fact.SourceType)
+		}
+		if fact.Author != "" {
+			fmt.Fprintf(&builder, " (情報提供者ID: %s)", fact.Author)
+		}
+		builder.WriteByte('\n')
+	}
+	return builder.String()
 }

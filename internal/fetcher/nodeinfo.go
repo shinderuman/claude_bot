@@ -34,93 +34,49 @@ var fediverseSoftware = map[string]bool{
 	"cherrypick": true,
 }
 
-type NodeInfoLinks struct {
-	Links []NodeInfoLink `json:"links"`
-}
-
-type NodeInfoLink struct {
-	Rel  string `json:"rel"`
-	Href string `json:"href"`
-}
-
-type NodeInfo struct {
-	Software NodeInfoSoftware `json:"software"`
-}
-
-type NodeInfoSoftware struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
-}
-
-func IsFediverseServer(domain string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), nodeInfoTimeout)
+func IsFediverseServer(ctx context.Context, domain string) bool {
+	ctx, cancel := context.WithTimeout(ctx, nodeInfoTimeout)
 	defer cancel()
 
-	wellKnownURL := fmt.Sprintf("https://%s/.well-known/nodeinfo", domain)
-	req, err := http.NewRequestWithContext(ctx, "GET", wellKnownURL, nil)
-	if err != nil {
+	var discovery struct {
+		Links []struct{ Rel, Href string } `json:"links"`
+	}
+	if err := fetchNodeInfo(ctx, fmt.Sprintf("https://%s/.well-known/nodeinfo", domain), &discovery); err != nil {
 		return false
+	}
+
+	for _, link := range discovery.Links {
+		if !strings.Contains(link.Rel, "ns/schema/2.") {
+			continue
+		}
+		var node struct {
+			Software struct{ Name string } `json:"software"`
+		}
+		if err := fetchNodeInfo(ctx, link.Href, &node); err != nil {
+			return false
+		}
+		return fediverseSoftware[strings.ToLower(node.Software.Name)]
+	}
+	return false
+}
+
+func fetchNodeInfo(ctx context.Context, url string, target any) error {
+	if err := IsValidURL(url, nil); err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
 	}
 	req.Header.Set("User-Agent", UserAgent)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return false
+		return err
 	}
-	defer resp.Body.Close() //nolint:errcheck
-
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return false
+		return fmt.Errorf("NodeInfo HTTP %d", resp.StatusCode)
 	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return false
-	}
-
-	var links NodeInfoLinks
-	if err := json.Unmarshal(body, &links); err != nil {
-		return false
-	}
-
-	var nodeInfoURL string
-	for _, link := range links.Links {
-		if strings.Contains(link.Rel, "ns/schema/2.") {
-			nodeInfoURL = link.Href
-			break
-		}
-	}
-
-	if nodeInfoURL == "" {
-		return false
-	}
-
-	req, err = http.NewRequestWithContext(ctx, "GET", nodeInfoURL, nil)
-	if err != nil {
-		return false
-	}
-	req.Header.Set("User-Agent", UserAgent)
-
-	resp, err = http.DefaultClient.Do(req)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close() //nolint:errcheck
-
-	if resp.StatusCode != http.StatusOK {
-		return false
-	}
-
-	body, err = io.ReadAll(resp.Body)
-	if err != nil {
-		return false
-	}
-
-	var nodeInfo NodeInfo
-	if err := json.Unmarshal(body, &nodeInfo); err != nil {
-		return false
-	}
-
-	softwareName := strings.ToLower(nodeInfo.Software.Name)
-	return fediverseSoftware[softwareName]
+	return json.NewDecoder(io.LimitReader(resp.Body, MaxBodySize)).Decode(target)
 }

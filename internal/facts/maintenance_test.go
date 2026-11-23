@@ -39,10 +39,6 @@ func (m *MockFactStorage) GetByTarget(ctx context.Context, target string) ([]mod
 func (m *MockFactStorage) GetAllFacts(ctx context.Context) ([]model.Fact, error) {
 	return m.GetAllFactsFunc(ctx)
 }
-func (m *MockFactStorage) GetAllTargets(ctx context.Context) ([]string, error) { return nil, nil }
-func (m *MockFactStorage) GetRandomGeneralFactBundle(ctx context.Context, count int) ([]model.Fact, error) {
-	return nil, nil
-}
 func (m *MockFactStorage) Remove(ctx context.Context, target string, filter func(model.Fact) bool) (int, error) {
 	if m.RemoveFunc != nil {
 		return m.RemoveFunc(ctx, target, filter)
@@ -54,9 +50,6 @@ func (m *MockFactStorage) Replace(ctx context.Context, target string, oldFacts, 
 		return m.ReplaceFunc(ctx, target, oldFacts, newFacts)
 	}
 	return nil
-}
-func (m *MockFactStorage) Search(ctx context.Context, query model.SearchQuery) ([]model.Fact, error) {
-	return nil, nil
 }
 func (m *MockFactStorage) GetRecent(ctx context.Context, limit int) ([]model.Fact, error) {
 	return nil, nil
@@ -112,7 +105,7 @@ func TestConsolidateBotFacts(t *testing.T) {
 		},
 	}
 
-	factStore := store.NewFactStore(mockStorage, nil, "")
+	factStore := store.NewFactStore(mockStorage, "")
 	service := NewFactService(&config.Config{EnableFactStore: true}, factStore, mockLLM, nil, nil, nil)
 
 	err := service.ConsolidateBotFacts(context.Background(), target, facts)
@@ -120,5 +113,69 @@ func TestConsolidateBotFacts(t *testing.T) {
 		t.Fatalf("ConsolidateBotFacts failed: %v", err)
 	}
 
-	time.Sleep(100 * time.Millisecond)
+}
+
+func TestArchiveKeepsFactsWhenLaterBatchFails(t *testing.T) {
+	const target = "user@example.com"
+	input := makeFacts(FactArchiveBatchSize+1, time.Now())
+	storage := store.NewMemoryFactStore()
+	for i := range input {
+		input[i].Target = target
+		if err := storage.Add(t.Context(), input[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	calls := 0
+	mockLLM := &MockLLMClient{
+		GenerateTextFunc: func(context.Context, []model.Message, string, int64, []model.Image, float64) string {
+			calls++
+			if calls == 1 {
+				return `[{"key":"archive","value":"first batch"}]`
+			}
+			return ""
+		},
+	}
+	service := NewFactService(&config.Config{BotUsername: "bot"}, store.NewFactStore(storage, ""), mockLLM, nil, nil, nil)
+	if err := service.archiveTargetFacts(t.Context(), target, input); err == nil || calls != 2 {
+		t.Fatalf("archiving error = %v, LLM calls = %d", err, calls)
+	}
+
+	all, err := storage.GetByTarget(t.Context(), target)
+	if err != nil || len(all) != len(input) {
+		t.Fatalf("remaining facts = %d, %v, want %d", len(all), err, len(input))
+	}
+}
+
+func TestFactReplacementRejectsTruncatedJSON(t *testing.T) {
+	const target = "user"
+	fact := model.Fact{Target: target, Key: "hobby", Value: "gardening"}
+	for _, operation := range []string{"archive", "consolidation"} {
+		t.Run(operation, func(t *testing.T) {
+			storage := store.NewMemoryFactStore()
+			if err := storage.Add(t.Context(), fact); err != nil {
+				t.Fatal(err)
+			}
+			modelClient := &MockLLMClient{
+				GenerateTextFunc: func(context.Context, []model.Message, string, int64, []model.Image, float64) string {
+					return `[{"key":"summary","value":"first entry"},{"key":"unfinished`
+				},
+			}
+			service := NewFactService(&config.Config{}, store.NewFactStore(storage, ""), modelClient, nil, nil, nil)
+
+			var err error
+			switch operation {
+			case "archive":
+				err = service.archiveTargetFacts(t.Context(), target, []model.Fact{fact})
+			case "consolidation":
+				err = service.ConsolidateBotFacts(t.Context(), target, []model.Fact{fact})
+			}
+			if err == nil {
+				t.Fatal("truncated response was accepted for fact replacement")
+			}
+			got, err := storage.GetByTarget(t.Context(), target)
+			if err != nil || len(got) != 1 || got[0].Value != fact.Value {
+				t.Fatalf("facts after failed replacement = %+v, %v", got, err)
+			}
+		})
+	}
 }

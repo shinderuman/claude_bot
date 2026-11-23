@@ -2,12 +2,14 @@ package facts
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
 
 	"claude_bot/internal/llm"
 	"claude_bot/internal/model"
+	"claude_bot/internal/prompts"
 )
 
 func (s *FactService) ExtractAndSaveFacts(ctx context.Context, message string, baseFact model.Fact) {
@@ -15,24 +17,11 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, message string, b
 		return
 	}
 
-	prompt := llm.BuildFactExtractionPrompt(baseFact.AuthorUserName, baseFact.Author, message, s.config.BotUsername, baseFact.IsTrusted)
-	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
-
-	response := s.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, s.config.MaxFactTokens, nil, llm.TemperatureSystem)
-	if response == "" {
-		return
-	}
-
-	var extracted []model.Fact
-	jsonStr := llm.ExtractJSON(response)
-	if err := llm.UnmarshalWithRepair(jsonStr, &extracted, "事実抽出"); err != nil {
-		return
-	}
-
+	prompt := prompts.BuildFactExtractionPrompt(baseFact.AuthorUserName, baseFact.Author, message, s.config.BotUsername, baseFact.IsTrusted)
+	extracted := s.extractFacts(ctx, prompt, "事実抽出")
 	if len(extracted) == 0 {
 		return
 	}
-
 	log.Printf("事実抽出JSON: %d件抽出", len(extracted))
 	for _, item := range extracted {
 		target, targetUserName := resolveFactTarget(item.Target, item.TargetUserName, baseFact.Author, baseFact.AuthorUserName, false)
@@ -63,43 +52,48 @@ func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, url
 		return
 	}
 
-	prompt := llm.BuildURLContentFactExtractionPrompt(urlContent)
-	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
+	s.CollectURLFacts(ctx, urlContent, baseFact, "")
+}
 
-	response := s.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, s.config.MaxFactTokens, nil, llm.TemperatureSystem)
-	if response == "" {
-		return
-	}
-
-	var extracted []model.Fact
-	jsonStr := llm.ExtractJSON(response)
-	if err := llm.UnmarshalWithRepair(jsonStr, &extracted, "URL事実抽出"); err != nil {
-		return
-	}
-
-	if len(extracted) == 0 {
-		return
-	}
-
-	log.Printf("URL事実抽出JSON: %d件抽出", len(extracted))
-	for _, item := range extracted {
-		fact := model.Fact{
-			Target:             item.Target,
-			TargetUserName:     item.TargetUserName,
-			Author:             baseFact.PostAuthor,
-			AuthorUserName:     baseFact.PostAuthorUserName,
-			Key:                item.Key,
-			Value:              item.Value,
-			Timestamp:          time.Now(),
-			SourceType:         baseFact.SourceType,
-			SourceURL:          baseFact.SourceURL,
-			PostAuthor:         baseFact.PostAuthor,
-			PostAuthorUserName: baseFact.PostAuthorUserName,
+func (s *FactService) CollectURLFacts(ctx context.Context, urlContent string, baseFact model.Fact, generalTargetName string) {
+	prompt := prompts.BuildURLContentFactExtractionPrompt(urlContent)
+	for _, item := range s.extractFacts(ctx, prompt, "URL事実抽出") {
+		fact := baseFact
+		fact.Target, fact.TargetUserName = item.Target, item.TargetUserName
+		if fact.Target == "" && generalTargetName != "" {
+			fact.Target, fact.TargetUserName = model.GeneralTarget, generalTargetName
 		}
-
+		fact.Author, fact.AuthorUserName = baseFact.PostAuthor, baseFact.PostAuthorUserName
+		fact.Key, fact.Value, fact.Timestamp = item.Key, item.Value, time.Now()
 		s.AddFact(fact)
 	}
+}
 
+func (s *FactService) CollectPostFacts(ctx context.Context, content string, baseFact model.Fact) {
+	prompt := prompts.BuildFactExtractionPrompt(baseFact.AuthorUserName, baseFact.Author, content, s.config.BotUsername, false)
+	for _, item := range s.extractFacts(ctx, prompt, "投稿: "+baseFact.Author) {
+		fact := baseFact
+		fact.Target, fact.TargetUserName = item.Target, item.TargetUserName
+		if fact.Target == "" {
+			fact.Target, fact.TargetUserName = baseFact.Author, baseFact.AuthorUserName
+		}
+		fact.Key, fact.Value, fact.Timestamp = item.Key, item.Value, time.Now()
+		s.AddFact(fact)
+	}
+}
+
+func (s *FactService) extractFacts(ctx context.Context, prompt, operation string) []model.Fact {
+	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
+	response := s.llmClient.GenerateText(ctx, messages, prompts.Messages.System.FactExtraction, s.config.MaxFactTokens, nil, llm.TemperatureSystem)
+	if response == "" {
+		return nil
+	}
+	var extracted []model.Fact
+	if err := json.Unmarshal([]byte(response), &extracted); err != nil {
+		log.Printf("%sのJSONを解析できませんでした: %v", operation, err)
+		return nil
+	}
+	return extracted
 }
 
 func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summary string, baseFact model.Fact) {
@@ -107,25 +101,8 @@ func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summar
 		return
 	}
 
-	prompt := llm.BuildSummaryFactExtractionPrompt(summary, baseFact.Author)
-	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
-
-	response := s.llmClient.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, s.config.MaxFactTokens, nil, llm.TemperatureSystem)
-	if response == "" {
-		return
-	}
-
-	var extracted []model.Fact
-	jsonStr := llm.ExtractJSON(response)
-	if err := llm.UnmarshalWithRepair(jsonStr, &extracted, "サマリ事実抽出"); err != nil {
-		return
-	}
-
-	if len(extracted) == 0 {
-		return
-	}
-
-	for _, item := range extracted {
+	prompt := prompts.BuildSummaryFactExtractionPrompt(summary, baseFact.Author)
+	for _, item := range s.extractFacts(ctx, prompt, "サマリ事実抽出") {
 		target, targetUserName := resolveFactTarget(item.Target, item.TargetUserName, baseFact.Author, baseFact.Author, true)
 
 		fact := model.Fact{
@@ -153,8 +130,6 @@ func (s *FactService) SaveColleagueFact(ctx context.Context, targetUserName, dis
 
 	myUsername := s.config.BotUsername
 
-	s.factStore.RemoveFactsByKey(myUsername, key)
-
 	fact := model.Fact{
 		Target:             myUsername,
 		TargetUserName:     myUsername,
@@ -169,7 +144,13 @@ func (s *FactService) SaveColleagueFact(ctx context.Context, targetUserName, dis
 		PostAuthorUserName: targetUserName,
 	}
 
-	s.AddFact(fact)
+	if !s.isValidFact(fact) {
+		return nil
+	}
+	if err := s.factStore.ReplaceFactForKey(ctx, fact); err != nil {
+		return err
+	}
+	s.logFactSaved(fact)
 	return nil
 }
 

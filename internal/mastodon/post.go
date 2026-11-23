@@ -2,106 +2,14 @@ package mastodon
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
-	"strings"
 	"time"
-
-	"claude_bot/internal/model"
+	"unicode/utf8"
 
 	gomastodon "github.com/mattn/go-mastodon"
-	"golang.org/x/net/html"
 )
-
-func (c *Client) ExtractUserMessage(notification *gomastodon.Notification) string {
-	content, _, _ := c.ExtractContentFromStatus(notification.Status)
-	return content
-}
-
-func (c *Client) ExtractContentFromStatus(status *gomastodon.Status) (string, []model.Image, error) {
-	content := stripHTML(string(status.Content))
-	words := strings.Fields(content)
-
-	var filtered []string
-	for _, word := range words {
-		if !strings.HasPrefix(word, "@") {
-			filtered = append(filtered, word)
-		}
-	}
-
-	text := strings.Join(filtered, " ")
-
-	var images []model.Image
-	for _, attachment := range status.MediaAttachments {
-		if attachment.Type == "image" {
-			base64Image, mediaType, err := c.downloadImage(attachment.URL)
-			if err != nil {
-				log.Printf("画像ダウンロードエラー (%s): %v", attachment.URL, err)
-				continue
-			}
-			images = append(images, model.Image{
-				Data:      base64Image,
-				MediaType: mediaType,
-			})
-		}
-	}
-
-	return text, images, nil
-}
-
-func (c *Client) downloadImage(url string) (string, string, error) {
-	resp, err := http.Get(url)
-	if err != nil {
-		return "", "", err
-	}
-	defer resp.Body.Close() //nolint:errcheck
-
-	if resp.StatusCode != http.StatusOK {
-		return "", "", fmt.Errorf("HTTP error: %d", resp.StatusCode)
-	}
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", "", err
-	}
-
-	mimeType := http.DetectContentType(data)
-	if !strings.HasPrefix(mimeType, "image/") {
-		return "", "", fmt.Errorf("not an image: %s", mimeType)
-	}
-
-	return base64.StdEncoding.EncodeToString(data), mimeType, nil
-}
-
-func stripHTML(htmlStr string) string {
-	doc, err := html.Parse(strings.NewReader(htmlStr))
-	if err != nil {
-		return htmlStr
-	}
-
-	var buf strings.Builder
-	extractText(doc, &buf)
-	return buf.String()
-}
-
-func (c *Client) StripHTML(htmlStr string) string {
-	return stripHTML(htmlStr)
-}
-
-func extractText(n *html.Node, buf *strings.Builder) {
-	if n.Type == html.TextNode {
-		buf.WriteString(n.Data)
-	} else if n.Type == html.ElementNode && n.Data == "br" {
-		buf.WriteString("\n")
-	}
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		extractText(c, buf)
-	}
-}
 
 func (c *Client) BuildMention(acct string) string {
 	return "@" + acct + " "
@@ -109,12 +17,19 @@ func (c *Client) BuildMention(acct string) string {
 
 func (c *Client) PostResponseWithSplit(ctx context.Context, inReplyToID, mention, response, visibility string) ([]*gomastodon.Status, error) {
 	parts := splitResponse(response, mention, c.config.MaxPostChars)
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("投稿の文字数上限 %d にメンションと本文が収まりません", c.config.MaxPostChars)
+	}
 
 	var postedStatuses []*gomastodon.Status
 	currentReplyID := inReplyToID
 	for i, part := range parts {
 		if i > 0 {
-			time.Sleep(SplitPostDelay)
+			select {
+			case <-ctx.Done():
+				return postedStatuses, ctx.Err()
+			case <-time.After(SplitPostDelay):
+			}
 		}
 
 		content := mention + part
@@ -177,7 +92,10 @@ func (c *Client) postReply(ctx context.Context, inReplyToID, content, visibility
 }
 
 func (c *Client) PostStatus(ctx context.Context, content, visibility string) (*gomastodon.Status, error) {
-	limit := c.config.MaxPostChars - len([]rune(BotTag))
+	limit := c.config.MaxPostChars - utf8.RuneCountInString(BotTag)
+	if limit < 0 {
+		return nil, fmt.Errorf("投稿の文字数上限 %d にBotタグが収まりません", c.config.MaxPostChars)
+	}
 	truncated := truncateText(content, limit) + BotTag
 
 	toot := &gomastodon.Toot{
@@ -211,8 +129,11 @@ func (c *Client) handlePostError(err error, contextType, content string) {
 }
 
 func splitResponse(response, mention string, maxChars int) []string {
-	mentionLen := len([]rune(mention))
+	mentionLen := utf8.RuneCountInString(mention)
 	maxContentLen := maxChars - mentionLen
+	if maxContentLen <= 0 {
+		return nil
+	}
 
 	runes := []rune(response)
 	if len(runes) <= maxContentLen {

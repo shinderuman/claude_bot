@@ -3,38 +3,29 @@ package store
 import (
 	"claude_bot/internal/model"
 	"context"
-	"log"
 )
 
-func (s *FactStore) SearchFuzzy(targets []string, keys []string) []model.Fact {
-	results, err := s.storage.SearchFuzzy(context.Background(), targets, keys)
+func (s *FactStore) SearchFuzzy(ctx context.Context, targets, keys []string) ([]model.Fact, error) {
+	return s.storage.SearchFuzzy(ctx, targets, keys)
+}
+
+func (s *FactStore) GetRecentFacts(ctx context.Context, limit int) ([]model.Fact, error) {
+	return s.storage.GetRecent(ctx, limit)
+}
+
+func (s *FactStore) GetRandomGeneralFactBundle(ctx context.Context, count int) ([]model.Fact, error) {
+	facts, err := s.GetFactsByTarget(ctx, model.GeneralTarget)
 	if err != nil {
-		log.Printf("SearchFuzzy error: %v", err)
-		return []model.Fact{}
+		return nil, err
 	}
-	return results
+	return facts[:min(count, len(facts))], nil
 }
 
-func (s *FactStore) GetRecentFacts(limit int) []model.Fact {
-	results, err := s.storage.GetRecent(context.Background(), limit)
+func (s *FactStore) GetAllTargets(ctx context.Context) ([]string, error) {
+	allFacts, err := s.GetAllFacts(ctx)
 	if err != nil {
-		log.Printf("GetRecentFacts error: %v", err)
-		return []model.Fact{}
+		return nil, err
 	}
-	return results
-}
-
-func (s *FactStore) GetRandomGeneralFactBundle(count int) ([]model.Fact, error) {
-
-	facts := s.GetFactsByTarget(model.GeneralTarget)
-	if len(facts) <= count {
-		return facts, nil
-	}
-	return facts[:count], nil
-}
-
-func (s *FactStore) GetAllTargets() []string {
-	allFacts := s.GetAllFacts()
 	targetsMap := make(map[string]bool)
 	for _, f := range allFacts {
 		targetsMap[f.Target] = true
@@ -43,5 +34,5 @@ func (s *FactStore) GetAllTargets() []string {
 	for t := range targetsMap {
 		targets = append(targets, t)
 	}
-	return targets
+	return targets, nil
 }

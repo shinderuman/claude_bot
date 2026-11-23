@@ -109,6 +109,12 @@ func TestIsBroadcastCommand(t *testing.T) {
 			want:             true,
 		},
 		{
+			name:             "Valid command with full-width space",
+			broadcastCommand: "!all",
+			content:          "!all　こんにちは",
+			want:             true,
+		},
+		{
 			name:             "Valid command with newline separator",
 			broadcastCommand: "!all",
 			content:          "!all\nhello",

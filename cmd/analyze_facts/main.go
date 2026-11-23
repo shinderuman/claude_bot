@@ -1,14 +1,12 @@
 package main
 
 import (
-	"log"
 	"os"
 
+	"claude_bot/internal/cli"
 	"claude_bot/internal/facttool"
 )
 
 func main() {
-	if err := facttool.Analyze("data/facts.json", os.Stdout); err != nil {
-		log.Fatal(err)
-	}
+	os.Exit(cli.ExitCode(facttool.Analyze("data/facts.json", os.Stdout)))
 }

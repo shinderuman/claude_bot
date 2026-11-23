@@ -29,21 +29,21 @@ LLM APIとの接続を確認するための専用コマンドが用意されて�
 ```bash
 # ビルドと実行
 go build -o test_claude ./cmd/test_claude
-./test_claude -message "こんにちは"
+./test_claude -message "こんにちは" data/.env
 
 # 画像認識のテスト（オプション）
-./test_claude -message "この画像は何ですか？" -image /path/to/image.png
+./test_claude -message "この画像は何ですか？" -image /path/to/image.png data/.env
 
 # 画像生成のテスト（オプション）
-./test_claude -mode generate-image -message "赤い丸と青い四角を描いて"
+./test_claude -mode generate-image -message "赤い丸と青い四角を描いて" data/.env
 
 # 会話モード（インタラクティブ）
-./test_claude -mode conversation
+./test_claude -mode conversation data/.env
 ```
 
 ### 4. ボットの起動
 ```bash
-go run ./cmd/claude_bot
+go run ./cmd/claude_bot -env data/.env
 ```
 
 ---

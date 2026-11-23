@@ -3,7 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -13,13 +13,17 @@ import (
 	"claude_bot/internal/config"
 	"claude_bot/internal/llm/provider"
 	"claude_bot/internal/model"
+	"claude_bot/internal/prompts"
 )
+
+func (m *MockProvider) SupportsStructuredOutput() bool { return true }
 
 func (m *MockProvider) GenerateStructuredContent(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image, temperature float64, schema *provider.StructuredSchema) (string, string, error) {
 	return m.GenerateContent(ctx, messages, systemPrompt, maxTokens, images, temperature)
 }
 
 type structuredProviderMock struct {
+	textOnly        bool
 	mu              sync.Mutex
 	structuredCalls int
 	contentCalls    int
@@ -27,6 +31,8 @@ type structuredProviderMock struct {
 	structuredErr   error
 	content         string
 }
+
+func (m *structuredProviderMock) SupportsStructuredOutput() bool { return !m.textOnly }
 
 func (m *structuredProviderMock) GenerateContent(context.Context, []model.Message, string, int64, []model.Image, float64) (string, string, error) {
 	m.mu.Lock()
@@ -60,11 +66,11 @@ func structuredTestClient(p provider.Provider) *Client {
 func TestGenerateTextUsesStructuredOutputWithoutFallback(t *testing.T) {
 	p := &structuredProviderMock{
 		structured: `{"target_candidates":[],"keys":[]}`,
-		content:    "legacy",
+		content:    "text result",
 	}
 	client := structuredTestClient(p)
 
-	got := client.GenerateText(context.Background(), []model.Message{{Role: model.RoleUser, Content: "query"}}, Messages.System.FactQuery, 100, nil, TemperatureSystem)
+	got := client.GenerateText(context.Background(), []model.Message{{Role: model.RoleUser, Content: "query"}}, prompts.Messages.System.FactQuery, 100, nil, TemperatureSystem)
 	if got != p.structured {
 		t.Fatalf("GenerateText() = %q, want %q", got, p.structured)
 	}
@@ -73,37 +79,46 @@ func TestGenerateTextUsesStructuredOutputWithoutFallback(t *testing.T) {
 	}
 }
 
-func TestGenerateTextFallbacksAfterStructuredError(t *testing.T) {
-	p := &structuredProviderMock{
-		structuredErr: errors.New("tool call missing"),
-		content:       `{"target_candidates":[],"keys":[]}`,
-	}
-	client := structuredTestClient(p)
-
-	got := client.GenerateText(context.Background(), []model.Message{{Role: model.RoleUser, Content: "query"}}, Messages.System.FactQuery, 100, nil, TemperatureSystem)
-	if got != p.content {
-		t.Fatalf("GenerateText() = %q, want %q (fallback content)", got, p.content)
-	}
-	if p.structuredCalls != 1 || p.contentCalls != 1 {
-		t.Fatalf("calls = structured:%d content:%d, want 1/1 (with fallback)", p.structuredCalls, p.contentCalls)
+func TestGenerateTextDoesNotResendInvalidStructuredResult(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		result string
+		err    error
+	}{
+		{name: "missing result", err: provider.ErrInvalidStructuredOutput},
+		{name: "schema mismatch", result: `{"keys":[]}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			p := &structuredProviderMock{
+				structured: test.result, structuredErr: test.err,
+				content: `{"target_candidates":[],"keys":[]}`,
+			}
+			client := structuredTestClient(p)
+			got := client.GenerateText(t.Context(), []model.Message{{Role: model.RoleUser, Content: "query"}},
+				prompts.Messages.System.FactQuery, 100, nil, TemperatureSystem)
+			if got != "" || p.structuredCalls != 1 || p.contentCalls != 0 {
+				t.Fatalf("result = %q, requests = %d structured and %d text", got, p.structuredCalls, p.contentCalls)
+			}
+		})
 	}
 }
 
-func TestGenerateTextSkipsUnsupportedToolsOnLaterRequests(t *testing.T) {
-	p := &structuredProviderMock{
-		structuredErr: errors.New("tool call missing"),
-		content:       "text result",
-	}
-	client := structuredTestClient(p)
-
-	for _, prompt := range []string{Messages.System.FactQuery, Messages.System.IntentClassification, Messages.System.FactExtraction} {
-		got := client.GenerateText(context.Background(), []model.Message{{Role: model.RoleUser, Content: "query"}}, prompt, 100, nil, TemperatureSystem)
-		if got != p.content {
-			t.Fatalf("GenerateText() = %q, want %q", got, p.content)
+func TestTextOnlyProviderSendsOneRequestAndValidatesJSON(t *testing.T) {
+	for _, test := range []struct {
+		result string
+		want   string
+	}{
+		{result: `{"target_candidates":[],"keys":[]}`, want: `{"target_candidates":[],"keys":[]}`},
+		{result: `{"target_candidates":"user","keys":[]}`},
+		{result: "```json\n" + `{"target_candidates":[],"keys":[]}` + "\n```"},
+	} {
+		p := &structuredProviderMock{textOnly: true, content: test.result}
+		client := structuredTestClient(p)
+		got := client.GenerateText(t.Context(), []model.Message{{Role: model.RoleUser, Content: "query"}},
+			prompts.Messages.System.FactQuery, 100, nil, TemperatureSystem)
+		if got != test.want || p.structuredCalls != 0 || p.contentCalls != 1 {
+			t.Fatalf("result = %q, want %q, calls = %d structured and %d text", got, test.want, p.structuredCalls, p.contentCalls)
 		}
-	}
-	if p.structuredCalls != 1 || p.contentCalls != 3 {
-		t.Fatalf("calls = structured:%d content:%d, want 1/3", p.structuredCalls, p.contentCalls)
 	}
 }
 
@@ -112,7 +127,7 @@ func TestGenerateTextKeepsUsingSupportedTools(t *testing.T) {
 	client := structuredTestClient(p)
 
 	for i := 0; i < 3; i++ {
-		got := client.GenerateText(context.Background(), []model.Message{{Role: model.RoleUser, Content: "query"}}, Messages.System.FactQuery, 100, nil, TemperatureSystem)
+		got := client.GenerateText(context.Background(), []model.Message{{Role: model.RoleUser, Content: "query"}}, prompts.Messages.System.FactQuery, 100, nil, TemperatureSystem)
 		if got != p.structured {
 			t.Fatalf("GenerateText() = %q, want %q", got, p.structured)
 		}
@@ -122,30 +137,30 @@ func TestGenerateTextKeepsUsingSupportedTools(t *testing.T) {
 	}
 }
 
-func TestGenerateTextStopsUsingToolsAfterLaterFailure(t *testing.T) {
+func TestGenerateTextKeepsUsingToolsAfterInvalidResult(t *testing.T) {
 	p := &structuredProviderMock{
 		structured: `{"target_candidates":[],"keys":[]}`,
 		content:    "text result",
 	}
 	client := structuredTestClient(p)
-	got := client.GenerateText(context.Background(), []model.Message{{Role: model.RoleUser, Content: "query"}}, Messages.System.FactQuery, 100, nil, TemperatureSystem)
+	got := client.GenerateText(context.Background(), []model.Message{{Role: model.RoleUser, Content: "query"}}, prompts.Messages.System.FactQuery, 100, nil, TemperatureSystem)
 	if got != p.structured {
 		t.Fatalf("first GenerateText() = %q, want %q", got, p.structured)
 	}
 
-	p.structuredErr = errors.New("structured tool call was not returned")
-	for _, prompt := range []string{Messages.System.IntentClassification, Messages.System.FactQuery, Messages.System.FactExtraction} {
+	p.structuredErr = provider.ErrInvalidStructuredOutput
+	for _, prompt := range []string{prompts.Messages.System.IntentClassification, prompts.Messages.System.FactQuery, prompts.Messages.System.FactExtraction} {
 		got := client.GenerateText(context.Background(), []model.Message{{Role: model.RoleUser, Content: "query"}}, prompt, 100, nil, TemperatureSystem)
-		if got != p.content {
-			t.Fatalf("GenerateText() = %q, want %q", got, p.content)
+		if got != "" {
+			t.Fatalf("GenerateText() = %q after an invalid result", got)
 		}
 	}
-	if p.structuredCalls != 2 || p.contentCalls != 3 {
-		t.Fatalf("calls = structured:%d content:%d, want 2/3", p.structuredCalls, p.contentCalls)
+	if p.structuredCalls != 4 || p.contentCalls != 0 {
+		t.Fatalf("calls = structured:%d content:%d, want 4/0", p.structuredCalls, p.contentCalls)
 	}
 }
 
-func TestGenerateTextStopsSendingToolsAfterTextOnlyAPIResponse(t *testing.T) {
+func TestGenerateTextRejectsTextInToolResponse(t *testing.T) {
 	var toolRequests, textRequests atomic.Int32
 	result := `{"target_candidates":[],"keys":[]}`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -179,44 +194,25 @@ func TestGenerateTextStopsSendingToolsAfterTextOnlyAPIResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(&config.Config{
+	client, err := NewClient(&config.Config{
 		LLMProvider: config.LLMProviderClaude, LLMMaxConcurrency: 1,
 		AnthropicBaseURL: server.URL, AnthropicAuthToken: "test-token", AnthropicModel: "test-model",
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for i := 0; i < 4; i++ {
-		got := client.GenerateText(context.Background(), []model.Message{{Role: model.RoleUser, Content: "query"}}, Messages.System.FactQuery, 100, nil, TemperatureSystem)
-		if got != result {
-			t.Fatalf("GenerateText() = %q, want %q", got, result)
+		got := client.GenerateText(context.Background(), []model.Message{{Role: model.RoleUser, Content: "query"}}, prompts.Messages.System.FactQuery, 100, nil, TemperatureSystem)
+		want := ""
+		if i == 0 {
+			want = result
+		}
+		if got != want {
+			t.Fatalf("GenerateText() = %q, want %q", got, want)
 		}
 	}
-	if tools, texts := toolRequests.Load(), textRequests.Load(); tools != 2 || texts != 3 {
-		t.Fatalf("API requests = tools:%d text:%d, want 2/3", tools, texts)
-	}
-}
-
-func TestGenerateTextChecksUnsupportedToolsOnceConcurrently(t *testing.T) {
-	p := &structuredProviderMock{structuredErr: errors.New("tool call missing"), content: "text result"}
-	client := structuredTestClient(p)
-	const requests = 8
-	client.semaphore = make(chan struct{}, requests)
-
-	start := make(chan struct{})
-	var wg sync.WaitGroup
-	for i := 0; i < requests; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			<-start
-			got := client.GenerateText(context.Background(), []model.Message{{Role: model.RoleUser, Content: "query"}}, Messages.System.FactQuery, 100, nil, TemperatureSystem)
-			if got != p.content {
-				t.Errorf("GenerateText() = %q, want %q", got, p.content)
-			}
-		}()
-	}
-	close(start)
-	wg.Wait()
-	if p.structuredCalls != 1 || p.contentCalls != requests {
-		t.Fatalf("calls = structured:%d content:%d, want 1/%d", p.structuredCalls, p.contentCalls, requests)
+	if tools, texts := toolRequests.Load(), textRequests.Load(); tools != 4 || texts != 0 {
+		t.Fatalf("API requests = tools:%d text:%d, want 4/0", tools, texts)
 	}
 }
 
@@ -224,7 +220,7 @@ func TestGenerateTextUsesNormalPathForChat(t *testing.T) {
 	p := &structuredProviderMock{content: "chat"}
 	client := structuredTestClient(p)
 
-	got := client.GenerateText(context.Background(), []model.Message{{Role: model.RoleUser, Content: "hello"}}, Messages.System.Base, 100, nil, 0.5)
+	got := client.GenerateText(context.Background(), []model.Message{{Role: model.RoleUser, Content: "hello"}}, prompts.Messages.System.Base, 100, nil, 0.5)
 	if got != "chat" {
 		t.Fatalf("GenerateText() = %q, want chat", got)
 	}
@@ -235,16 +231,55 @@ func TestGenerateTextUsesNormalPathForChat(t *testing.T) {
 
 func TestStructuredOutputSchemas(t *testing.T) {
 	for _, prompt := range []string{
-		Messages.System.FactExtraction,
-		Messages.System.FactQuery,
-		Messages.System.IntentClassification,
-		Messages.System.ImageGeneration,
+		prompts.Messages.System.FactExtraction,
+		prompts.Messages.System.FactQuery,
+		prompts.Messages.System.IntentClassification,
+		prompts.Messages.System.ImageGeneration,
 	} {
 		if schema := structuredOutputSchema(prompt); schema == nil {
 			t.Fatalf("structuredOutputSchema(%q) = nil", prompt)
 		}
 	}
-	if schema := structuredOutputSchema(Messages.System.Base); schema != nil {
+	if schema := structuredOutputSchema(prompts.Messages.System.Base); schema != nil {
 		t.Fatalf("structuredOutputSchema(normal chat) = %#v, want nil", schema)
+	}
+}
+
+func TestStructuredRequestRetriesTransientFailureWithoutTextFallback(t *testing.T) {
+	const result = `{"target_candidates":[],"keys":[]}`
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Tools []json.RawMessage `json:"tools"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		if len(request.Tools) == 0 {
+			t.Error("temporary API failure caused a text request")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if calls.Add(1) == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, `{"type":"error","error":{"type":"overloaded_error","message":"retry"}}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"id":"msg_test","type":"message","role":"assistant","model":"test-model","content":[
+			{"type":"tool_use","id":"tool_test","name":"submit_json_result","input":{"result":`+result+`}}
+		],"stop_reason":"tool_use","usage":{"input_tokens":1,"output_tokens":1}}`)
+	}))
+	defer server.Close()
+
+	client, err := NewClient(&config.Config{
+		LLMProvider: config.LLMProviderClaude, LLMMaxConcurrency: 1, LLMMaxRetries: 1,
+		AnthropicBaseURL: server.URL, AnthropicAuthToken: "test-token", AnthropicModel: "test-model",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := client.GenerateText(t.Context(), []model.Message{{Role: model.RoleUser, Content: "query"}}, prompts.Messages.System.FactQuery, 100, nil, TemperatureSystem)
+	if got != result || calls.Load() != 2 {
+		t.Fatalf("GenerateText = %q, API requests = %d, want %q and 2 requests", got, calls.Load(), result)
 	}
 }

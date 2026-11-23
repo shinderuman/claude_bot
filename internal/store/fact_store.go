@@ -3,119 +3,126 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"sync"
 
 	"claude_bot/internal/config"
 	"claude_bot/internal/model"
-	"claude_bot/internal/slack"
 	"claude_bot/internal/util"
 )
 
 type FactStore struct {
-	storage      FactStorage
-	slackClient  *slack.Client
-	saveFilePath string
-	mu           sync.Mutex
+	keyUpdateMu   sync.Mutex
+	storage       FactStorage
+	saveFilePath  string
+	backupMu      sync.Mutex
+	backupRunning bool
+	backupPending bool
 }
 
-func InitializeFactStore(cfg *config.Config, slackClient *slack.Client) *FactStore {
-
+func InitializeFactStore(cfg *config.Config) (*FactStore, error) {
+	path, err := util.DataFilePath(cfg.FactStoreFileName)
+	if err != nil {
+		return nil, err
+	}
 	storage, err := NewRedisFactStore(cfg.RedisURL, cfg.RedisFactsKey)
 	if err != nil {
-		log.Fatalf("Redis初期化エラー: %v", err)
+		return nil, fmt.Errorf("Redis初期化エラー: %w", err)
 	}
-
-	log.Printf("Redis FactStore initialized (URL: %s, KeyPrefix: %s)", cfg.RedisURL, cfg.RedisFactsKey)
-
-	filePath := cfg.FactStoreFileName
-
-	finalPath := filePath
-	if !filepath.IsAbs(finalPath) {
-		finalPath = util.GetFilePath(finalPath)
-	}
-
-	return NewFactStore(storage, slackClient, finalPath)
+	log.Printf("Redis FactStore initialized (KeyPrefix: %s)", cfg.RedisFactsKey)
+	return NewFactStore(storage, path), nil
 }
 
-func NewFactStore(storage FactStorage, slackClient *slack.Client, filePath string) *FactStore {
+func NewFactStore(storage FactStorage, filePath string) *FactStore {
 	return &FactStore{
 		storage:      storage,
-		slackClient:  slackClient,
 		saveFilePath: filePath,
 	}
 }
 
-func (s *FactStore) AddFact(fact model.Fact) {
-	err := s.storage.Add(context.Background(), fact)
-	if err != nil {
-		log.Printf("Error adding fact: %v", err)
-	} else {
-		go s.saveAsync()
+func (s *FactStore) AddFact(fact model.Fact) error {
+	if err := s.storage.Add(context.Background(), fact); err != nil {
+		return err
+	}
+	s.requestBackup()
+	return nil
+}
+
+func (s *FactStore) requestBackup() {
+	if s.saveFilePath == "" {
+		return
+	}
+	s.backupMu.Lock()
+	defer s.backupMu.Unlock()
+
+	s.backupPending = true
+	if !s.backupRunning {
+		s.backupRunning = true
+		go s.backupLoop()
 	}
 }
 
-func (s *FactStore) saveAsync() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *FactStore) backupLoop() {
+	for {
+		s.backupMu.Lock()
+		if !s.backupPending {
+			s.backupRunning = false
+			s.backupMu.Unlock()
+			return
+		}
+		s.backupPending = false
+		s.backupMu.Unlock()
+		s.writeBackup()
+	}
+}
 
+func (s *FactStore) writeBackup() {
 	facts, err := s.storage.GetAllFacts(context.Background())
 	if err != nil {
 		log.Printf("Backup failed: could not fetch facts: %v", err)
 		return
 	}
 
+	if facts == nil {
+		facts = []model.Fact{}
+	}
 	data, err := json.MarshalIndent(facts, "", "  ")
 	if err != nil {
 		log.Printf("Backup failed: marshal error: %v", err)
 		return
 	}
 
-	tmpFile := s.saveFilePath + ".tmp"
-	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
-		log.Printf("Backup failed: write error: %v", err)
-		return
-	}
-
-	if err := os.Rename(tmpFile, s.saveFilePath); err != nil {
-		log.Printf("Backup failed: rename error: %v", err)
+	if err := util.WriteFileAtomically(s.saveFilePath, data); err != nil {
+		log.Printf("Backup failed: %v", err)
 	}
 }
 
-func (s *FactStore) GetFactsByTarget(target string) []model.Fact {
-	facts, err := s.storage.GetByTarget(context.Background(), target)
+func (s *FactStore) GetFactsByTarget(ctx context.Context, target string) ([]model.Fact, error) {
+	return s.storage.GetByTarget(ctx, target)
+}
+
+func (s *FactStore) GetAllFacts(ctx context.Context) ([]model.Fact, error) {
+	return s.storage.GetAllFacts(ctx)
+}
+
+func (s *FactStore) ReplaceFactForKey(ctx context.Context, replacement model.Fact) error {
+	s.keyUpdateMu.Lock()
+	defer s.keyUpdateMu.Unlock()
+
+	facts, err := s.storage.GetByTarget(ctx, replacement.Target)
 	if err != nil {
-		log.Printf("Error getting facts by target %s: %v", target, err)
-		return []model.Fact{}
+		return err
 	}
-	return facts
+	var old []model.Fact
+	for _, fact := range facts {
+		if fact.Key == replacement.Key {
+			old = append(old, fact)
+		}
+	}
+	return s.ReplaceFacts(ctx, replacement.Target, old, []model.Fact{replacement})
 }
 
-func (s *FactStore) GetAllFacts() []model.Fact {
-	facts, err := s.storage.GetAllFacts(context.Background())
-	if err != nil {
-		log.Printf("Error getting all facts: %v", err)
-		return []model.Fact{}
-	}
-	return facts
-}
-
-func (s *FactStore) RemoveFactsByKey(target, key string) int {
-	count, err := s.storage.Remove(context.Background(), target, func(f model.Fact) bool {
-		return f.Key == key
-	})
-	if err != nil {
-		log.Printf("Error removing facts by key %s %s: %v", target, key, err)
-		return 0
-	}
-	if count > 0 {
-		go s.saveAsync()
-	}
-	return count
-}
-
-func (s *FactStore) GetStorage() FactStorage {
-	return s.storage
+func (s *FactStore) Close() error {
+	return s.storage.Close()
 }

@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"claude_bot/internal/discovery"
+	"claude_bot/internal/config"
 	"claude_bot/internal/model"
 	"claude_bot/internal/util"
 )
@@ -45,7 +45,7 @@ func (b *Bot) startMetricsLogger(ctx context.Context) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	if err := b.collectAndLogMetrics(); err != nil {
+	if err := b.collectAndLogMetrics(ctx); err != nil {
 		log.Printf("メトリクスログ出力失敗: %v", err)
 	}
 
@@ -54,16 +54,23 @@ func (b *Bot) startMetricsLogger(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := b.collectAndLogMetrics(); err != nil {
+			if err := b.collectAndLogMetrics(ctx); err != nil {
 				log.Printf("メトリクスログ出力失敗: %v", err)
 			}
 		}
 	}
 }
 
-func (b *Bot) collectAndLogMetrics() error {
-	allFacts := b.factStore.GetAllFacts()
-	botUsernames, err := discovery.GetKnownBotUsernames(util.GetFilePath(""))
+func (b *Bot) collectAndLogMetrics(ctx context.Context) error {
+	allFacts, err := b.factStore.GetAllFacts(ctx)
+	if err != nil {
+		return err
+	}
+	dataDir, err := util.GetFilePath("")
+	if err != nil {
+		return err
+	}
+	botUsernames, err := config.GetKnownBotUsernames(dataDir)
 	if err != nil {
 		log.Printf("Warning: failed to get known bot usernames for metrics: %v", err)
 	}
@@ -72,7 +79,11 @@ func (b *Bot) collectAndLogMetrics() error {
 	factsSize := calculateTotalFactsSize(allFacts)
 	sessionCount, sessionSize := b.history.GetStats()
 
-	f, err := os.OpenFile(util.GetFilePath(b.config.MetricsLogFile), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	filePath, err := util.DataFilePath(b.config.MetricsLogFile)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to open metrics log file: %w", err)
 	}
@@ -113,7 +124,7 @@ func writeSummaryLog(enc *json.Encoder, timestamp, botUsername string, factsCoun
 func calculateTotalFactsSize(facts []model.Fact) int64 {
 	var size int64
 	for _, f := range facts {
-		size += int64(len(f.Key) + len(fmt.Sprint(f.Value)))
+		size += int64(len(f.Key) + len(f.Value))
 	}
 	return size
 }

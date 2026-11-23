@@ -20,7 +20,7 @@ func TestExtractAndSaveFactsFromURLContent_MetadataPropagation(t *testing.T) {
 		capturedFacts = append(capturedFacts, fact)
 		return nil
 	}, GetAllFactsFunc: func(ctx context.Context) ([]model.Fact, error) { return capturedFacts, nil }}
-	factStore := store.NewFactStore(mockStorage, nil, "")
+	factStore := store.NewFactStore(mockStorage, "")
 	service := NewFactService(&config.Config{EnableFactStore: true}, factStore, mockLLM, nil, nil, nil)
 
 	baseFact := model.Fact{
@@ -60,7 +60,7 @@ func TestExtractAndSaveFactsFromSummary_MetadataPropagation(t *testing.T) {
 		capturedFacts = append(capturedFacts, fact)
 		return nil
 	}, GetAllFactsFunc: func(ctx context.Context) ([]model.Fact, error) { return capturedFacts, nil }}
-	factStore := store.NewFactStore(mockStorage, nil, "")
+	factStore := store.NewFactStore(mockStorage, "")
 	service := NewFactService(&config.Config{EnableFactStore: true}, factStore, mockLLM, nil, nil, nil)
 
 	baseFact := model.Fact{Author: "summary_user"}
@@ -96,7 +96,7 @@ func TestExtractAndSaveFacts_UnknownUsernameCorrection(t *testing.T) {
 		},
 	}
 
-	factStore := store.NewFactStore(mockStorage, nil, "")
+	factStore := store.NewFactStore(mockStorage, "")
 	service := NewFactService(&config.Config{EnableFactStore: true}, factStore, mockLLM, nil, nil, nil)
 
 	authorID := "user123"
@@ -144,7 +144,7 @@ func TestExtractAndSaveFacts_DropUnidentifiable(t *testing.T) {
 		},
 	}
 
-	factStore := store.NewFactStore(mockStorage, nil, "")
+	factStore := store.NewFactStore(mockStorage, "")
 	service := NewFactService(&config.Config{EnableFactStore: true}, factStore, mockLLM, nil, nil, nil)
 
 	authorID := "user123"
@@ -187,7 +187,7 @@ func TestExtractAndSaveFacts_BotValidation(t *testing.T) {
 		"known_bot_user": {},
 	}
 
-	fs := store.NewFactStore(mockStorage, nil, "")
+	fs := store.NewFactStore(mockStorage, "")
 	service := NewFactService(&config.Config{EnableFactStore: true}, fs, mockLLM, nil, nil, knownBots)
 
 	tests := []struct {
@@ -268,7 +268,7 @@ func TestExtractAndSaveFacts_MetadataPropagation(t *testing.T) {
 		},
 	}
 
-	factStore := store.NewFactStore(mockStorage, nil, "")
+	factStore := store.NewFactStore(mockStorage, "")
 	service := NewFactService(&config.Config{EnableFactStore: true}, factStore, mockLLM, nil, nil, nil)
 
 	inputBaseFact := model.Fact{
@@ -327,7 +327,7 @@ func TestExtractAndSaveFacts_TrustedUser(t *testing.T) {
 		},
 	}
 	mockStorage := &MockFactStorage{AddFunc: func(ctx context.Context, fact model.Fact) error { return nil }}
-	factStore := store.NewFactStore(mockStorage, nil, "")
+	factStore := store.NewFactStore(mockStorage, "")
 	service := NewFactService(&config.Config{EnableFactStore: true, BotUsername: "my_bot"}, factStore, mockLLM, nil, nil, nil)
 
 	baseFactTrusted := model.Fact{Author: "trusted_user", IsTrusted: true}
@@ -364,7 +364,7 @@ func TestExtractAndSaveFacts_TargetResolutionIntegration(t *testing.T) {
 		},
 		GetAllFactsFunc: func(ctx context.Context) ([]model.Fact, error) { return capturedFacts, nil },
 	}
-	factStore := store.NewFactStore(mockStorage, nil, "")
+	factStore := store.NewFactStore(mockStorage, "")
 	service := NewFactService(&config.Config{EnableFactStore: true}, factStore, mockLLM, nil, nil, nil)
 
 	authorID := "actual_author_id"
@@ -396,7 +396,7 @@ func TestExtractAndSaveFacts_MultipleFacts(t *testing.T) {
 		},
 		GetAllFactsFunc: func(ctx context.Context) ([]model.Fact, error) { return capturedFacts, nil },
 	}
-	factStore := store.NewFactStore(mockStorage, nil, "")
+	factStore := store.NewFactStore(mockStorage, "")
 	service := NewFactService(&config.Config{EnableFactStore: true}, factStore, mockLLM, nil, nil, nil)
 
 	baseFact := model.Fact{

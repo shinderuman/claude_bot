@@ -7,9 +7,10 @@ import (
 	"log"
 
 	"claude_bot/internal/config"
+	"claude_bot/internal/conversation"
 	"claude_bot/internal/llm"
 	"claude_bot/internal/model"
-	"claude_bot/internal/slack"
+	"claude_bot/internal/prompts"
 	"claude_bot/internal/store"
 )
 
@@ -21,7 +22,7 @@ func runSummary(cfg *config.Config, client *llm.Client, newMessages, existingSum
 		return errMissingAnthropicToken
 	}
 
-	summaryPrompt := llm.BuildSummaryPrompt(newMessages, existingSummary)
+	summaryPrompt := prompts.BuildSummaryPrompt(newMessages, existingSummary)
 
 	log.Println("--- 要約プロンプト ---")
 	log.Println(summaryPrompt)
@@ -56,7 +57,7 @@ func runFactExtraction(cfg *config.Config, client *llm.Client, message string) e
 
 	authorUserName := "testuser"
 	author := "testuser@example.com"
-	prompt := llm.BuildFactExtractionPrompt(authorUserName, author, message, "test_bot", false)
+	prompt := prompts.BuildFactExtractionPrompt(authorUserName, author, message, "test_bot", false)
 
 	log.Println("--- 事実抽出プロンプト ---")
 	log.Println(prompt)
@@ -65,7 +66,7 @@ func runFactExtraction(cfg *config.Config, client *llm.Client, message string) e
 
 	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 	ctx := context.Background()
-	response := client.GenerateText(ctx, messages, llm.Messages.System.FactExtraction, cfg.MaxResponseTokens, nil, llm.TemperatureSystem)
+	response := client.GenerateText(ctx, messages, prompts.Messages.System.FactExtraction, cfg.MaxResponseTokens, nil, llm.TemperatureSystem)
 
 	if response == "" {
 		return errors.New("エラー: 事実抽出に失敗しました")
@@ -87,11 +88,17 @@ func runAutoPost(cfg *config.Config, client *llm.Client) error {
 		return errMissingAnthropicToken
 	}
 
-	_ = store.InitializeHistory(cfg)
-	slackClient := slack.NewClient(cfg.SlackBotToken, cfg.SlackChannelID, cfg.SlackErrorChannelID, cfg.BotUsername)
-	factStore := store.InitializeFactStore(cfg, slackClient)
+	if _, err := conversation.Open(cfg); err != nil {
+		return err
+	}
 
-	facts, err := factStore.GetRandomGeneralFactBundle(5)
+	factStore, err := store.InitializeFactStore(cfg)
+	if err != nil {
+		return err
+	}
+	defer factStore.Close()
+
+	facts, err := factStore.GetRandomGeneralFactBundle(context.Background(), 5)
 	if err != nil {
 		return fmt.Errorf("ファクト取得エラー: %w", err)
 	}
@@ -106,7 +113,7 @@ func runAutoPost(cfg *config.Config, client *llm.Client) error {
 	}
 	log.Println()
 
-	prompt := llm.BuildAutoPostPrompt(facts)
+	prompt := prompts.BuildAutoPostPrompt(facts)
 	log.Println("--- 生成されたプロンプト ---")
 	log.Println(prompt)
 	log.Println("--------------------------")
@@ -136,7 +143,7 @@ func runErrorMessageGeneration(cfg *config.Config, client *llm.Client, errorDeta
 		return errMissingAnthropicToken
 	}
 
-	prompt := llm.BuildErrorMessagePrompt(errorDetail)
+	prompt := prompts.BuildErrorMessagePrompt(errorDetail)
 	log.Println("--- 生成されたプロンプト ---")
 	log.Println(prompt)
 	log.Println("--------------------------")
@@ -157,7 +164,7 @@ func runErrorMessageGeneration(cfg *config.Config, client *llm.Client, errorDeta
 }
 
 func generateInCharacter(cfg *config.Config, client *llm.Client, messages []model.Message, maxTokens int64) (string, error) {
-	systemPrompt := llm.BuildSystemPrompt(cfg, "", "", "", true, cfg.CharacterPriority)
+	systemPrompt := prompts.BuildSystemPrompt(cfg, "", "", "", true, cfg.CharacterPriority)
 	response := client.GenerateText(context.Background(), messages, systemPrompt, maxTokens, nil, cfg.LLMTemperature)
 	if response == "" {
 		return "", errEmptyClaudeReply

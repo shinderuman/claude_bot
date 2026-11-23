@@ -1,6 +1,10 @@
 package mastodon
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"claude_bot/internal/config"
@@ -49,7 +53,7 @@ func TestBuildProfileFields(t *testing.T) {
 	got := c.BuildProfileFields(cfg, existingFields, authKey)
 
 	if len(got) != 5 {
-		t.Errorf("Expected 5 fields, got %d", len(got))
+		t.Fatalf("Expected 5 fields, got %d", len(got))
 	}
 
 	if got[0].Name != "Existing" {
@@ -104,5 +108,47 @@ func TestExtractCleanProfileNote(t *testing.T) {
 				t.Errorf("got %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestUpdateProfilePublishesNoteAndFieldsTogether(t *testing.T) {
+	var updates atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/v1/accounts/verify_credentials":
+			_, _ = io.WriteString(w, `{"id":"bot","fields":[{"name":"Existing","value":"keep"},{"name":"SystemID","value":"old"}]}`)
+		case "PATCH /api/v1/accounts/update_credentials":
+			updates.Add(1)
+			if err := r.ParseForm(); err != nil {
+				t.Error(err)
+			}
+			want := map[string]string{
+				"note":                        "new profile" + DisclaimerText,
+				"fields_attributes[0][name]":  "Existing",
+				"fields_attributes[0][value]": "keep",
+				"fields_attributes[1][name]":  ProfileFieldSystemID,
+				"fields_attributes[1][value]": "new",
+				"fields_attributes[2][value]": MentionStatusStopped,
+			}
+			for field, value := range want {
+				if got := r.PostForm.Get(field); got != value {
+					t.Errorf("%s = %q, want %q", field, got, value)
+				}
+			}
+			_, _ = io.WriteString(w, `{"id":"bot"}`)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{Server: server.URL})
+	if err := client.UpdateProfileWithFields(t.Context(), &config.Config{Timezone: "UTC"}, "new profile", "new"); err != nil {
+		t.Fatal(err)
+	}
+	if got := updates.Load(); got != 1 {
+		t.Fatalf("profile updates = %d, want 1", got)
 	}
 }

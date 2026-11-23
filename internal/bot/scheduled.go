@@ -1,12 +1,13 @@
 package bot
 
 import (
-	"claude_bot/internal/llm"
-	"claude_bot/internal/model"
 	"context"
 	"fmt"
 	"log"
 	"time"
+
+	"claude_bot/internal/model"
+	"claude_bot/internal/prompts"
 )
 
 func (b *Bot) startFactMaintenanceLoop(ctx context.Context) {
@@ -14,13 +15,6 @@ func (b *Bot) startFactMaintenanceLoop(ctx context.Context) {
 		return
 	}
 
-	jitterFunc := func(interval time.Duration) time.Duration {
-		minutes := int64(interval.Minutes())
-		if minutes > 0 {
-			return time.Duration(time.Now().UnixNano()%minutes) * time.Minute
-		}
-		return 0
-	}
 	interval := time.Duration(b.config.FactMaintenanceIntervalHours) * time.Hour
 	b.runInWindowedLoop(ctx, interval, "ファクトメンテナンス", func(ctx context.Context) {
 		log.Println("ファクトメンテナンスを実行中...")
@@ -32,7 +26,7 @@ func (b *Bot) startFactMaintenanceLoop(ctx context.Context) {
 			log.Println("Peer探索を実行中...")
 			b.factCollector.DiscoverAndCollectPeerFacts(ctx)
 		}
-	}, jitterFunc, true)
+	}, windowJitter, true)
 }
 
 func (b *Bot) startAutoPostLoop(ctx context.Context) {
@@ -41,20 +35,23 @@ func (b *Bot) startAutoPostLoop(ctx context.Context) {
 	}
 
 	interval := time.Duration(b.config.AutoPostIntervalHours) * time.Hour
-	jitterFunc := func(interval time.Duration) time.Duration {
-		minutes := int64(interval.Minutes())
-		if minutes > 0 {
-			return time.Duration(time.Now().UnixNano()%minutes) * time.Minute
-		}
+	b.runInWindowedLoop(ctx, interval, "自動投稿", b.executeAutoPost, windowJitter, false)
+}
+
+func windowJitter(interval time.Duration) time.Duration {
+	minutes := int64(interval / time.Minute)
+	if minutes <= 0 {
 		return 0
 	}
-
-	b.runInWindowedLoop(ctx, interval, "自動投稿", b.executeAutoPost, jitterFunc, false)
+	return time.Duration(time.Now().UnixNano()%minutes) * time.Minute
 }
 
 type jitterFunc func(interval time.Duration) time.Duration
 
 func (b *Bot) runInWindowedLoop(ctx context.Context, interval time.Duration, taskName string, task func(context.Context), getJitter jitterFunc, notifySlack bool) {
+	if interval <= 0 {
+		return
+	}
 	log.Printf("%sループを開始しました (間隔: %v)", taskName, interval)
 
 	b.scheduleDelayedTask(ctx, interval, taskName, task, getJitter, notifySlack)
@@ -114,18 +111,23 @@ func (b *Bot) scheduleDelayedTask(ctx context.Context, interval time.Duration, t
 }
 
 func (b *Bot) executeAutoPost(ctx context.Context) {
-	facts, err := b.factStore.GetRandomGeneralFactBundle(AutoPostFactCount)
-	if err != nil || len(facts) == 0 {
+	facts, err := b.factStore.GetRandomGeneralFactBundle(ctx, AutoPostFactCount)
+	if err != nil {
+		log.Printf("自動投稿用ファクトの取得失敗: %v", err)
+		return
+	}
+	if len(facts) == 0 {
 		return
 	}
 
-	prompt := llm.BuildAutoPostPrompt(facts)
-	systemPrompt := llm.BuildSystemPrompt(b.config, "", "", "", true, b.config.CharacterPriority)
+	prompt := prompts.BuildAutoPostPrompt(facts)
+	systemPrompt := prompts.BuildSystemPrompt(b.config, "", "", "", true, b.config.CharacterPriority)
 
 	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: model.RoleUser, Content: prompt}}, systemPrompt, int64(b.config.MaxPostChars), nil, b.config.LLMTemperature)
 
 	if response != "" {
-		log.Printf("自動投稿を実行します: %s...", string([]rune(response))[:min(LogContentMaxChars, len([]rune(response)))])
+		runes := []rune(response)
+		log.Printf("自動投稿を実行します: %s...", string(runes[:min(LogContentMaxChars, len(runes))]))
 		status, err := b.mastodonClient.PostStatus(ctx, response, b.config.AutoPostVisibility)
 		if err != nil {
 			log.Printf("自動投稿エラー: %v", err)

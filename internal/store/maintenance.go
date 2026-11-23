@@ -2,7 +2,7 @@ package store
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -10,93 +10,57 @@ import (
 	"claude_bot/internal/model"
 )
 
-func (s *FactStore) Cleanup(retention time.Duration) int {
-	ctx := context.Background()
+func (s *FactStore) Cleanup(ctx context.Context, retention time.Duration) (int, error) {
 	threshold := time.Now().Add(-retention)
 
-	allFacts := s.GetAllFacts()
+	allFacts, err := s.GetAllFacts(ctx)
+	if err != nil {
+		return 0, err
+	}
 	targets := make(map[string]bool)
 	for _, f := range allFacts {
 		targets[f.Target] = true
 	}
 
 	deletedTotal := 0
+	var failures []error
 	for target := range targets {
 		count, err := s.storage.Remove(ctx, target, func(f model.Fact) bool {
 			return f.Timestamp.Before(threshold)
 		})
 		if err != nil {
-			log.Printf("Error cleaning up target %s: %v", target, err)
+			failures = append(failures, fmt.Errorf("ファクトの期限切れ削除 (%s): %w", target, err))
 			continue
 		}
 		deletedTotal += count
 	}
 
-	return deletedTotal
+	return deletedTotal, errors.Join(failures...)
 }
 
-func (s *FactStore) PerformMaintenance(retentionDays, maxFacts int) int {
-	deleted := s.Cleanup(time.Duration(retentionDays) * 24 * time.Hour)
-
-	if maxFacts > 0 {
-		removedCount, err := s.storage.EnforceMaxFacts(context.Background(), maxFacts)
-		if err != nil {
-			log.Printf("Max Facts Enforcement failed: %v", err)
-		} else if removedCount > 0 {
-			log.Printf("Max Facts Enforcement: Removed %d old facts from Redis", removedCount)
+func (s *FactStore) PerformMaintenance(ctx context.Context, retentionDays, maxFacts int) (int, error) {
+	deleted, err := s.Cleanup(ctx, time.Duration(retentionDays)*24*time.Hour)
+	if err == nil && maxFacts > 0 {
+		var removedCount int
+		removedCount, err = s.storage.EnforceMaxFacts(ctx, maxFacts)
+		if err == nil {
 			deleted += removedCount
 		}
 	}
 
 	if deleted > 0 {
-		log.Printf("ファクトメンテナンス完了: %d件削除", deleted)
-		go s.saveAsync()
-	}
-
-	return deleted
-}
-
-func (s *FactStore) ReplaceFacts(target string, factsToRemove, factsToAdd []model.Fact) error {
-	err := s.storage.Replace(context.Background(), target, factsToRemove, factsToAdd)
-	if err == nil {
-		go s.saveAsync()
-	}
-	return err
-}
-
-func (s *FactStore) RemoveFacts(ctx context.Context, target string, shouldRemove func(model.Fact) bool) (int, error) {
-
-	facts, err := s.storage.GetByTarget(ctx, target)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get facts for target %s: %w", target, err)
-	}
-
-	var toRemove []model.Fact
-	for _, fact := range facts {
-		if shouldRemove(fact) {
-			toRemove = append(toRemove, fact)
+		s.requestBackup()
+		if err == nil {
+			log.Printf("ファクトメンテナンス完了: %d件削除", deleted)
 		}
 	}
+	return deleted, err
+}
 
-	if len(toRemove) == 0 {
-		return 0, nil
+func (s *FactStore) ReplaceFacts(ctx context.Context, target string, factsToRemove, factsToAdd []model.Fact) error {
+	err := s.storage.Replace(ctx, target, factsToRemove, factsToAdd)
+	if err == nil {
+		s.requestBackup()
 	}
-
-	for _, fact := range toRemove {
-		jsonBytes, _ := json.Marshal(fact)
-		log.Printf("🗑️ ファクト削除: %s", string(jsonBytes))
-
-		jsonIndentBytes, _ := json.MarshalIndent(fact, "", "    ")
-		msg := fmt.Sprintf("🗑️ ファクトを削除しました (Target: %s)\n```\n%s\n```", target, string(jsonIndentBytes))
-		s.slackClient.PostMessageAsync(ctx, msg)
-	}
-
-	err = s.storage.Replace(ctx, target, toRemove, nil)
-	if err != nil {
-		return 0, fmt.Errorf("failed to remove facts: %w", err)
-	}
-
-	go s.saveAsync()
-
-	return len(toRemove), nil
+	return err
 }

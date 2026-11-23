@@ -8,13 +8,14 @@ import (
 	"log"
 	"os"
 
+	"claude_bot/internal/cli"
 	"claude_bot/internal/config"
 	"claude_bot/internal/facts"
-	"claude_bot/internal/facttool"
 	"claude_bot/internal/image"
 	"claude_bot/internal/llm"
 	"claude_bot/internal/model"
 	"claude_bot/internal/store"
+	"claude_bot/internal/util"
 )
 
 var (
@@ -23,13 +24,13 @@ var (
 )
 
 func Run(args []string) error {
-	flags := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	flags := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 	mode := flags.String("mode", "response", "テストモード: response, summary, fact, profile")
 	message := flags.String("message", "Hello", "テストメッセージ")
 	imagePath := flags.String("image", "", "画像ファイルパス (responseモード用)")
 	existingSummary := flags.String("existing-summary", "", "既存の要約（summaryモード用）")
 	testFacts := flags.Bool("test-facts", false, "テスト用facts.jsonを使用（data/facts_test.json）")
-	if err := flags.Parse(args); err != nil {
+	if err := cli.Parse(flags, args); err != nil {
 		return err
 	}
 
@@ -39,16 +40,24 @@ func Run(args []string) error {
 		}
 	}
 	envPath := flags.Arg(0)
-	config.LoadEnvironment(envPath)
+	if err := config.LoadEnvironment(envPath); err != nil {
+		return err
+	}
 	if envPath != "" {
 		log.Printf("設定ファイルを読み込みました: %s", envPath)
 	} else {
 		log.Println("デフォルト設定ファイルを読み込みました")
 	}
 
-	cfg := config.LoadConfig()
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return err
+	}
 	printConfig(cfg)
-	llmClient := llm.NewClient(cfg)
+	llmClient, err := llm.NewClient(cfg)
+	if err != nil {
+		return err
+	}
 
 	factsFile := "data/facts.json"
 	if *testFacts {
@@ -87,7 +96,7 @@ func Run(args []string) error {
 
 func loadMemoryFacts(path string) (*store.FactStore, error) {
 	memoryStore := store.NewMemoryFactStore()
-	loadedFacts, err := facttool.ReadFile[model.Fact](path)
+	loadedFacts, err := util.ReadJSONArray[model.Fact](path)
 	if errors.Is(err, os.ErrNotExist) {
 		log.Printf("Facts file not found, starting with empty memory store: %s", path)
 	} else if err != nil {
@@ -99,5 +108,5 @@ func loadMemoryFacts(path string) (*store.FactStore, error) {
 			return nil, err
 		}
 	}
-	return store.NewFactStore(memoryStore, nil, path), nil
+	return store.NewFactStore(memoryStore, path), nil
 }

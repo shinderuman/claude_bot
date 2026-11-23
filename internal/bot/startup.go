@@ -1,18 +1,12 @@
 package bot
 
 import (
-	"claude_bot/internal/discovery"
 	"context"
 	"log"
 	"time"
 )
 
-func (b *Bot) executeStartupTasks(ctx context.Context) {
-	instanceID, totalInstances, err := discovery.GetMyPosition(b.config.BotUsername)
-	if err != nil {
-		log.Fatalf("[Startup] Critical Error: Failed to get cluster position for delay: %v. Cannot proceed safely.", err)
-	}
-
+func (b *Bot) executeStartupTasks(ctx context.Context, instanceID, totalInstances int) {
 	log.Printf("[Startup] Cluster Size: %d instances. Position: %d", totalInstances, instanceID)
 
 	lightTasks, heavyTasks := b.prepareStartupTasks()
@@ -37,7 +31,11 @@ func (b *Bot) prepareStartupTasks() ([]func(context.Context), []func(context.Con
 		func(ctx context.Context) {
 			if b.factStore != nil {
 				log.Println("起動時ファクトクリーンアップ（物理整理）を実行します...")
-				deleted := b.factStore.PerformMaintenance(b.config.FactRetentionDays, b.config.MaxFacts)
+				deleted, err := b.factStore.PerformMaintenance(ctx, b.config.FactRetentionDays, b.config.MaxFacts)
+				if err != nil {
+					log.Printf("起動時クリーンアップ失敗 (%d件削除): %v", deleted, err)
+					return
+				}
 				log.Printf("起動時クリーンアップ完了: %d件削除", deleted)
 			}
 		},
@@ -52,7 +50,9 @@ func (b *Bot) prepareStartupTasks() ([]func(context.Context), []func(context.Con
 		heavyTasks = append(heavyTasks, func(ctx context.Context) {
 			log.Println("[Startup] メンテナンスモードが有効です。ファクトメンテナンスを実行します...")
 			if b.factService != nil {
-				b.factService.PerformMaintenance(ctx)
+				if err := b.factService.PerformMaintenance(ctx); err != nil {
+					log.Printf("起動時ファクトメンテナンスエラー: %v", err)
+				}
 			}
 		})
 	}

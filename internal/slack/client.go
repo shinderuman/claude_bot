@@ -2,15 +2,17 @@ package slack
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/slack-go/slack"
 )
 
-var (
+const (
 	maxBackoffDelay = 1 * time.Minute
 	maxTotalTimeout = 10 * time.Minute
 	initialBackoff  = 1 * time.Second
@@ -66,7 +68,8 @@ func (c *Client) PostMessageToChannel(ctx context.Context, channelID, message st
 }
 
 func (c *Client) postMessageWithRetry(ctx context.Context, channelID, message string) error {
-	startTime := time.Now()
+	ctx, cancel := context.WithTimeout(ctx, maxTotalTimeout)
+	defer cancel()
 	backoff := initialBackoff
 
 	for {
@@ -80,37 +83,38 @@ func (c *Client) postMessageWithRetry(ctx context.Context, channelID, message st
 			return err
 		}
 
-		if shouldStopRetry(startTime) {
-			return nil
+		delay := backoff
+		var limited *slack.RateLimitedError
+		if errors.As(err, &limited) {
+			delay = max(delay, limited.RetryAfter)
 		}
-
-		sleepDuration := min(backoff, maxBackoffDelay)
+		if deadline, ok := ctx.Deadline(); ok && delay >= time.Until(deadline) {
+			return fmt.Errorf("Slack再試行の待機時間が期限を超えます: %w", err)
+		}
 
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(sleepDuration):
-			backoff = min(time.Duration(float64(backoff)*2), maxBackoffDelay)
+		case <-time.After(delay):
+			backoff = min(backoff*2, maxBackoffDelay)
 		}
 	}
-}
-
-func shouldStopRetry(startTime time.Time) bool {
-	if time.Since(startTime) > maxTotalTimeout {
-		return true
-	}
-	return false
 }
 
 func isRateLimitedError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if rateLimitedError, ok := err.(*slack.RateLimitedError); ok {
-		return rateLimitedError.Retryable()
+	var rateLimited *slack.RateLimitedError
+	if errors.As(err, &rateLimited) {
+		return true
+	}
+	var status slack.StatusCodeError
+	if errors.As(err, &status) {
+		return status.Code == http.StatusTooManyRequests
 	}
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "ratelimited") || strings.Contains(msg, "rate limit") || strings.Contains(msg, "too many requests") || strings.Contains(msg, "429")
+	return msg == "ratelimited"
 }
 
 func (c *Client) PostMessageAsync(ctx context.Context, message string) {

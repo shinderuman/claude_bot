@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -28,10 +27,7 @@ func (s *MemoryFactStore) Add(ctx context.Context, fact model.Fact) error {
 
 	for i, existing := range s.facts {
 		if existing.Target == fact.Target && existing.Key == fact.Key {
-			val1 := fmt.Sprintf("%v", existing.Value)
-			val2 := fmt.Sprintf("%v", fact.Value)
-
-			if val1 == val2 {
+			if existing.Value == fact.Value {
 				s.facts[i].Author = fact.Author
 				s.facts[i].Timestamp = time.Now()
 				if fact.SourceType != "" {
@@ -66,6 +62,9 @@ func (s *MemoryFactStore) GetByTarget(ctx context.Context, target string) ([]mod
 }
 
 func (s *MemoryFactStore) GetRecent(ctx context.Context, limit int) ([]model.Fact, error) {
+	if limit <= 0 {
+		return []model.Fact{}, nil
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -86,40 +85,7 @@ func (s *MemoryFactStore) SearchFuzzy(ctx context.Context, targets []string, key
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var results []model.Fact
-	for _, fact := range s.facts {
-		targetMatch := false
-		for _, t := range targets {
-			if fact.Target == t || fact.TargetUserName == t {
-				targetMatch = true
-				break
-			}
-			if len(t) >= MinTargetUserNameFuzzyLength {
-				if strings.HasPrefix(fact.TargetUserName, t) || strings.HasSuffix(fact.TargetUserName, t) {
-					targetMatch = true
-					break
-				}
-			}
-		}
-		if !targetMatch {
-			continue
-		}
-
-		for _, key := range keys {
-			if strings.Contains(fact.Key, key) || strings.Contains(key, fact.Key) {
-				results = append(results, fact)
-				break
-			}
-			if strings.HasPrefix(fact.Key, model.SystemFactKeyPrefix) {
-				valStr := fmt.Sprintf("%v", fact.Value)
-				if strings.Contains(valStr, key) {
-					results = append(results, fact)
-					break
-				}
-			}
-		}
-	}
-	return results, nil
+	return filterFuzzyFacts(s.facts, targets, keys), nil
 }
 
 func (s *MemoryFactStore) Remove(ctx context.Context, target string, filter func(model.Fact) bool) (int, error) {
@@ -147,13 +113,13 @@ func (s *MemoryFactStore) Replace(ctx context.Context, target string, remove []m
 	var afterRemove []model.Fact
 	toRemoveMap := make(map[string]bool)
 	for _, f := range remove {
-		key := fmt.Sprintf("%s:%s:%s", f.Target, f.Key, fmt.Sprint(f.Value))
+		key := fmt.Sprintf("%s:%s:%s", f.Target, f.Key, f.Value)
 		toRemoveMap[key] = true
 	}
 
 	for _, f := range s.facts {
 		if f.Target == target {
-			key := fmt.Sprintf("%s:%s:%s", f.Target, f.Key, fmt.Sprint(f.Value))
+			key := fmt.Sprintf("%s:%s:%s", f.Target, f.Key, f.Value)
 			if toRemoveMap[key] {
 				continue
 			}
@@ -183,6 +149,7 @@ func (s *MemoryFactStore) GetAllFacts(ctx context.Context) ([]model.Fact, error)
 }
 
 func (s *MemoryFactStore) EnforceMaxFacts(ctx context.Context, maxFacts int) (int, error) {
+	maxFacts = max(0, maxFacts)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

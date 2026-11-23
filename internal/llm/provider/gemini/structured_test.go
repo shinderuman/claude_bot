@@ -43,7 +43,7 @@ func TestExtractStructuredResultRejectsMissingResult(t *testing.T) {
 	}
 }
 
-func TestExtractStructuredResultRejectsTextOnlyResponse(t *testing.T) {
+func TestExtractStructuredResultRejectsTextResponse(t *testing.T) {
 	resp := &genai.GenerateContentResponse{
 		Candidates: []*genai.Candidate{{
 			Content: &genai.Content{Parts: []genai.Part{genai.Text(`{"intent":"chat"}`)}},
@@ -51,7 +51,7 @@ func TestExtractStructuredResultRejectsTextOnlyResponse(t *testing.T) {
 	}
 
 	if _, err := extractStructuredResult(resp); err == nil {
-		t.Fatal("extractStructuredResult() accepted text response")
+		t.Fatal("text was accepted as a tool response")
 	}
 }
 

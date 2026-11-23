@@ -44,13 +44,13 @@ func TestExtractStructuredResultRejectsMissingResult(t *testing.T) {
 	}
 }
 
-func TestExtractStructuredResultRejectsTextOnlyResponse(t *testing.T) {
+func TestExtractStructuredResultRejectsTextResponse(t *testing.T) {
 	msg := &anthropic.Message{
 		Content: []anthropic.ContentBlockUnion{{Text: `{"intent":"chat"}`}},
 	}
 
 	if _, err := extractStructuredResult(msg); err == nil {
-		t.Fatal("extractStructuredResult() accepted text response")
+		t.Fatal("text was accepted as a tool response")
 	}
 }
 

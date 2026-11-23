@@ -108,3 +108,13 @@ func TestPostStatus_ContentVerification(t *testing.T) {
 		t.Errorf("Content mismatch.\nGot: %q\nWant: %q", receivedContent, expected)
 	}
 }
+
+func TestPostingRejectsLimitsSmallerThanRequiredText(t *testing.T) {
+	client := NewClient(Config{MaxPostChars: 3})
+	if _, err := client.PostStatus(t.Context(), "text", "public"); err == nil {
+		t.Error("PostStatus accepted a limit smaller than the Bot tag")
+	}
+	if _, err := client.PostResponseWithSplit(t.Context(), "post", "@あ ", "text", "public"); err == nil {
+		t.Error("PostResponseWithSplit accepted a mention that uses the entire limit")
+	}
+}

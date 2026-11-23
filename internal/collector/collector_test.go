@@ -43,3 +43,15 @@ func TestCleanupExpiredSets(t *testing.T) {
 		t.Error("Valid domain should be kept")
 	}
 }
+
+func TestReserveHourlyProcessingSlotReleasesExpiredCapacity(t *testing.T) {
+	collector := NewFactCollector(&config.Config{FactCollectionMaxPerHour: 2}, nil, nil)
+	collector.processedTimes = []time.Time{time.Now().Add(-2 * time.Hour), time.Now().Add(-time.Minute)}
+
+	if !collector.reserveHourlyProcessingSlot() {
+		t.Fatal("expired processing slot still counted against the quota")
+	}
+	if collector.reserveHourlyProcessingSlot() {
+		t.Fatal("collector exceeded the hourly quota")
+	}
+}

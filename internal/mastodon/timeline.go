@@ -2,8 +2,10 @@ package mastodon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -11,60 +13,24 @@ import (
 	gomastodon "github.com/mattn/go-mastodon"
 )
 
-func (c *Client) GetRootStatusID(ctx context.Context, notification *gomastodon.Notification) string {
-	if notification.Status.InReplyToID == nil {
-		return string(notification.Status.ID)
-	}
-
-	currentStatus := notification.Status
-
+func (c *Client) GetRootStatusID(ctx context.Context, currentStatus *gomastodon.Status) (string, error) {
 	for currentStatus.InReplyToID != nil {
-		parentStatus, err := c.convertToIDAndFetchStatus(ctx, currentStatus.InReplyToID)
+		parentStatus, err := c.GetStatus(ctx, fmt.Sprint(currentStatus.InReplyToID))
 		if err != nil {
-			return string(notification.Status.ID)
+			var apiErr *gomastodon.APIError
+			if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+				return string(currentStatus.ID), nil
+			}
+			return "", err
 		}
 		currentStatus = parentStatus
 	}
-
-	return string(currentStatus.ID)
-}
-
-func (c *Client) convertToIDAndFetchStatus(ctx context.Context, inReplyToID any) (*gomastodon.Status, error) {
-	statusID := fmt.Sprintf("%v", inReplyToID)
-	return c.GetStatus(ctx, statusID)
+	return string(currentStatus.ID), nil
 }
 
 func (c *Client) GetStatus(ctx context.Context, statusID string) (*gomastodon.Status, error) {
 	id := gomastodon.ID(statusID)
 	return c.client.GetStatus(ctx, id)
-}
-
-func ShouldCollectFactsFromStatus(status *gomastodon.Status, ignoreURLRequirement bool) bool {
-	if status == nil {
-		return false
-	}
-
-	switch status.Visibility {
-	case "public":
-	case "unlisted":
-		if !status.Account.Bot {
-			return false
-		}
-	default:
-		return false
-	}
-
-	content := string(status.Content)
-
-	if strings.Contains(content, "@") {
-		return false
-	}
-
-	if ignoreURLRequirement {
-		return true
-	}
-
-	return strings.Contains(content, "http://") || strings.Contains(content, "https://")
 }
 
 func (c *Client) fetchStatuses(ctx context.Context, accountID string, maxID gomastodon.ID, handler func([]*gomastodon.Status) (bool, error)) error {
@@ -81,6 +47,7 @@ func (c *Client) fetchStatuses(ctx context.Context, accountID string, maxID goma
 			break
 		}
 
+		requestedMaxID := pg.MaxID
 		statuses, err := c.client.GetAccountStatuses(ctx, gomastodon.ID(accountID), pg)
 		apiCalls++
 
@@ -101,6 +68,9 @@ func (c *Client) fetchStatuses(ctx context.Context, accountID string, maxID goma
 		}
 
 		nextMaxID := statuses[len(statuses)-1].ID
+		if requestedMaxID == nextMaxID {
+			break
+		}
 		pg = &gomastodon.Pagination{
 			MaxID: nextMaxID,
 			Limit: DefaultPageLimit,
@@ -112,7 +82,7 @@ func (c *Client) fetchStatuses(ctx context.Context, accountID string, maxID goma
 func (c *Client) GetStatusesByRange(ctx context.Context, accountID string, startID, endID string) ([]*gomastodon.Status, error) {
 	var allStatuses []*gomastodon.Status
 
-	if startID > endID {
+	if compareStatusIDs(startID, endID) > 0 {
 		startID, endID = endID, startID
 	}
 
@@ -125,11 +95,11 @@ func (c *Client) GetStatusesByRange(ctx context.Context, accountID string, start
 
 	err = c.fetchStatuses(ctx, accountID, gomastodon.ID(endID), func(statuses []*gomastodon.Status) (bool, error) {
 		for _, status := range statuses {
-			if string(status.ID) < startID {
+			if compareStatusIDs(string(status.ID), startID) < 0 {
 				return false, nil
 			}
 
-			if string(status.ID) > endID {
+			if compareStatusIDs(string(status.ID), endID) > 0 {
 				continue
 			}
 
@@ -151,7 +121,7 @@ func (c *Client) GetStatusesByRange(ctx context.Context, accountID string, start
 		return nil, err
 	}
 
-	c.sortStatusesByID(allStatuses)
+	sortStatusesByID(allStatuses)
 
 	hasStartID := false
 	for _, s := range allStatuses {
@@ -177,9 +147,9 @@ func (c *Client) GetStatusesByDateRange(ctx context.Context, accountID string, s
 
 	err := c.fetchStatuses(ctx, accountID, "", func(statuses []*gomastodon.Status) (bool, error) {
 		for _, status := range statuses {
-			createdAtJST := status.CreatedAt.In(startTime.Location())
+			createdAt := status.CreatedAt
 
-			if createdAtJST.After(startTime) && createdAtJST.Before(endTime) {
+			if !createdAt.Before(startTime) && createdAt.Before(endTime) {
 				if status.Reblog != nil {
 					continue
 				}
@@ -192,7 +162,7 @@ func (c *Client) GetStatusesByDateRange(ctx context.Context, accountID string, s
 				}
 			}
 
-			if createdAtJST.Before(startTime) {
+			if createdAt.Before(startTime) {
 				isPinned, ok := status.Pinned.(bool)
 				if ok && isPinned {
 					continue
@@ -207,13 +177,20 @@ func (c *Client) GetStatusesByDateRange(ctx context.Context, accountID string, s
 		return nil, err
 	}
 
-	c.sortStatusesByID(allStatuses)
+	sortStatusesByID(allStatuses)
 
 	return allStatuses, nil
 }
 
-func (c *Client) sortStatusesByID(statuses []*gomastodon.Status) {
+func sortStatusesByID(statuses []*gomastodon.Status) {
 	sort.Slice(statuses, func(i, j int) bool {
-		return string(statuses[i].ID) < string(statuses[j].ID)
+		return compareStatusIDs(string(statuses[i].ID), string(statuses[j].ID)) < 0
 	})
+}
+
+func compareStatusIDs(left, right string) int {
+	if len(left) != len(right) && strings.Trim(left+right, "0123456789") == "" {
+		return len(left) - len(right)
+	}
+	return strings.Compare(left, right)
 }

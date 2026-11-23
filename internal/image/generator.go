@@ -2,12 +2,14 @@ package image
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 
 	"claude_bot/internal/config"
 	"claude_bot/internal/llm"
 	"claude_bot/internal/model"
+	"claude_bot/internal/prompts"
 )
 
 type ImageGenerator struct {
@@ -27,20 +29,19 @@ func (g *ImageGenerator) GenerateSVG(ctx context.Context, prompt string) (string
 		return "", fmt.Errorf("画像生成機能が無効です")
 	}
 
-	userPrompt := llm.BuildImageGenerationPrompt(prompt)
+	userPrompt := prompts.BuildImageGenerationPrompt(prompt)
 	messages := []model.Message{{Role: model.RoleUser, Content: userPrompt}}
-	response := g.llmClient.GenerateText(ctx, messages, llm.Messages.System.ImageGeneration, g.config.MaxImageTokens, nil, llm.TemperatureSystem)
+	response := g.llmClient.GenerateText(ctx, messages, prompts.Messages.System.ImageGeneration, g.config.MaxImageTokens, nil, llm.TemperatureSystem)
 
 	if response == "" {
 		return "", fmt.Errorf("LLMからの応答がありません")
 	}
 
-	jsonStr := llm.ExtractJSON(response)
 	var result struct {
 		SVG string `json:"svg"`
 	}
 
-	if err := llm.UnmarshalWithRepair(jsonStr, &result, "画像生成"); err != nil {
+	if err := json.Unmarshal([]byte(response), &result); err != nil {
 		return "", fmt.Errorf("JSONパースエラー: %v", err)
 	}
 

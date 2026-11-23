@@ -47,18 +47,18 @@ func (c *Client) TruncateToSafeProfileBody(text string) string {
 }
 
 func (c *Client) UpdateProfileWithFields(ctx context.Context, cfg *config.Config, body string, authKey string) error {
-	finalNote := body + DisclaimerText
-	if err := c.UpdateProfile(ctx, finalNote); err != nil {
-		return err
-	}
-
 	currentUser, err := c.GetAccountCurrentUser(ctx)
 	if err != nil {
 		return err
 	}
 
-	newFields := c.BuildProfileFields(cfg, currentUser.Fields, authKey)
-	return c.UpdateProfileFields(ctx, newFields)
+	note := body + DisclaimerText
+	fields := c.BuildProfileFields(cfg, currentUser.Fields, authKey)
+	_, err = c.client.AccountUpdate(ctx, &gomastodon.Profile{Note: &note, Fields: &fields})
+	if err != nil && errorNotifier != nil {
+		go errorNotifier("プロフィール更新エラー", err.Error())
+	}
+	return err
 }
 
 func (c *Client) BuildProfileFields(cfg *config.Config, currentFields []gomastodon.Field, authKey string) []gomastodon.Field {

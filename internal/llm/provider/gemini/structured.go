@@ -14,6 +14,8 @@ import (
 
 const structuredResultToolName = "submit_json_result"
 
+func (c *Client) SupportsStructuredOutput() bool { return true }
+
 func (c *Client) GenerateStructuredContent(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, images []model.Image, temperature float64, schema *provider.StructuredSchema) (string, string, error) {
 	requestModel := c.requestModel(systemPrompt, maxTokens, temperature)
 	requestModel.Tools = []*genai.Tool{
@@ -92,7 +94,7 @@ func geminiSchemaType(schemaType string) genai.Type {
 
 func extractStructuredResult(resp *genai.GenerateContentResponse) (string, error) {
 	if len(resp.Candidates) == 0 || resp.Candidates[0].Content == nil {
-		return "", fmt.Errorf("structured function call was not returned")
+		return "", fmt.Errorf("%w: function call was not returned", provider.ErrInvalidStructuredOutput)
 	}
 
 	for _, part := range resp.Candidates[0].Content.Parts {
@@ -102,16 +104,16 @@ func extractStructuredResult(resp *genai.GenerateContentResponse) (string, error
 		}
 		result, ok := call.Args["result"]
 		if !ok || result == nil {
-			return "", fmt.Errorf("structured function returned no result")
+			return "", fmt.Errorf("%w: function returned no result", provider.ErrInvalidStructuredOutput)
 		}
 		data, err := json.Marshal(result)
 		if err != nil {
-			return "", fmt.Errorf("encode structured function result: %w", err)
+			return "", fmt.Errorf("%w: encode structured function result: %v", provider.ErrInvalidStructuredOutput, err)
 		}
 		if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
-			return "", fmt.Errorf("structured function returned no result")
+			return "", fmt.Errorf("%w: function returned no result", provider.ErrInvalidStructuredOutput)
 		}
 		return string(data), nil
 	}
-	return "", fmt.Errorf("structured function call was not returned")
+	return "", fmt.Errorf("%w: function call was not returned", provider.ErrInvalidStructuredOutput)
 }

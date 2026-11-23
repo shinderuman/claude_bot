@@ -3,11 +3,14 @@ package config
 import (
 	"bufio"
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
-	"time"
 
 	"claude_bot/internal/util"
 
@@ -18,29 +21,28 @@ type URLBlacklist struct {
 	mu       sync.RWMutex
 	domains  []string
 	filePath string
-	watcher  *fsnotify.Watcher
 }
 
-func NewURLBlacklist(filePath string) *URLBlacklist {
+func NewURLBlacklist(filePath string) (*URLBlacklist, error) {
 	b := &URLBlacklist{
 		filePath: filePath,
 		domains:  []string{},
 	}
 
 	if err := b.reload(); err != nil {
-		log.Printf("URL Blacklist初期読み込みエラー（空のリストで起動します）: %v", err)
+		return nil, err
 	}
 
-	return b
+	return b, nil
 }
 
 func (b *URLBlacklist) Get() []string {
+	if b == nil {
+		return nil
+	}
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-
-	result := make([]string, len(b.domains))
-	copy(result, b.domains)
-	return result
+	return slices.Clone(b.domains)
 }
 
 func (b *URLBlacklist) reload() error {
@@ -48,7 +50,7 @@ func (b *URLBlacklist) reload() error {
 	if err != nil {
 		return err
 	}
-	defer file.Close() //nolint:errcheck
+	defer file.Close()
 
 	var domains []string
 	scanner := bufio.NewScanner(file)
@@ -76,87 +78,47 @@ func (b *URLBlacklist) reload() error {
 }
 
 func (b *URLBlacklist) StartWatching(ctx context.Context) error {
+	path, err := filepath.Abs(b.filePath)
+	if err != nil {
+		return err
+	}
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return err
 	}
 
-	b.watcher = watcher
-
-	if err := watcher.Add(b.filePath); err != nil {
-		watcher.Close() //nolint:errcheck
+	if err := watcher.Add(filepath.Dir(path)); err != nil {
+		watcher.Close()
 		return err
 	}
 
-	go b.watchLoop(ctx)
-	log.Printf("URL Blacklistファイル監視開始: %s", b.filePath)
-
+	go b.watchLoop(ctx, watcher, path)
+	log.Printf("URL Blacklistファイル監視開始: %s", path)
 	return nil
 }
 
-func (b *URLBlacklist) watchLoop(ctx context.Context) {
-	defer b.watcher.Close() //nolint:errcheck
-
+func (b *URLBlacklist) watchLoop(ctx context.Context, watcher *fsnotify.Watcher, path string) {
+	defer watcher.Close()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case event, ok := <-b.watcher.Events:
+		case event, ok := <-watcher.Events:
 			if !ok {
 				return
 			}
-			b.handleFileEvent(ctx, event)
-		case err, ok := <-b.watcher.Errors:
+			if filepath.Clean(event.Name) == path && (event.Has(fsnotify.Write) || event.Has(fsnotify.Create)) {
+				if err := b.reload(); err != nil {
+					log.Printf("URL Blacklist再読み込みエラー: %v", err)
+				}
+			}
+		case err, ok := <-watcher.Errors:
 			if !ok {
 				return
 			}
 			log.Printf("URL Blacklistファイル監視エラー: %v", err)
 		}
 	}
-}
-
-func (b *URLBlacklist) handleFileEvent(ctx context.Context, event fsnotify.Event) {
-	shouldReload := event.Op&fsnotify.Write == fsnotify.Write ||
-		event.Op&fsnotify.Create == fsnotify.Create
-
-	if shouldReload {
-		if err := b.reload(); err != nil {
-			log.Printf("URL Blacklist再読み込みエラー: %v", err)
-		}
-		return
-	}
-
-	shouldRewatch := event.Op&fsnotify.Rename == fsnotify.Rename ||
-		event.Op&fsnotify.Remove == fsnotify.Remove
-
-	if shouldRewatch {
-		go b.attemptRewatch(ctx)
-	}
-}
-
-func (b *URLBlacklist) attemptRewatch(ctx context.Context) {
-	// Editors can replace the file by renaming a temporary file over it.
-	for range 5 {
-		if b.tryAddWatcher() {
-			if err := b.reload(); err != nil {
-				log.Printf("URL Blacklist再読み込みエラー: %v", err)
-			}
-			return
-		}
-
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(100 * time.Millisecond):
-		}
-	}
-}
-
-func (b *URLBlacklist) tryAddWatcher() bool {
-	if _, err := os.Stat(b.filePath); err != nil {
-		return false
-	}
-	return b.watcher.Add(b.filePath) == nil
 }
 
 func LoadBlacklistFromEnv(envValue string) []string {
@@ -175,15 +137,20 @@ func LoadBlacklistFromEnv(envValue string) []string {
 	return domains
 }
 
-func InitializeURLBlacklist(ctx context.Context, envValue string) *URLBlacklist {
-	blacklistPath := util.GetFilePath("url_blacklist.txt")
-
-	if _, err := os.Stat(blacklistPath); err == nil {
-		blacklist := NewURLBlacklist(blacklistPath)
-		if err := blacklist.StartWatching(ctx); err != nil {
-			log.Printf("URL Blacklistファイル監視開始エラー: %v", err)
+func InitializeURLBlacklist(ctx context.Context, envValue string) (*URLBlacklist, error) {
+	blacklistPath, err := util.GetFilePath("url_blacklist.txt")
+	if err == nil {
+		blacklist, err := NewURLBlacklist(blacklistPath)
+		if err != nil {
+			return nil, fmt.Errorf("URL Blacklistを読み込めません: %w", err)
 		}
-		return blacklist
+		if err := blacklist.StartWatching(ctx); err != nil {
+			return nil, fmt.Errorf("URL Blacklistの監視を開始できません: %w", err)
+		}
+		return blacklist, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
 	}
 
 	log.Printf("url_blacklist.txtが見つかりません。環境変数URL_BLACKLISTを使用します")
@@ -195,5 +162,5 @@ func InitializeURLBlacklist(ctx context.Context, envValue string) *URLBlacklist 
 	}
 
 	log.Printf("URL Blacklist読み込み完了: %d件 (環境変数)", len(domains))
-	return blacklist
+	return blacklist, nil
 }
