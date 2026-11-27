@@ -41,6 +41,14 @@ func TestBuildDailySummaryPrompt_Timezone(t *testing.T) {
 	}
 }
 
+func TestBuildSystemPromptOpenAIIncludesConfiguredReplyLimitAndFormatting(t *testing.T) {
+	cfg := &config.Config{LLMProvider: config.LLMProviderOpenAI, MaxPostChars: 120}
+	prompt := BuildSystemPrompt(cfg, "", "", "", true, 1)
+	if !strings.Contains(prompt, "返答は120文字以内に収めます。強調表示（**text**）は禁止です。") {
+		t.Fatalf("reply constraints are missing from the system prompt: %q", prompt)
+	}
+}
+
 func TestBuildSystemPrompt_AnalogPriority(t *testing.T) {
 	cfg := &config.Config{
 		BotUsername:     "testbot",

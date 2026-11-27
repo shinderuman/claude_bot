@@ -12,6 +12,7 @@ import (
 	"claude_bot/internal/llm/provider"
 	"claude_bot/internal/llm/provider/anthropic"
 	"claude_bot/internal/llm/provider/gemini"
+	"claude_bot/internal/llm/provider/openai"
 	"claude_bot/internal/model"
 	"claude_bot/internal/prompts"
 )
@@ -42,9 +43,11 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		p = anthropic.NewClient(cfg)
 	case config.LLMProviderGemini:
 		p, err = gemini.NewClient(cfg)
+	case config.LLMProviderOpenAI:
+		p, err = openai.NewClient(cfg)
 	default:
-		return nil, fmt.Errorf("エラー: 未知のプロバイダー '%s' が指定されました。'%s' または '%s' を指定してください。",
-			cfg.LLMProvider, config.LLMProviderClaude, config.LLMProviderGemini)
+		return nil, fmt.Errorf("エラー: 未知のプロバイダー '%s' が指定されました。'%s'、'%s' または '%s' を指定してください。",
+			cfg.LLMProvider, config.LLMProviderClaude, config.LLMProviderGemini, config.LLMProviderOpenAI)
 	}
 
 	if err != nil {

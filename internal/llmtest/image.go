@@ -19,16 +19,14 @@ import (
 
 func runRawImage(cfg *config.Config, client *llm.Client, message, imagePath string) error {
 	log.Printf("=== 画像認識テスト（最小プロンプト） ===")
-	log.Printf("テストメッセージ: %s", message)
+	if cfg.LLMProvider != config.LLMProviderOpenAI {
+		log.Printf("テストメッセージ: %s", message)
+	}
 	if imagePath == "" {
 		return errors.New("エラー: 画像ファイルパスが必要です (-image オプション)")
 	}
 	log.Printf("画像ファイル: %s", imagePath)
 	log.Println()
-
-	if cfg.AnthropicAuthToken == "" {
-		return errMissingAnthropicToken
-	}
 
 	img, err := loadImage(imagePath)
 	if err != nil {
@@ -42,14 +40,10 @@ func runRawImage(cfg *config.Config, client *llm.Client, message, imagePath stri
 	response := client.GenerateText(ctx, messages, "", cfg.MaxResponseTokens, currentImages, cfg.LLMTemperature)
 
 	if response == "" {
-		return errEmptyClaudeReply
+		return errEmptyReply
 	}
 
-	log.Println("Claude応答受信")
-	log.Println()
-	log.Println("--- Claude応答 ---")
-	log.Println(response)
-	log.Println("------------------")
+	logReply(response)
 	return nil
 }
 
@@ -72,10 +66,12 @@ func loadImage(path string) (*model.Image, error) {
 	}, nil
 }
 
-func runGenerateImage(imageGen *image.ImageGenerator, prompt string) error {
+func runGenerateImage(cfg *config.Config, imageGen *image.ImageGenerator, prompt string) error {
 	log.Printf("=== SVG画像生成テスト ===")
-	log.Printf("プロンプト: %s", prompt)
-	log.Println()
+	if cfg.LLMProvider != config.LLMProviderOpenAI {
+		log.Printf("プロンプト: %s", prompt)
+		log.Println()
+	}
 
 	ctx := context.Background()
 	svg, err := imageGen.GenerateSVG(ctx, prompt)

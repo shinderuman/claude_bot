@@ -12,6 +12,56 @@ import (
 )
 
 func LoadEnvironment(envPath string) error {
+	if err := LoadInstanceEnvironment(envPath); err != nil {
+		return err
+	}
+	return loadCommonEnvironment(envPath)
+}
+
+func LoadLLMTestConfig(envPath string) (*Config, error) {
+	if err := LoadInstanceEnvironment(envPath); err != nil {
+		return nil, err
+	}
+	if os.Getenv("LLM_PROVIDER") == LLMProviderOpenAI {
+		return loadOpenAIConfig()
+	}
+	if err := loadCommonEnvironment(envPath); err != nil {
+		return nil, err
+	}
+	return LoadConfig()
+}
+
+func LoadProfileTestConfig(envPath string) (*Config, error) {
+	if envPath != "" {
+		if err := LoadEnvironment(envPath); err != nil {
+			return nil, err
+		}
+	}
+	var env environmentReader
+	cfg := &Config{
+		LLMProvider:        os.Getenv("LLM_PROVIDER"),
+		GeminiModel:        os.Getenv("GEMINI_MODEL"),
+		AnthropicModel:     os.Getenv("ANTHROPIC_DEFAULT_MODEL"),
+		MaxPostChars:       env.optionalInteger("MAX_POST_CHARS", 480),
+		Timezone:           os.Getenv("TIMEZONE"),
+		AutoPostVisibility: os.Getenv("AUTO_POST_VISIBILITY"),
+	}
+	if os.Getenv("ALLOW_REMOTE_USERS") != "" {
+		cfg.AllowRemoteUsers = env.boolean("ALLOW_REMOTE_USERS")
+	}
+	if env.err != nil {
+		return nil, env.err
+	}
+	if cfg.Timezone == "" {
+		cfg.Timezone = "UTC"
+	}
+	if cfg.AutoPostVisibility == "" {
+		cfg.AutoPostVisibility = "unlisted"
+	}
+	return cfg, nil
+}
+
+func LoadInstanceEnvironment(envPath string) error {
 	if envPath == "" {
 		return errors.New("個別環境設定ファイルを指定してください")
 	}
@@ -20,6 +70,10 @@ func LoadEnvironment(envPath string) error {
 		return fmt.Errorf("個別環境設定ファイルを読み込めません (%s): %w", envPath, err)
 	}
 
+	return nil
+}
+
+func loadCommonEnvironment(envPath string) error {
 	// godotenv.Load only fills unset variables, so the instance settings take precedence.
 	commonEnvPath, err := util.GetFilePath(".env")
 	if errors.Is(err, os.ErrNotExist) {
@@ -38,8 +92,15 @@ func LoadEnvironment(envPath string) error {
 
 func LoadConfig() (*Config, error) {
 	var env environmentReader
+	provider := env.required("LLM_PROVIDER")
+	if env.err != nil {
+		return nil, env.err
+	}
+	if provider != LLMProviderClaude && provider != LLMProviderGemini {
+		return nil, fmt.Errorf("未対応のLLMプロバイダー: %s", provider)
+	}
 	cfg := &Config{
-		LLMProvider:       env.required("LLM_PROVIDER"),
+		LLMProvider:       provider,
 		LLMTemperature:    env.decimal("LLM_TEMPERATURE"),
 		LLMMaxConcurrency: env.integer("LLM_MAX_CONCURRENCY"),
 		LLMMaxRetries:     env.integer("LLM_MAX_RETRIES"),
@@ -121,8 +182,30 @@ func LoadConfig() (*Config, error) {
 		if cfg.AnthropicAuthToken == "" {
 			return nil, errors.New("Claudeプロバイダーには ANTHROPIC_AUTH_TOKEN が必要です")
 		}
-	default:
-		return nil, fmt.Errorf("未対応のLLMプロバイダー: %s", cfg.LLMProvider)
+	}
+	return cfg, nil
+}
+
+func loadOpenAIConfig() (*Config, error) {
+	var env environmentReader
+	cfg := &Config{
+		LLMProvider:          LLMProviderOpenAI,
+		OpenAIModel:          env.required("OPENAI_MODEL"),
+		OpenAICredentialFile: env.required("OPENAI_CREDENTIAL_FILE"),
+		LLMMaxConcurrency:    env.optionalInteger("LLM_MAX_CONCURRENCY", 1),
+		LLMMaxRetries:        env.optionalInteger("LLM_MAX_RETRIES", 0),
+		CharacterPrompt:      os.Getenv("CHARACTER_PROMPT"),
+		CharacterPriority:    1,
+		MaxPostChars:         env.optionalInteger("MAX_POST_CHARS", 0),
+	}
+	if os.Getenv("CHARACTER_PRIORITY") != "" {
+		cfg.CharacterPriority = env.decimal("CHARACTER_PRIORITY")
+	}
+	if os.Getenv("ENABLE_IMAGE_GENERATION") != "" {
+		cfg.EnableImageGeneration = env.boolean("ENABLE_IMAGE_GENERATION")
+	}
+	if env.err != nil {
+		return nil, env.err
 	}
 	return cfg, nil
 }
@@ -160,6 +243,13 @@ func (r *environmentReader) integer(name string) int {
 		r.err = fmt.Errorf("%s には整数を指定してください", name)
 	}
 	return value
+}
+
+func (r *environmentReader) optionalInteger(name string, defaultValue int) int {
+	if os.Getenv(name) == "" {
+		return defaultValue
+	}
+	return r.integer(name)
 }
 
 func (r *environmentReader) decimal(name string) float64 {

@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -49,6 +50,10 @@ type Bot struct {
 }
 
 func NewBot(cfg *config.Config) (*Bot, error) {
+	if cfg.LLMProvider == config.LLMProviderOpenAI {
+		return nil, errors.New("Mastodon BotではChatGPTプランを使用できません。本人用の test_claude を使用してください")
+	}
+
 	history, err := chat.Open(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("会話履歴初期化: %w", err)

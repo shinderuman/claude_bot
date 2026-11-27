@@ -18,16 +18,14 @@ func runSummary(cfg *config.Config, client *llm.Client, newMessages, existingSum
 	log.Printf("=== 要約生成テスト ===")
 	log.Println()
 
-	if cfg.AnthropicAuthToken == "" {
-		return errMissingAnthropicToken
-	}
-
 	summaryPrompt := prompts.BuildSummaryPrompt(newMessages, existingSummary)
 
-	log.Println("--- 要約プロンプト ---")
-	log.Println(summaryPrompt)
-	log.Println("--------------------")
-	log.Println()
+	if cfg.LLMProvider != config.LLMProviderOpenAI {
+		log.Println("--- 要約プロンプト ---")
+		log.Println(summaryPrompt)
+		log.Println("--------------------")
+		log.Println()
+	}
 
 	messages := []model.Message{{Role: model.RoleUser, Content: summaryPrompt}}
 	ctx := context.Background()
@@ -48,21 +46,21 @@ func runSummary(cfg *config.Config, client *llm.Client, newMessages, existingSum
 
 func runFactExtraction(cfg *config.Config, client *llm.Client, message string) error {
 	log.Printf("=== 事実抽出テスト ===")
-	log.Printf("テストメッセージ: %s", message)
-	log.Println()
-
-	if cfg.AnthropicAuthToken == "" {
-		return errMissingAnthropicToken
+	if cfg.LLMProvider != config.LLMProviderOpenAI {
+		log.Printf("テストメッセージ: %s", message)
+		log.Println()
 	}
 
 	authorUserName := "testuser"
 	author := "testuser@example.com"
 	prompt := prompts.BuildFactExtractionPrompt(authorUserName, author, message, "test_bot", false)
 
-	log.Println("--- 事実抽出プロンプト ---")
-	log.Println(prompt)
-	log.Println("------------------------")
-	log.Println()
+	if cfg.LLMProvider != config.LLMProviderOpenAI {
+		log.Println("--- 事実抽出プロンプト ---")
+		log.Println(prompt)
+		log.Println("------------------------")
+		log.Println()
+	}
 
 	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 	ctx := context.Background()
@@ -83,10 +81,6 @@ func runFactExtraction(cfg *config.Config, client *llm.Client, message string) e
 func runAutoPost(cfg *config.Config, client *llm.Client) error {
 	log.Printf("=== 自動投稿テスト ===")
 	log.Println()
-
-	if cfg.AnthropicAuthToken == "" {
-		return errMissingAnthropicToken
-	}
 
 	if _, err := conversation.Open(cfg); err != nil {
 		return err
@@ -136,18 +130,18 @@ func runAutoPost(cfg *config.Config, client *llm.Client) error {
 
 func runErrorMessageGeneration(cfg *config.Config, client *llm.Client, errorDetail string) error {
 	log.Printf("=== エラーメッセージ生成テスト ===")
-	log.Printf("エラー詳細: %s", errorDetail)
-	log.Println()
-
-	if cfg.AnthropicAuthToken == "" {
-		return errMissingAnthropicToken
+	if cfg.LLMProvider != config.LLMProviderOpenAI {
+		log.Printf("エラー詳細: %s", errorDetail)
+		log.Println()
 	}
 
 	prompt := prompts.BuildErrorMessagePrompt(errorDetail)
-	log.Println("--- 生成されたプロンプト ---")
-	log.Println(prompt)
-	log.Println("--------------------------")
-	log.Println()
+	if cfg.LLMProvider != config.LLMProviderOpenAI {
+		log.Println("--- 生成されたプロンプト ---")
+		log.Println(prompt)
+		log.Println("--------------------------")
+		log.Println()
+	}
 
 	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 	response, err := generateInCharacter(cfg, client, messages, cfg.MaxResponseTokens)
@@ -167,7 +161,7 @@ func generateInCharacter(cfg *config.Config, client *llm.Client, messages []mode
 	systemPrompt := prompts.BuildSystemPrompt(cfg, "", "", "", true, cfg.CharacterPriority)
 	response := client.GenerateText(context.Background(), messages, systemPrompt, maxTokens, nil, cfg.LLMTemperature)
 	if response == "" {
-		return "", errEmptyClaudeReply
+		return "", errEmptyReply
 	}
 	return response, nil
 }

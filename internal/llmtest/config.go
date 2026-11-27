@@ -7,6 +7,10 @@ import (
 )
 
 func printConfig(cfg *config.Config) {
+	if cfg.LLMProvider == config.LLMProviderOpenAI {
+		log.Printf("OpenAIモデル: %s", cfg.OpenAIModel)
+		return
+	}
 	log.Println("=== 設定情報 ===")
 	log.Printf("Mastodonサーバー: %s", cfg.MastodonServer)
 	log.Printf("Botユーザー名: @%s", cfg.BotUsername)

@@ -15,11 +15,13 @@ import (
 
 func runResponse(cfg *config.Config, client *llm.Client, factService *facts.FactService, message, imagePath string) error {
 	log.Printf("=== 通常応答テスト ===")
-	log.Printf("テストメッセージ: %s", message)
-	if imagePath != "" {
-		log.Printf("画像ファイル: %s", imagePath)
+	if cfg.LLMProvider != config.LLMProviderOpenAI {
+		log.Printf("テストメッセージ: %s", message)
+		if imagePath != "" {
+			log.Printf("画像ファイル: %s", imagePath)
+		}
+		log.Println()
 	}
-	log.Println()
 
 	testUser := "asmodeus"
 	testUserName := "グレートマグマカッター"
@@ -48,14 +50,17 @@ func runResponse(cfg *config.Config, client *llm.Client, factService *facts.Fact
 
 	ctx := context.Background()
 
-	log.Println("事実を検索中...")
-	relevantFacts := factService.QueryRelevantFacts(ctx, testUser, testUserName, message)
-	if relevantFacts != "" {
-		log.Println("--- 関連する事実 ---")
-		log.Println(relevantFacts)
-		log.Println("------------------")
-	} else {
-		log.Println("関連する事実は見つかりませんでした")
+	var relevantFacts string
+	if factService != nil && cfg.EnableFactStore {
+		log.Println("事実を検索中...")
+		relevantFacts = factService.QueryRelevantFacts(ctx, testUser, testUserName, message)
+		if relevantFacts != "" {
+			log.Println("--- 関連する事実 ---")
+			log.Println(relevantFacts)
+			log.Println("------------------")
+		} else {
+			log.Println("関連する事実は見つかりませんでした")
+		}
 	}
 
 	var botProfile string
@@ -70,16 +75,11 @@ func runResponse(cfg *config.Config, client *llm.Client, factService *facts.Fact
 	response := client.GenerateResponse(ctx, session, conversation, relevantFacts, botProfile, currentImages)
 
 	if response == "" {
-		return errEmptyClaudeReply
+		return errEmptyReply
 	}
+	logReply(response)
 
-	log.Println("Claude応答受信")
-	log.Println()
-	log.Println("--- Claude応答 ---")
-	log.Println(response)
-	log.Println("------------------")
-
-	if cfg.EnableFactStore {
+	if factService != nil && cfg.EnableFactStore {
 		log.Println()
 		log.Println("ファクトを抽出中...")
 		baseFact := model.Fact{
@@ -107,22 +107,24 @@ func runConversation(cfg *config.Config, client *llm.Client, lastMessage string)
 		{Role: "user", Content: lastMessage},
 	}
 
-	log.Println("--- 会話履歴 ---")
-	for _, msg := range messages {
-		log.Printf("[%s]: %s", msg.Role, msg.Content)
+	if cfg.LLMProvider != config.LLMProviderOpenAI {
+		log.Println("--- 会話履歴 ---")
+		for _, msg := range messages {
+			log.Printf("[%s]: %s", msg.Role, msg.Content)
+		}
+		log.Println("----------------")
+		log.Println()
 	}
-	log.Println("----------------")
-	log.Println()
 
 	response, err := generateInCharacter(cfg, client, messages, cfg.MaxResponseTokens)
 	if err != nil {
 		return err
 	}
 
-	log.Println("応答受信")
-	log.Println()
-	log.Println("--- 応答 ---")
-	log.Println(response)
-	log.Println("------------------")
+	logReply(response)
 	return nil
+}
+
+func logReply(response string) {
+	log.Printf("応答: %s", response)
 }

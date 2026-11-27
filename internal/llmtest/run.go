@@ -18,10 +18,7 @@ import (
 	"claude_bot/internal/util"
 )
 
-var (
-	errMissingAnthropicToken = errors.New("エラー: ANTHROPIC_AUTH_TOKEN環境変数が設定されていません")
-	errEmptyClaudeReply      = errors.New("エラー: Claudeからの応答がありません")
-)
+var errEmptyReply = errors.New("LLMからの応答がありません")
 
 func Run(args []string) error {
 	flags := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
@@ -33,25 +30,29 @@ func Run(args []string) error {
 	if err := cli.Parse(flags, args); err != nil {
 		return err
 	}
+	envPath := flags.Arg(0)
+	if *mode == "profile" {
+		cfg, err := config.LoadProfileTestConfig(envPath)
+		if err != nil {
+			return err
+		}
+		return runProfileUpdate(cfg)
+	}
 
 	if os.Getenv("RUN_MAINTENANCE") == "" {
 		if err := os.Setenv("RUN_MAINTENANCE", "false"); err != nil {
 			return err
 		}
 	}
-	envPath := flags.Arg(0)
-	if err := config.LoadEnvironment(envPath); err != nil {
-		return err
-	}
-	if envPath != "" {
-		log.Printf("設定ファイルを読み込みました: %s", envPath)
-	} else {
-		log.Println("デフォルト設定ファイルを読み込みました")
-	}
-
-	cfg, err := config.LoadConfig()
+	cfg, err := config.LoadLLMTestConfig(envPath)
 	if err != nil {
 		return err
+	}
+	log.Printf("設定ファイルを読み込みました: %s", envPath)
+	if cfg.LLMProvider == config.LLMProviderOpenAI {
+		if *mode == "auto-post" {
+			return errors.New("ChatGPTプランではBot用のファクトを使う auto-post モードを実行できません")
+		}
 	}
 	printConfig(cfg)
 	llmClient, err := llm.NewClient(cfg)
@@ -59,19 +60,21 @@ func Run(args []string) error {
 		return err
 	}
 
-	factsFile := "data/facts.json"
-	if *testFacts {
-		factsFile = "data/facts_test.json"
-		log.Printf("テストモード: %s を使用します", factsFile)
-	}
-	factStore, err := loadMemoryFacts(factsFile)
-	if err != nil {
-		return err
-	}
-	factService := facts.NewFactService(cfg, factStore, llmClient, nil, nil, nil)
-
 	switch *mode {
 	case "response":
+		var factService *facts.FactService
+		if cfg.EnableFactStore {
+			factsFile := "data/facts.json"
+			if *testFacts {
+				factsFile = "data/facts_test.json"
+				log.Printf("テストモード: %s を使用します", factsFile)
+			}
+			factStore, err := loadMemoryFacts(factsFile)
+			if err != nil {
+				return err
+			}
+			factService = facts.NewFactService(cfg, factStore, llmClient, nil, nil, nil)
+		}
 		return runResponse(cfg, llmClient, factService, *message, *imagePath)
 	case "summary":
 		return runSummary(cfg, llmClient, *message, *existingSummary)
@@ -84,13 +87,11 @@ func Run(args []string) error {
 	case "conversation":
 		return runConversation(cfg, llmClient, *message)
 	case "generate-image":
-		return runGenerateImage(image.NewImageGenerator(cfg, llmClient), *message)
+		return runGenerateImage(cfg, image.NewImageGenerator(cfg, llmClient), *message)
 	case "error":
 		return runErrorMessageGeneration(cfg, llmClient, *message)
-	case "profile":
-		return runProfileUpdate(cfg)
 	default:
-		return fmt.Errorf("不明なモード: %s (使用可能: response, summary, fact, raw-image, auto-post, conversation, generate-image, error)", *mode)
+		return fmt.Errorf("不明なモード: %s (使用可能: response, summary, fact, raw-image, auto-post, conversation, generate-image, error, profile)", *mode)
 	}
 }
 

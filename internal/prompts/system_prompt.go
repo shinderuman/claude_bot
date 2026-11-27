@@ -44,7 +44,10 @@ func BuildSystemPrompt(cfg *config.Config, sessionSummary, relevantFacts, botPro
 			sb.WriteString(truncatedProfile)
 			sb.WriteString("\n\n")
 		}
-		sb.WriteString(fmt.Sprintf(Messages.System.Constraint, cfg.MaxPostChars))
+		if cfg.MaxPostChars > 0 {
+			fmt.Fprintf(&sb, Messages.System.ReplyLength, cfg.MaxPostChars)
+		}
+		sb.WriteString(Messages.System.ReplyFormatting)
 		characterPart = sb.String()
 	}
 

@@ -17,6 +17,9 @@ type Config struct {
 	AnthropicBaseURL   string
 	AnthropicModel     string
 
+	OpenAIModel          string
+	OpenAICredentialFile string
+
 	BotUsername       string
 	CharacterPrompt   string
 	CharacterPriority float64

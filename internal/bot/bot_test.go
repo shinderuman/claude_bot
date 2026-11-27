@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -269,5 +270,11 @@ func TestResolveBroadcastRootID(t *testing.T) {
 				t.Errorf("resolveBroadcastRootID() rootID = %v, want %v", gotRootID, tt.wantRootID)
 			}
 		})
+	}
+}
+
+func TestNewBotRejectsOpenAIPlanBeforeInitialization(t *testing.T) {
+	if _, err := NewBot(&config.Config{LLMProvider: config.LLMProviderOpenAI}); err == nil || !strings.Contains(err.Error(), "ChatGPTプラン") {
+		t.Fatalf("NewBot() error = %v, want rejection of ChatGPT plan", err)
 	}
 }

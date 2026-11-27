@@ -22,7 +22,7 @@ func (c *Client) reportGenerationError(err error, payload string) {
 	log.Printf("LLM応答生成失敗: %v", err)
 	details := err.Error()
 
-	if c.provider.IsBadRequest(err) {
+	if payload != "" && c.provider.IsBadRequest(err) {
 		log.Printf("LLMリクエスト: %s", payload)
 		details = fmt.Sprintf("%s\n\n[Request Payload]\n%s", details, payload)
 	}
