@@ -37,7 +37,7 @@ func runRawImage(cfg *config.Config, client *llm.Client, message, imagePath stri
 	messages := []model.Message{{Role: "user", Content: message}}
 
 	ctx := context.Background()
-	response := client.GenerateText(ctx, messages, "", cfg.MaxResponseTokens, currentImages, cfg.LLMTemperature)
+	response := client.GenerateText(ctx, messages, "", cfg.MaxResponseTokens, currentImages, cfg.LLMTemperature, "画像入力への応答生成")
 
 	if response == "" {
 		return errEmptyReply

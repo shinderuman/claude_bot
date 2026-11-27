@@ -2,13 +2,11 @@ package bot
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"time"
 
 	chat "claude_bot/internal/conversation"
-	"claude_bot/internal/llm"
 	"claude_bot/internal/model"
 	"claude_bot/internal/prompts"
 
@@ -28,22 +26,12 @@ func (b *Bot) classifyIntent(ctx context.Context, message string, urlCandidates 
 		return intentResult{}, err
 	}
 	prompt := prompts.BuildIntentClassificationPrompt(message, time.Now().In(location), urlCandidates...)
-	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: model.RoleUser, Content: prompt}},
-		prompts.Messages.System.IntentClassification, b.config.MaxResponseTokens, nil, llm.TemperatureSystem)
-	if response == "" {
-		return intentResult{}, fmt.Errorf("意図判定の応答が空です")
-	}
-
 	var result intentResult
-	if err := json.Unmarshal([]byte(response), &result); err != nil {
+	if err := b.llmClient.GenerateJSON(ctx, []model.Message{{Role: model.RoleUser, Content: prompt}},
+		prompts.Messages.System.IntentClassification, b.config.MaxResponseTokens, "意図判定", &result); err != nil {
 		return intentResult{}, err
 	}
-	switch result.Intent {
-	case model.IntentChat, model.IntentAnalysis, model.IntentImageGeneration, model.IntentDailySummary, model.IntentFollowRequest:
-		return result, nil
-	default:
-		return intentResult{}, fmt.Errorf("未対応の意図判定結果: %q", result.Intent)
-	}
+	return result, nil
 }
 
 func (b *Bot) handleFollowRequest(ctx context.Context, conversation *model.Conversation, notification *gomastodon.Notification, statusID, mention, visibility string) bool {
@@ -95,7 +83,7 @@ func (b *Bot) generateFollowReply(ctx context.Context, targetAcct, template, fal
 	replyPrompt := fmt.Sprintf(template, b.config.CharacterPrompt, targetAcct)
 	replyMessages := []model.Message{{Role: model.RoleUser, Content: replyPrompt}}
 
-	generatedReply := b.llmClient.GenerateText(ctx, replyMessages, "", b.config.MaxResponseTokens, nil, b.config.LLMTemperature)
+	generatedReply := b.llmClient.GenerateText(ctx, replyMessages, "", b.config.MaxResponseTokens, nil, b.config.LLMTemperature, "フォロー依頼の返信生成")
 	if generatedReply != "" {
 		return generatedReply
 	}

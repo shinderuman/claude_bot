@@ -3,9 +3,11 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -63,23 +65,31 @@ func structuredTestClient(p provider.Provider) *Client {
 	}
 }
 
-func TestGenerateTextUsesStructuredOutputWithoutFallback(t *testing.T) {
+func generateJSONForTest(ctx context.Context, client *Client, prompt string) string {
+	var result json.RawMessage
+	if err := client.GenerateJSON(ctx, []model.Message{{Role: model.RoleUser, Content: "query"}}, prompt, 100, "テスト生成", &result); err != nil {
+		return ""
+	}
+	return string(result)
+}
+
+func TestGenerateJSONUsesStructuredOutputWithoutFallback(t *testing.T) {
 	p := &structuredProviderMock{
 		structured: `{"target_candidates":[],"keys":[]}`,
 		content:    "text result",
 	}
 	client := structuredTestClient(p)
 
-	got := client.GenerateText(context.Background(), []model.Message{{Role: model.RoleUser, Content: "query"}}, prompts.Messages.System.FactQuery, 100, nil, TemperatureSystem)
+	got := generateJSONForTest(context.Background(), client, prompts.Messages.System.FactQuery)
 	if got != p.structured {
-		t.Fatalf("GenerateText() = %q, want %q", got, p.structured)
+		t.Fatalf("GenerateJSON() = %q, want %q", got, p.structured)
 	}
 	if p.structuredCalls != 1 || p.contentCalls != 0 {
 		t.Fatalf("calls = structured:%d content:%d, want 1/0", p.structuredCalls, p.contentCalls)
 	}
 }
 
-func TestGenerateTextDoesNotResendInvalidStructuredResult(t *testing.T) {
+func TestGenerateJSONDoesNotResendInvalidStructuredResult(t *testing.T) {
 	for _, test := range []struct {
 		name   string
 		result string
@@ -94,8 +104,7 @@ func TestGenerateTextDoesNotResendInvalidStructuredResult(t *testing.T) {
 				content: `{"target_candidates":[],"keys":[]}`,
 			}
 			client := structuredTestClient(p)
-			got := client.GenerateText(t.Context(), []model.Message{{Role: model.RoleUser, Content: "query"}},
-				prompts.Messages.System.FactQuery, 100, nil, TemperatureSystem)
+			got := generateJSONForTest(t.Context(), client, prompts.Messages.System.FactQuery)
 			if got != "" || p.structuredCalls != 1 || p.contentCalls != 0 {
 				t.Fatalf("result = %q, requests = %d structured and %d text", got, p.structuredCalls, p.contentCalls)
 			}
@@ -105,31 +114,43 @@ func TestGenerateTextDoesNotResendInvalidStructuredResult(t *testing.T) {
 
 func TestTextOnlyProviderSendsOneRequestAndValidatesJSON(t *testing.T) {
 	for _, test := range []struct {
-		result string
-		want   string
+		result  string
+		wantErr string
 	}{
-		{result: `{"target_candidates":[],"keys":[]}`, want: `{"target_candidates":[],"keys":[]}`},
-		{result: `{"target_candidates":"user","keys":[]}`},
-		{result: "```json\n" + `{"target_candidates":[],"keys":[]}` + "\n```"},
+		{result: `{"target_candidates":[],"keys":[]}`},
+		{result: `{"target_candidates":[],"keys":"user"}`, wantErr: "keys: 配列が必要"},
+		{result: `{"target_candidates":[],"keys":[1]}`, wantErr: "keys: [0]: 文字列が必要"},
+		{result: `{"keys":[]}`, wantErr: "必須項目 target_candidates がない"},
+		{result: `{"keys":[`, wantErr: "9バイト目: unexpected end"},
+		{result: "```json\n" + `{"target_candidates":[],"keys":[]}` + "\n```", wantErr: "1バイト目"},
 	} {
 		p := &structuredProviderMock{textOnly: true, content: test.result}
 		client := structuredTestClient(p)
-		got := client.GenerateText(t.Context(), []model.Message{{Role: model.RoleUser, Content: "query"}},
-			prompts.Messages.System.FactQuery, 100, nil, TemperatureSystem)
-		if got != test.want || p.structuredCalls != 0 || p.contentCalls != 1 {
-			t.Fatalf("result = %q, want %q, calls = %d structured and %d text", got, test.want, p.structuredCalls, p.contentCalls)
+		var result json.RawMessage
+		err := client.GenerateJSON(t.Context(), nil, prompts.Messages.System.FactQuery, 100, "検索クエリ生成", &result)
+		if test.wantErr == "" {
+			if err != nil || string(result) != test.result {
+				t.Errorf("result = %q, %v, want %q", result, err, test.result)
+			}
+		} else if !errors.Is(err, provider.ErrInvalidStructuredOutput) || !strings.Contains(err.Error(), test.wantErr) || len(result) != 0 {
+			t.Errorf("result = %q, %v, want %q", result, err, test.wantErr)
+		} else if !strings.HasSuffix(err.Error(), "\nJSON: "+test.result) {
+			t.Errorf("error = %q, want the whole response %q", err, test.result)
+		}
+		if p.structuredCalls != 0 || p.contentCalls != 1 {
+			t.Errorf("calls = %d structured and %d text, want 0 and 1", p.structuredCalls, p.contentCalls)
 		}
 	}
 }
 
-func TestGenerateTextKeepsUsingSupportedTools(t *testing.T) {
+func TestGenerateJSONKeepsUsingSupportedTools(t *testing.T) {
 	p := &structuredProviderMock{structured: `{"target_candidates":[],"keys":[]}`}
 	client := structuredTestClient(p)
 
 	for i := 0; i < 3; i++ {
-		got := client.GenerateText(context.Background(), []model.Message{{Role: model.RoleUser, Content: "query"}}, prompts.Messages.System.FactQuery, 100, nil, TemperatureSystem)
+		got := generateJSONForTest(context.Background(), client, prompts.Messages.System.FactQuery)
 		if got != p.structured {
-			t.Fatalf("GenerateText() = %q, want %q", got, p.structured)
+			t.Fatalf("GenerateJSON() = %q, want %q", got, p.structured)
 		}
 	}
 	if p.structuredCalls != 3 || p.contentCalls != 0 {
@@ -137,22 +158,22 @@ func TestGenerateTextKeepsUsingSupportedTools(t *testing.T) {
 	}
 }
 
-func TestGenerateTextKeepsUsingToolsAfterInvalidResult(t *testing.T) {
+func TestGenerateJSONKeepsUsingToolsAfterInvalidResult(t *testing.T) {
 	p := &structuredProviderMock{
 		structured: `{"target_candidates":[],"keys":[]}`,
 		content:    "text result",
 	}
 	client := structuredTestClient(p)
-	got := client.GenerateText(context.Background(), []model.Message{{Role: model.RoleUser, Content: "query"}}, prompts.Messages.System.FactQuery, 100, nil, TemperatureSystem)
+	got := generateJSONForTest(context.Background(), client, prompts.Messages.System.FactQuery)
 	if got != p.structured {
-		t.Fatalf("first GenerateText() = %q, want %q", got, p.structured)
+		t.Fatalf("first GenerateJSON() = %q, want %q", got, p.structured)
 	}
 
 	p.structuredErr = provider.ErrInvalidStructuredOutput
 	for _, prompt := range []string{prompts.Messages.System.IntentClassification, prompts.Messages.System.FactQuery, prompts.Messages.System.FactExtraction} {
-		got := client.GenerateText(context.Background(), []model.Message{{Role: model.RoleUser, Content: "query"}}, prompt, 100, nil, TemperatureSystem)
+		got := generateJSONForTest(context.Background(), client, prompt)
 		if got != "" {
-			t.Fatalf("GenerateText() = %q after an invalid result", got)
+			t.Fatalf("GenerateJSON() = %q after an invalid result", got)
 		}
 	}
 	if p.structuredCalls != 4 || p.contentCalls != 0 {
@@ -160,7 +181,7 @@ func TestGenerateTextKeepsUsingToolsAfterInvalidResult(t *testing.T) {
 	}
 }
 
-func TestGenerateTextRejectsTextInToolResponse(t *testing.T) {
+func TestGenerateJSONRejectsTextInToolResponse(t *testing.T) {
 	var toolRequests, textRequests atomic.Int32
 	result := `{"target_candidates":[],"keys":[]}`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -202,13 +223,15 @@ func TestGenerateTextRejectsTextInToolResponse(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 4; i++ {
-		got := client.GenerateText(context.Background(), []model.Message{{Role: model.RoleUser, Content: "query"}}, prompts.Messages.System.FactQuery, 100, nil, TemperatureSystem)
-		want := ""
+		var got json.RawMessage
+		err := client.GenerateJSON(t.Context(), []model.Message{{Role: model.RoleUser, Content: "query"}},
+			prompts.Messages.System.FactQuery, 100, "検索クエリ生成", &got)
 		if i == 0 {
-			want = result
-		}
-		if got != want {
-			t.Fatalf("GenerateText() = %q, want %q", got, want)
+			if err != nil || string(got) != result {
+				t.Fatalf("GenerateJSON() = %q, %v, want %q", got, err, result)
+			}
+		} else if !errors.Is(err, provider.ErrInvalidStructuredOutput) || !strings.Contains(err.Error(), "\n応答JSON: ") || !strings.Contains(err.Error(), `"type":"text"`) {
+			t.Fatalf("GenerateJSON() error = %v, want rejected text response in the error", err)
 		}
 	}
 	if tools, texts := toolRequests.Load(), textRequests.Load(); tools != 4 || texts != 0 {
@@ -220,7 +243,7 @@ func TestGenerateTextUsesNormalPathForChat(t *testing.T) {
 	p := &structuredProviderMock{content: "chat"}
 	client := structuredTestClient(p)
 
-	got := client.GenerateText(context.Background(), []model.Message{{Role: model.RoleUser, Content: "hello"}}, prompts.Messages.System.Base, 100, nil, 0.5)
+	got := client.GenerateText(context.Background(), []model.Message{{Role: model.RoleUser, Content: "hello"}}, prompts.Messages.System.Base, 100, nil, 0.5, "返信生成")
 	if got != "chat" {
 		t.Fatalf("GenerateText() = %q, want chat", got)
 	}
@@ -278,8 +301,8 @@ func TestStructuredRequestRetriesTransientFailureWithoutTextFallback(t *testing.
 		t.Fatal(err)
 	}
 
-	got := client.GenerateText(t.Context(), []model.Message{{Role: model.RoleUser, Content: "query"}}, prompts.Messages.System.FactQuery, 100, nil, TemperatureSystem)
+	got := generateJSONForTest(t.Context(), client, prompts.Messages.System.FactQuery)
 	if got != result || calls.Load() != 2 {
-		t.Fatalf("GenerateText = %q, API requests = %d, want %q and 2 requests", got, calls.Load(), result)
+		t.Fatalf("GenerateJSON = %q, API requests = %d, want %q and 2 requests", got, calls.Load(), result)
 	}
 }

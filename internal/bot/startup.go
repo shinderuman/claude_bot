@@ -10,10 +10,18 @@ func (b *Bot) executeStartupTasks(ctx context.Context, instanceID int) {
 	lightTasks, heavyTasks := b.prepareStartupTasks()
 
 	lightDelay := time.Duration(instanceID) * StartupInitSlotDuration
+	if lightDelay > 0 {
+		log.Printf("起動時初期処理まで: %s", lightDelay)
+	}
 	go runWithDelay(ctx, lightDelay, lightTasks)
 
-	heavyDelay := time.Duration(instanceID) * StartupMaintenanceSlotDuration
-	go runWithDelay(ctx, heavyDelay, heavyTasks)
+	if len(heavyTasks) > 0 {
+		heavyDelay := time.Duration(instanceID) * StartupMaintenanceSlotDuration
+		if heavyDelay > 0 {
+			log.Printf("起動時メンテナンスまで: %s", heavyDelay)
+		}
+		go runWithDelay(ctx, heavyDelay, heavyTasks)
+	}
 }
 
 func (b *Bot) prepareStartupTasks() ([]func(context.Context), []func(context.Context)) {
@@ -25,12 +33,12 @@ func (b *Bot) prepareStartupTasks() ([]func(context.Context), []func(context.Con
 		},
 		func(ctx context.Context) {
 			if b.factStore != nil {
-				deleted, err := b.factStore.PerformMaintenance(ctx, b.config.FactRetentionDays, b.config.MaxFacts)
+				expired, overLimit, err := b.factStore.PerformMaintenance(ctx, b.config.FactRetentionDays, b.config.MaxFacts)
 				if err != nil {
-					log.Printf("起動時ファクト整理失敗: %d件削除済み、%v", deleted, err)
+					log.Printf("起動時ファクト整理失敗: 期限切れ%d件・上限超過%d件削除、%v", expired, overLimit, err)
 					return
 				}
-				log.Printf("起動時ファクト整理完了: %d件削除", deleted)
+				log.Printf("起動時ファクト整理: 期限切れ%d件・上限超過%d件削除", expired, overLimit)
 			}
 		},
 		func(ctx context.Context) {
@@ -40,7 +48,7 @@ func (b *Bot) prepareStartupTasks() ([]func(context.Context), []func(context.Con
 
 	heavyTasks := []func(context.Context){}
 
-	if b.config.RunMaintenanceOnStartup {
+	if b.config.EnableFactStore && b.config.RunMaintenanceOnStartup {
 		heavyTasks = append(heavyTasks, func(ctx context.Context) {
 			if b.factService != nil {
 				if err := b.factService.PerformMaintenance(ctx); err != nil {

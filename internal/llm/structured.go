@@ -1,9 +1,22 @@
 package llm
 
 import (
+	"context"
+	"fmt"
+
 	"claude_bot/internal/llm/provider"
+	"claude_bot/internal/model"
 	"claude_bot/internal/prompts"
 )
+
+func (c *Client) GenerateJSON(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, operation string, result any) error {
+	schema := structuredOutputSchema(systemPrompt)
+	if schema == nil {
+		return fmt.Errorf("%sのJSONスキーマがありません", operation)
+	}
+	_, err := c.generate(ctx, messages, systemPrompt, maxTokens, nil, TemperatureSystem, operation, schema, result)
+	return err
+}
 
 func structuredOutputSchema(systemPrompt string) *provider.StructuredSchema {
 	switch systemPrompt {
@@ -29,7 +42,13 @@ func structuredOutputSchema(systemPrompt string) *provider.StructuredSchema {
 		)
 	case prompts.Messages.System.IntentClassification:
 		intent := stringSchema()
-		intent.Enum = []string{"chat", "image_generation", "analysis", "daily_summary", "follow_request"}
+		intent.Enum = []string{
+			string(model.IntentChat),
+			string(model.IntentImageGeneration),
+			string(model.IntentAnalysis),
+			string(model.IntentDailySummary),
+			string(model.IntentFollowRequest),
+		}
 		return objectSchema(
 			map[string]*provider.StructuredSchema{
 				"intent":        intent,

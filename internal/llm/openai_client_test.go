@@ -99,8 +99,7 @@ func openAIClient(t *testing.T, credentialPath string, maxRetries int, handler r
 }
 
 func openAIFactQuery(client *Client) string {
-	return client.GenerateText(context.Background(), []model.Message{{Role: model.RoleUser, Content: "query"}},
-		prompts.Messages.System.FactQuery, 100, nil, TemperatureSystem)
+	return generateJSONForTest(context.Background(), client, prompts.Messages.System.FactQuery)
 }
 
 func TestGenerateTextWithOpenAIProviderUsesPromptSchemaValidation(t *testing.T) {
@@ -236,7 +235,7 @@ func TestOpenAI400LogsDiagnosticsWithoutRequestContent(t *testing.T) {
 	})
 	images := []model.Image{{MediaType: "image/png", Data: "cHJpdmF0ZS1pbWFnZQ=="}}
 	got := client.GenerateText(t.Context(), []model.Message{{Role: model.RoleUser, Content: "private user text"}},
-		"private system prompt", 100, images, 0)
+		"private system prompt", 100, images, 0, "返信生成")
 	if got != "" {
 		t.Fatalf("GenerateText() = %q, want failure", got)
 	}
@@ -276,7 +275,7 @@ func TestOpenAIProviderUsesOfficialHostAndRejectsRedirect(t *testing.T) {
 		return resp, nil
 	})
 
-	result := client.GenerateText(t.Context(), []model.Message{{Role: model.RoleUser, Content: "query"}}, "", 100, nil, 0)
+	result := client.GenerateText(t.Context(), []model.Message{{Role: model.RoleUser, Content: "query"}}, "", 100, nil, 0, "返信生成")
 	if result != "" || requests != 1 {
 		t.Fatalf("result = %q, requests = %d, want one rejected request", result, requests)
 	}
@@ -293,7 +292,7 @@ func TestGenerateTextWithOpenAIProviderRetriesUnavailableRouting(t *testing.T) {
 	})
 
 	got := client.GenerateText(context.Background(), []model.Message{{Role: model.RoleUser, Content: "query"}},
-		prompts.Messages.System.Base, 100, nil, 0.5)
+		prompts.Messages.System.Base, 100, nil, 0.5, "返信生成")
 	if got != "復旧後の応答" {
 		t.Fatalf("GenerateText() = %q", got)
 	}

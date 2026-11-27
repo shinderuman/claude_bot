@@ -56,7 +56,7 @@ func (c *Client) GenerateStructuredContent(ctx context.Context, messages []model
 
 	result, err := extractStructuredResult(msg)
 	if err != nil {
-		return "", payload, err
+		return "", payload, fmt.Errorf("%w\n応答JSON: %s", err, msg.RawJSON())
 	}
 	return result, payload, nil
 }

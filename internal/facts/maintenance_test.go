@@ -2,6 +2,8 @@ package facts
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -15,11 +17,15 @@ type MockLLMClient struct {
 	GenerateTextFunc func(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, currentImages []model.Image, temperature float64) string
 }
 
-func (m *MockLLMClient) GenerateText(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, currentImages []model.Image, temperature float64) string {
+func (m *MockLLMClient) GenerateText(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, currentImages []model.Image, temperature float64, _ string) string {
 	if m.GenerateTextFunc != nil {
 		return m.GenerateTextFunc(ctx, messages, systemPrompt, maxTokens, currentImages, temperature)
 	}
 	return ""
+}
+
+func (m *MockLLMClient) GenerateJSON(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, operation string, result any) error {
+	return json.Unmarshal([]byte(m.GenerateText(ctx, messages, systemPrompt, maxTokens, nil, 0, operation)), result)
 }
 
 type MockFactStorage struct {
@@ -169,8 +175,9 @@ func TestFactReplacementRejectsTruncatedJSON(t *testing.T) {
 			case "consolidation":
 				err = service.ConsolidateBotFacts(t.Context(), target, []model.Fact{fact})
 			}
-			if err == nil {
-				t.Fatal("truncated response was accepted for fact replacement")
+			var syntaxErr *json.SyntaxError
+			if !errors.As(err, &syntaxErr) {
+				t.Fatalf("fact replacement error = %v, want JSON syntax error", err)
 			}
 			got, err := storage.GetByTarget(t.Context(), target)
 			if err != nil || len(got) != 1 || got[0].Value != fact.Value {

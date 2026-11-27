@@ -2,14 +2,12 @@ package facts
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
 	"time"
 
 	"claude_bot/internal/discovery"
-	"claude_bot/internal/llm"
 	"claude_bot/internal/model"
 	"claude_bot/internal/prompts"
 	"claude_bot/internal/util"
@@ -37,14 +35,9 @@ func (s *FactService) ConsolidateBotFacts(ctx context.Context, target string, fa
 	prompt := prompts.BuildFactConsolidationPrompt(factList.String(), s.config.CharacterPrompt)
 	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 
-	response := s.llmClient.GenerateText(ctx, messages, prompts.Messages.System.FactExtraction, s.config.MaxFactTokens*2, nil, llm.TemperatureSystem)
-	if response == "" {
-		return fmt.Errorf("ConsolidateBotFacts: LLM response empty")
-	}
-
 	var consolidatedFacts []model.Fact
-	if err := json.Unmarshal([]byte(response), &consolidatedFacts); err != nil {
-		return fmt.Errorf("ConsolidateBotFacts: JSON parse failed: %w", err)
+	if err := s.llmClient.GenerateJSON(ctx, messages, prompts.Messages.System.FactExtraction, s.config.MaxFactTokens*2, "ファクト統合", &consolidatedFacts); err != nil {
+		return err
 	}
 
 	if len(consolidatedFacts) == 0 {
@@ -98,7 +91,7 @@ func (s *FactService) GenerateAndSaveBotProfile(ctx context.Context, facts []mod
 	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 
 	generateCtx := context.WithValue(ctx, model.ContextKeyIsProfileGeneration, true)
-	profileText := s.llmClient.GenerateText(generateCtx, messages, s.config.CharacterPrompt, s.config.MaxSummaryTokens, nil, s.config.LLMTemperature)
+	profileText := s.llmClient.GenerateText(generateCtx, messages, s.config.CharacterPrompt, s.config.MaxSummaryTokens, nil, s.config.LLMTemperature, "プロフィール生成")
 	if profileText == "" {
 		return fmt.Errorf("プロファイル生成結果が空でした")
 	}

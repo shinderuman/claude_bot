@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -63,7 +64,7 @@ func (c *Client) GenerateContent(ctx context.Context, messages []model.Message, 
 	payload := string(pc.Body)
 
 	if err != nil {
-		return "", payload, err
+		return "", payload, c.classifyRateLimit(err)
 	}
 
 	return extractResponseText(msg), payload, nil
@@ -75,6 +76,34 @@ func (c *Client) IsRetryable(err error) bool {
 		return aerr.StatusCode >= http.StatusInternalServerError
 	}
 	return false
+}
+
+func (c *Client) classifyRateLimit(err error) error {
+	var apiErr *anthropic.Error
+	if c.config.AnthropicBaseURL != zAIAnthropicBaseURL || !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusTooManyRequests {
+		return err
+	}
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if json.Unmarshal([]byte(apiErr.RawJSON()), &body) != nil {
+		return err
+	}
+	switch body.Error.Code {
+	case "1302", "1305":
+		retryAfter := apiErr.Response.Header.Get("Retry-After")
+		delay, parseErr := time.ParseDuration(retryAfter + "s")
+		if parseErr != nil {
+			if retryAt, dateErr := http.ParseTime(retryAfter); dateErr == nil {
+				delay = time.Until(retryAt)
+			}
+		}
+		return &provider.TemporaryRateLimitError{Err: err, RetryAfter: delay}
+	default:
+		return err
+	}
 }
 
 func (c *Client) IsBadRequest(err error) bool {

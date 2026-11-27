@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 
 	"claude_bot/internal/llm/provider"
 	"claude_bot/internal/model"
@@ -13,6 +15,24 @@ import (
 )
 
 const structuredResultToolName = "submit_json_result"
+
+type structuredResponseKey struct{}
+
+type structuredResponseTransport struct{ http.RoundTripper }
+
+func (t structuredResponseTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	response, err := t.RoundTripper.RoundTrip(req)
+	if body, ok := req.Context().Value(structuredResponseKey{}).(*bytes.Buffer); ok {
+		body.Reset()
+		if err == nil && response.StatusCode == http.StatusOK {
+			response.Body = struct {
+				io.Reader
+				io.Closer
+			}{io.TeeReader(response.Body, body), response.Body}
+		}
+	}
+	return response, err
+}
 
 func (c *Client) SupportsStructuredOutput() bool { return true }
 
@@ -45,16 +65,22 @@ func (c *Client) GenerateStructuredContent(ctx context.Context, messages []model
 		return "", "", err
 	}
 
-	resp, err := requestModel.GenerateContent(ctx, parts...)
-	if err != nil {
-		return "", "", err
+	var responseBody bytes.Buffer
+	responseCtx := context.WithValue(ctx, structuredResponseKey{}, &responseBody)
+	resp, err := requestModel.GenerateContent(responseCtx, parts...)
+	var result string
+	if err == nil {
+		result, err = extractStructuredResult(resp)
 	}
-
-	result, err := extractStructuredResult(resp)
-	if err != nil {
-		return "", "", err
+	if err != nil && responseBody.Len() > 0 {
+		body := responseBody.Bytes()
+		var compactJSON bytes.Buffer
+		if json.Compact(&compactJSON, body) == nil {
+			body = compactJSON.Bytes()
+		}
+		err = fmt.Errorf("%w\n応答JSON: %s", err, body)
 	}
-	return result, "", nil
+	return result, "", err
 }
 
 func toGeminiSchema(schema *provider.StructuredSchema) *genai.Schema {

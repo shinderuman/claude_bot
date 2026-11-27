@@ -2,12 +2,10 @@ package facts
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"time"
 
-	"claude_bot/internal/llm"
 	"claude_bot/internal/model"
 	"claude_bot/internal/prompts"
 )
@@ -18,7 +16,7 @@ func (s *FactService) ExtractAndSaveFacts(ctx context.Context, message string, b
 	}
 
 	prompt := prompts.BuildFactExtractionPrompt(baseFact.AuthorUserName, baseFact.Author, message, s.config.BotUsername, baseFact.IsTrusted)
-	extracted := s.extractFacts(ctx, prompt, "事実抽出")
+	extracted := s.extractFacts(ctx, prompt, "ファクト抽出")
 	if len(extracted) == 0 {
 		return
 	}
@@ -57,7 +55,11 @@ func (s *FactService) ExtractAndSaveFactsFromURLContent(ctx context.Context, url
 
 func (s *FactService) CollectURLFacts(ctx context.Context, urlContent string, baseFact model.Fact, generalTargetName string) {
 	prompt := prompts.BuildURLContentFactExtractionPrompt(urlContent)
-	for _, item := range s.extractFacts(ctx, prompt, "URL事実抽出") {
+	extracted := s.extractFacts(ctx, prompt, "URL "+baseFact.SourceURL+" のファクト抽出")
+	if len(extracted) > 0 {
+		log.Printf("URLファクト抽出: %d件", len(extracted))
+	}
+	for _, item := range extracted {
 		fact := baseFact
 		fact.Target, fact.TargetUserName = item.Target, item.TargetUserName
 		if fact.Target == "" && generalTargetName != "" {
@@ -71,7 +73,7 @@ func (s *FactService) CollectURLFacts(ctx context.Context, urlContent string, ba
 
 func (s *FactService) CollectPostFacts(ctx context.Context, content string, baseFact model.Fact) {
 	prompt := prompts.BuildFactExtractionPrompt(baseFact.AuthorUserName, baseFact.Author, content, s.config.BotUsername, false)
-	for _, item := range s.extractFacts(ctx, prompt, "投稿: "+baseFact.Author) {
+	for _, item := range s.extractFacts(ctx, prompt, baseFact.Author+"の投稿ファクト抽出") {
 		fact := baseFact
 		fact.Target, fact.TargetUserName = item.Target, item.TargetUserName
 		if fact.Target == "" {
@@ -84,13 +86,9 @@ func (s *FactService) CollectPostFacts(ctx context.Context, content string, base
 
 func (s *FactService) extractFacts(ctx context.Context, prompt, operation string) []model.Fact {
 	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
-	response := s.llmClient.GenerateText(ctx, messages, prompts.Messages.System.FactExtraction, s.config.MaxFactTokens, nil, llm.TemperatureSystem)
-	if response == "" {
-		return nil
-	}
 	var extracted []model.Fact
-	if err := json.Unmarshal([]byte(response), &extracted); err != nil {
-		log.Printf("%sのJSON解析失敗: %v", operation, err)
+	if err := s.llmClient.GenerateJSON(ctx, messages, prompts.Messages.System.FactExtraction, s.config.MaxFactTokens, operation, &extracted); err != nil {
+		log.Printf("%s失敗: %v", operation, err)
 		return nil
 	}
 	return extracted
@@ -102,7 +100,7 @@ func (s *FactService) ExtractAndSaveFactsFromSummary(ctx context.Context, summar
 	}
 
 	prompt := prompts.BuildSummaryFactExtractionPrompt(summary, baseFact.Author)
-	for _, item := range s.extractFacts(ctx, prompt, "サマリ事実抽出") {
+	for _, item := range s.extractFacts(ctx, prompt, "要約ファクト抽出") {
 		target, targetUserName := resolveFactTarget(item.Target, item.TargetUserName, baseFact.Author, baseFact.Author, true)
 
 		fact := model.Fact{

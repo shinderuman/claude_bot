@@ -116,7 +116,7 @@ func runConversation(cfg *config.Config, client *llm.Client, lastMessage string)
 		log.Println()
 	}
 
-	response, err := generateInCharacter(cfg, client, messages, cfg.MaxResponseTokens)
+	response, err := generateInCharacter(cfg, client, messages, cfg.MaxResponseTokens, "返信生成")
 	if err != nil {
 		return err
 	}

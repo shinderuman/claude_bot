@@ -277,8 +277,8 @@ func TestMaintenanceStopsWhenFactsCannotBeListed(t *testing.T) {
 	}
 
 	factStore := NewFactStore(storage, "")
-	if deleted, err := factStore.PerformMaintenance(t.Context(), 30, 1); deleted != 0 || err == nil {
-		t.Fatalf("maintenance = %d deletions, %v", deleted, err)
+	if expired, overLimit, err := factStore.PerformMaintenance(t.Context(), 30, 1); expired != 0 || overLimit != 0 || err == nil {
+		t.Fatalf("maintenance = %d expired, %d over limit, %v", expired, overLimit, err)
 	}
 	if facts, err := storage.GetByTarget(t.Context(), "user"); err != nil || len(facts) != 2 {
 		t.Fatalf("facts after failed maintenance = %+v, %v", facts, err)

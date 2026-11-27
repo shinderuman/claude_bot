@@ -17,6 +17,7 @@ import (
 	"github.com/google/generative-ai-go/genai"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
+	httptransport "google.golang.org/api/transport/http"
 )
 
 const MinProfileResponseLength = 50
@@ -29,10 +30,17 @@ type Client struct {
 
 func NewClient(cfg *config.Config) (provider.Provider, error) {
 	ctx := context.Background()
+	if cfg.GeminiAPIKey == "" {
+		return nil, fmt.Errorf("GEMINI_API_KEY が設定されていません")
+	}
+	apiKey := option.WithAPIKey(cfg.GeminiAPIKey)
+	httpClient, _, err := httptransport.NewClient(ctx, apiKey)
+	if err != nil {
+		return nil, fmt.Errorf("Gemini HTTPクライアント作成エラー: %w", err)
+	}
+	httpClient.Transport = structuredResponseTransport{httpClient.Transport}
 
-	client, err := genai.NewClient(ctx,
-		option.WithAPIKey(cfg.GeminiAPIKey),
-	)
+	client, err := genai.NewClient(ctx, apiKey, option.WithHTTPClient(httpClient))
 	if err != nil {
 		return nil, fmt.Errorf("Geminiクライアント作成エラー: %w", err)
 	}
@@ -174,7 +182,7 @@ func (c *Client) validateResponse(ctx context.Context, resp *genai.GenerateConte
 		finishReason = resp.Candidates[0].FinishReason
 	}
 
-	return "", fmt.Errorf("%w (%d chars, reason: %s)", provider.ErrResponseTooShort, runeCount, finishReason)
+	return "", fmt.Errorf("%w: %d文字、終了理由 %s、応答 %q", provider.ErrResponseTooShort, runeCount, finishReason, responseText)
 }
 
 func (c *Client) IsRetryable(err error) bool {

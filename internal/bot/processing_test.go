@@ -1,10 +1,13 @@
 package bot
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -22,6 +25,25 @@ import (
 
 	gomastodon "github.com/mattn/go-mastodon"
 )
+
+func TestUserStreamLogsDifferentErrorsInTheSameMinute(t *testing.T) {
+	var logs bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(previous) })
+
+	messages := []string{"connection reset", "connection reset", "401 Unauthorized"}
+	events := make(chan gomastodon.Event, len(messages))
+	for _, message := range messages {
+		events <- &gomastodon.ErrorEvent{Err: errors.New(message)}
+	}
+	close(events)
+	(&Bot{}).consumeUserStream(t.Context(), events)
+
+	if got := logs.String(); strings.Count(got, "connection reset") != 1 || strings.Count(got, "401 Unauthorized") != 1 {
+		t.Fatalf("log = %q, want both errors once", got)
+	}
+}
 
 func TestAnalysisURLCandidatesUseFullAuthoredLinks(t *testing.T) {
 	const start = "https://example.org/@user/123?ref=post&amp;via=web"

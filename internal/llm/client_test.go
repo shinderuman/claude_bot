@@ -1,16 +1,22 @@
 package llm
 
 import (
-	"claude_bot/internal/config"
-	"claude_bot/internal/model"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"time"
+
+	"claude_bot/internal/config"
+	"claude_bot/internal/model"
 )
 
 type TestError struct {
@@ -95,7 +101,7 @@ func TestClient_ConcurrencyLimit(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			client.GenerateText(context.Background(), nil, "", 100, nil, 0.0)
+			client.GenerateText(context.Background(), nil, "", 100, nil, 0.0, "テスト生成")
 		}()
 	}
 	wg.Wait()
@@ -130,7 +136,7 @@ func TestClient_RetryLogic(t *testing.T) {
 	client.provider = mockP
 
 	start := time.Now()
-	resp := client.GenerateText(context.Background(), nil, "", 100, nil, 0.0)
+	resp := client.GenerateText(context.Background(), nil, "", 100, nil, 0.0, "テスト生成")
 	elapsed := time.Since(start)
 
 	if resp != "success" {
@@ -168,7 +174,7 @@ func TestClient_RateLimitNoRetry(t *testing.T) {
 	client.provider = mockP
 
 	start := time.Now()
-	resp := client.GenerateText(context.Background(), nil, "", 100, nil, 0.0)
+	resp := client.GenerateText(context.Background(), nil, "", 100, nil, 0.0, "テスト生成")
 	elapsed := time.Since(start)
 
 	if resp != "" {
@@ -179,6 +185,43 @@ func TestClient_RateLimitNoRetry(t *testing.T) {
 	}
 	if elapsed >= 1*time.Second {
 		t.Errorf("Expected no backoff delay on 429, got %v", elapsed)
+	}
+}
+
+func TestGenerateTextLogsTimeoutWithOperation(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		want string
+		send roundTripFunc
+	}{
+		{name: "headers", want: "Client.Timeout exceeded while awaiting headers", send: func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("Client.Timeout exceeded while awaiting headers")
+		}},
+		{name: "body", want: "error reading response body: context deadline exceeded", send: func(req *http.Request) (*http.Response, error) {
+			response := stubResponse(req, http.StatusOK, "application/json", "")
+			response.Body = io.NopCloser(iotest.ErrReader(context.DeadlineExceeded))
+			return response, nil
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			stubDefaultTransport(t, tt.send)
+			client, err := NewClient(&config.Config{
+				LLMProvider: config.LLMProviderClaude, LLMMaxConcurrency: 1, AnthropicModel: "glm-test",
+				AnthropicBaseURL: "https://api.z.ai/api/anthropic", AnthropicAuthToken: "test-token",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var logs bytes.Buffer
+			previous := log.Writer()
+			log.SetOutput(&logs)
+			t.Cleanup(func() { log.SetOutput(previous) })
+
+			client.GenerateText(t.Context(), nil, "", 100, nil, 0, "自動投稿文生成")
+			if got := logs.String(); !strings.Contains(got, "自動投稿文生成失敗: ") || !strings.Contains(got, tt.want) || strings.Count(got, "\n") != 1 {
+				t.Fatalf("log = %q, want one line with the operation and %q", got, tt.want)
+			}
+		})
 	}
 }
 

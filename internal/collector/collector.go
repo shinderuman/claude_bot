@@ -90,6 +90,7 @@ func (fc *FactCollector) Start(ctx context.Context) {
 		log.Printf("連合ストリーム開始失敗: %v", err)
 		return
 	}
+	log.Println("連合ストリーム監視開始")
 	go fc.processEvents(ctx, events)
 }
 
@@ -108,20 +109,23 @@ func (fc *FactCollector) ProcessHomeEvent(ctx context.Context, event *gomastodon
 }
 
 func (fc *FactCollector) processEvents(ctx context.Context, eventChan <-chan gomastodon.Event) {
-	var lastError time.Time
+	var lastError string
+	var lastErrorAt time.Time
 	for event := range eventChan {
 		if ctx.Err() != nil {
 			continue
 		}
 		if event, ok := event.(*gomastodon.ErrorEvent); ok {
-			if time.Since(lastError) >= time.Minute {
-				log.Printf("連合ストリームエラー: %v", event.Err)
-				lastError = time.Now()
+			message := event.Err.Error()
+			if message != lastError || time.Since(lastErrorAt) >= time.Minute {
+				log.Printf("連合ストリームエラー: %s", message)
+				lastError, lastErrorAt = message, time.Now()
 			}
 			continue
 		}
 		fc.handleStatus(ctx, mastodon.ExtractStatusFromEvent(event), model.SourceTypeFederated)
 	}
+	log.Println("連合ストリーム監視終了")
 }
 
 func (fc *FactCollector) handleStatus(ctx context.Context, status *gomastodon.Status, sourceType string) {

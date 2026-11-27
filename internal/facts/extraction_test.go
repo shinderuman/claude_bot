@@ -1,13 +1,76 @@
 package facts
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
+	"log"
+	"net/http"
+	"strings"
 	"testing"
+	"time"
 
 	"claude_bot/internal/config"
+	"claude_bot/internal/llm"
 	"claude_bot/internal/model"
 	"claude_bot/internal/store"
 )
+
+type factExtractionTransport func(*http.Request) (*http.Response, error)
+
+func (f factExtractionTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestURLFactExtractionLogsCompleteInvalidResponse(t *testing.T) {
+	const sourceURL = "https://example.com/article"
+	responseJSON := "[\n  \"先頭" + strings.Repeat("x", 256) + "\": \"末尾\"\n]\n"
+	data, err := json.Marshal(responseJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousTransport := http.DefaultTransport
+	http.DefaultTransport = factExtractionTransport(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": {"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"content":[{"type":"text","text":` + string(data) + `}]}`)),
+			Request:    req,
+		}, nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = previousTransport })
+
+	var logs bytes.Buffer
+	previousWriter := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(previousWriter) })
+	alerts := make(chan string, 1)
+	llm.SetErrorNotifier(func(_, details string) { alerts <- details })
+	t.Cleanup(func() { llm.SetErrorNotifier(nil) })
+
+	cfg := &config.Config{
+		EnableFactStore: true, MaxFactTokens: 1024, LLMMaxConcurrency: 1,
+		LLMProvider: config.LLMProviderClaude, AnthropicBaseURL: "https://api.z.ai/api/anthropic", AnthropicModel: "test-model",
+	}
+	client, err := llm.NewClient(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewFactService(cfg, nil, client, nil, nil, nil)
+	service.ExtractAndSaveFactsFromURLContent(t.Context(), "page content", model.Fact{SourceURL: sourceURL})
+
+	var alert string
+	select {
+	case alert = <-alerts:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no LLM alert")
+	}
+	want := "URL " + sourceURL + " のファクト抽出失敗: JSON不正: 269バイト目: invalid character ':' after array element\nJSON: " + responseJSON
+	if !strings.HasSuffix(logs.String(), want) || alert != want {
+		t.Fatalf("log = %q\nalert = %q\nwant the whole response in both: %q", logs.String(), alert, want)
+	}
+}
 
 func TestExtractAndSaveFactsFromURLContent_MetadataPropagation(t *testing.T) {
 	var capturedFacts []model.Fact

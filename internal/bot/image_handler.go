@@ -46,7 +46,7 @@ func (b *Bot) handleImageGeneration(ctx context.Context, session *model.Session,
 
 	replyPrompt := prompts.BuildImageGenerationReplyPrompt(imagePrompt, b.config.CharacterPrompt)
 	replyMessages := []model.Message{{Role: model.RoleUser, Content: replyPrompt}}
-	response := b.llmClient.GenerateText(ctx, replyMessages, "", b.config.MaxResponseTokens, nil, b.config.LLMTemperature)
+	response := b.llmClient.GenerateText(ctx, replyMessages, "", b.config.MaxResponseTokens, nil, b.config.LLMTemperature, "画像への添え文生成")
 
 	if response == "" {
 		response = prompts.Messages.Success.ImageGeneration

@@ -40,7 +40,7 @@ func (b *Bot) handleAssistantRequest(ctx context.Context, session *model.Session
 	prompt := prompts.BuildAssistantAnalysisPrompt(statuses, userMessage)
 	systemPrompt := prompts.BuildSystemPrompt(b.config, "", "", "", true, b.config.CharacterPriority)
 
-	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: model.RoleUser, Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil, llm.TemperatureSystem)
+	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: model.RoleUser, Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil, llm.TemperatureSystem, "投稿分析の応答生成")
 
 	if response == "" {
 		b.postErrorMessage(ctx, statusID, mention, visibility, prompts.Messages.Error.AnalysisGeneration)
@@ -108,7 +108,7 @@ func (b *Bot) handleDailySummaryRequest(ctx context.Context, session *model.Sess
 	prompt := prompts.BuildDailySummaryPrompt(statuses, targetDateStr, userMessage, loc)
 	systemPrompt := prompts.BuildSystemPrompt(b.config, "", "", "", true, b.config.CharacterPriority)
 
-	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: model.RoleUser, Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil, llm.TemperatureSystem)
+	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: model.RoleUser, Content: prompt}}, systemPrompt, b.config.MaxSummaryTokens, nil, llm.TemperatureSystem, "日次まとめ生成")
 
 	if response == "" {
 		b.postErrorMessage(ctx, statusID, mention, visibility, prompts.Messages.Error.SummaryGeneration)

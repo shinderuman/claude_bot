@@ -27,8 +27,9 @@ type Client struct {
 	config    *config.Config
 	semaphore chan struct{}
 
-	rateLimitMu        sync.Mutex
-	lastRateLimitNotif time.Time
+	rateLimitMu                 sync.Mutex
+	lastRateLimitNotif          time.Time
+	lastTemporaryRateLimitNotif time.Time
 }
 
 func NewClient(cfg *config.Config) (*Client, error) {
@@ -67,47 +68,46 @@ func (c *Client) GenerateResponse(ctx context.Context, session *model.Session, c
 	}
 	systemPrompt := prompts.BuildSystemPrompt(c.config, sessionSummary, relevantFacts, botProfile, true, c.config.CharacterPriority)
 
-	return c.GenerateText(ctx, conversation.Messages, systemPrompt, c.config.MaxResponseTokens, currentImages, c.config.LLMTemperature)
+	return c.GenerateText(ctx, conversation.Messages, systemPrompt, c.config.MaxResponseTokens, currentImages, c.config.LLMTemperature, "返信生成")
 }
 
 func (c *Client) GenerateSummary(ctx context.Context, messages []model.Message, summary string) string {
 	systemPrompt := prompts.BuildSystemPrompt(c.config, summary, "", "", false, 0.0)
-	return c.GenerateText(ctx, messages, systemPrompt, c.config.MaxSummaryTokens, nil, TemperatureSystem)
+	return c.GenerateText(ctx, messages, systemPrompt, c.config.MaxSummaryTokens, nil, TemperatureSystem, "会話要約生成")
 }
 
-func (c *Client) GenerateText(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, currentImages []model.Image, temperature float64) string {
+func (c *Client) GenerateText(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, currentImages []model.Image, temperature float64, operation string) string {
+	content, err := c.generate(ctx, messages, systemPrompt, maxTokens, currentImages, temperature, operation, nil, nil)
+	if err != nil {
+		log.Printf("%s失敗: %v", operation, err)
+	}
+	return content
+}
+
+func (c *Client) generate(ctx context.Context, messages []model.Message, systemPrompt string, maxTokens int64, currentImages []model.Image, temperature float64, operation string, schema *provider.StructuredSchema, result any) (string, error) {
 	select {
 	case c.semaphore <- struct{}{}:
 		defer func() { <-c.semaphore }()
 	case <-ctx.Done():
-		log.Printf("待機中のLLMリクエスト取消: %v", ctx.Err())
-		return ""
+		return "", fmt.Errorf("待機中のLLMリクエスト取消: %w", ctx.Err())
 	}
 
 	msgs, sysPrompt := c.adjustForGemma(messages, systemPrompt)
-	schema := structuredOutputSchema(systemPrompt)
-	content, payload, err := c.executeWithRetry(ctx, func() (string, string, error) {
-		if schema == nil {
-			return c.provider.GenerateContent(ctx, msgs, sysPrompt, maxTokens, currentImages, temperature)
+	content, payload, err := c.executeWithRetry(ctx, operation, func() (string, string, error) {
+		if schema != nil && c.provider.SupportsStructuredOutput() {
+			return c.provider.GenerateStructuredContent(ctx, msgs, sysPrompt, maxTokens, currentImages, temperature, schema)
 		}
-
-		var content, payload string
-		var err error
-		if c.provider.SupportsStructuredOutput() {
-			content, payload, err = c.provider.GenerateStructuredContent(ctx, msgs, sysPrompt, maxTokens, currentImages, temperature, schema)
-		} else {
-			content, payload, err = c.provider.GenerateContent(ctx, msgs, sysPrompt, maxTokens, currentImages, temperature)
-		}
-		if err == nil && !schema.Accepts(content) {
-			return "", payload, provider.ErrInvalidStructuredOutput
-		}
-		return content, payload, err
+		return c.provider.GenerateContent(ctx, msgs, sysPrompt, maxTokens, currentImages, temperature)
 	})
-	if err != nil {
-		c.reportGenerationError(err, payload)
-		return ""
+	if err == nil && schema != nil {
+		if err = schema.Decode(content, result); err != nil && content != "" {
+			err = fmt.Errorf("%w\nJSON: %s", err, content)
+		}
 	}
-	return content
+	if err != nil {
+		c.notifyGenerationError(operation, err, payload)
+	}
+	return content, err
 }
 
 func (c *Client) adjustForGemma(messages []model.Message, systemPrompt string) ([]model.Message, string) {

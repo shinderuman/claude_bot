@@ -2,7 +2,6 @@ package image
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 
@@ -31,18 +30,12 @@ func (g *ImageGenerator) GenerateSVG(ctx context.Context, prompt string) (string
 
 	userPrompt := prompts.BuildImageGenerationPrompt(prompt)
 	messages := []model.Message{{Role: model.RoleUser, Content: userPrompt}}
-	response := g.llmClient.GenerateText(ctx, messages, prompts.Messages.System.ImageGeneration, g.config.MaxImageTokens, nil, llm.TemperatureSystem)
-
-	if response == "" {
-		return "", fmt.Errorf("LLMからの応答がありません")
-	}
-
 	var result struct {
 		SVG string `json:"svg"`
 	}
 
-	if err := json.Unmarshal([]byte(response), &result); err != nil {
-		return "", fmt.Errorf("JSONパースエラー: %v", err)
+	if err := g.llmClient.GenerateJSON(ctx, messages, prompts.Messages.System.ImageGeneration, g.config.MaxImageTokens, "画像生成", &result); err != nil {
+		return "", err
 	}
 
 	if result.SVG == "" {

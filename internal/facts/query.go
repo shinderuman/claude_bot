@@ -2,12 +2,10 @@ package facts
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
 
-	"claude_bot/internal/llm"
 	"claude_bot/internal/model"
 	"claude_bot/internal/prompts"
 )
@@ -20,14 +18,9 @@ func (s *FactService) QueryRelevantFacts(ctx context.Context, author, authorUser
 	prompt := prompts.BuildFactQueryPrompt(authorUserName, author, message)
 	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 
-	response := s.llmClient.GenerateText(ctx, messages, prompts.Messages.System.FactQuery, s.config.MaxResponseTokens, nil, llm.TemperatureSystem)
-	if response == "" {
-		return ""
-	}
-
 	var q model.SearchQuery
-	if err := json.Unmarshal([]byte(response), &q); err != nil {
-		log.Printf("検索クエリ解析失敗: %v", err)
+	if err := s.llmClient.GenerateJSON(ctx, messages, prompts.Messages.System.FactQuery, s.config.MaxResponseTokens, "検索クエリ生成", &q); err != nil {
+		log.Printf("検索クエリ生成失敗: %v", err)
 		return ""
 	}
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -42,7 +43,7 @@ func TestGenerateContentShortResponsePolicy(t *testing.T) {
 		requests.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(geminiResponse{
-			Candidates: []geminiCandidate{{Content: geminiContent{Parts: []geminiPart{{Text: "短い"}}}}},
+			Candidates: []geminiCandidate{{Content: geminiContent{Parts: []geminiPart{{Text: "短い"}}}, FinishReason: "MAX_TOKENS"}},
 		})
 	}))
 	defer server.Close()
@@ -65,7 +66,7 @@ func TestGenerateContentShortResponsePolicy(t *testing.T) {
 	}
 	profileCtx := context.WithValue(ctx, model.ContextKeyIsProfileGeneration, true)
 	_, _, err = client.GenerateContent(profileCtx, messages, "", 100, nil, 0)
-	if !errors.Is(err, provider.ErrResponseTooShort) || requests.Load() != 2 {
+	if !errors.Is(err, provider.ErrResponseTooShort) || !strings.Contains(err.Error(), `応答 "短い"`) || !strings.Contains(err.Error(), genai.FinishReasonMaxTokens.String()) || requests.Load() != 2 {
 		t.Fatalf("profile error = %v, requests = %d", err, requests.Load())
 	}
 }

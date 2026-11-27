@@ -2,9 +2,18 @@ package provider
 
 import (
 	"context"
+	"time"
 
 	"claude_bot/internal/model"
 )
+
+type TemporaryRateLimitError struct {
+	Err        error
+	RetryAfter time.Duration
+}
+
+func (e *TemporaryRateLimitError) Error() string { return e.Err.Error() }
+func (e *TemporaryRateLimitError) Unwrap() error { return e.Err }
 
 type Provider interface {
 	SupportsStructuredOutput() bool

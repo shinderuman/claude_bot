@@ -66,7 +66,8 @@ func (b *Bot) Run(ctx context.Context) error {
 }
 
 func (b *Bot) consumeUserStream(ctx context.Context, events <-chan gomastodon.Event) {
-	var lastError time.Time
+	var lastError string
+	var lastErrorAt time.Time
 	for event := range events {
 		if ctx.Err() != nil {
 			continue
@@ -89,9 +90,10 @@ func (b *Bot) consumeUserStream(ctx context.Context, events <-chan gomastodon.Ev
 				b.factCollector.ProcessHomeEvent(ctx, e)
 			}
 		case *gomastodon.ErrorEvent:
-			if time.Since(lastError) >= time.Minute {
-				log.Printf("ユーザーストリームエラー: %v", e.Err)
-				lastError = time.Now()
+			message := e.Err.Error()
+			if message != lastError || time.Since(lastErrorAt) >= time.Minute {
+				log.Printf("ユーザーストリームエラー: %s", message)
+				lastError, lastErrorAt = message, time.Now()
 			}
 		}
 	}

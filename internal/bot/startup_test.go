@@ -81,6 +81,7 @@ func TestRunWithDelay_ContextCancelBetweenTasks(t *testing.T) {
 func TestPrepareStartupTasks_Maintenance(t *testing.T) {
 	b1 := &Bot{
 		config: &config.Config{
+			EnableFactStore:         true,
 			RunMaintenanceOnStartup: false,
 		},
 	}
@@ -91,11 +92,16 @@ func TestPrepareStartupTasks_Maintenance(t *testing.T) {
 
 	b2 := &Bot{
 		config: &config.Config{
+			EnableFactStore:         true,
 			RunMaintenanceOnStartup: true,
 		},
 	}
 	_, heavyTasks2 := b2.prepareStartupTasks()
 	if len(heavyTasks2) != 1 {
 		t.Errorf("Expected 1 heavy task when maintenance is enabled, got %d", len(heavyTasks2))
+	}
+	b2.config.EnableFactStore = false
+	if _, tasks := b2.prepareStartupTasks(); len(tasks) != 0 {
+		t.Errorf("scheduled %d heavy tasks with the fact store disabled", len(tasks))
 	}
 }

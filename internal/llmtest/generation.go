@@ -2,6 +2,7 @@ package llmtest
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -64,16 +65,15 @@ func runFactExtraction(cfg *config.Config, client *llm.Client, message string) e
 
 	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 	ctx := context.Background()
-	response := client.GenerateText(ctx, messages, prompts.Messages.System.FactExtraction, cfg.MaxResponseTokens, nil, llm.TemperatureSystem)
-
-	if response == "" {
-		return errors.New("エラー: 事実抽出に失敗しました")
+	var response json.RawMessage
+	if err := client.GenerateJSON(ctx, messages, prompts.Messages.System.FactExtraction, cfg.MaxResponseTokens, "ファクト抽出", &response); err != nil {
+		return fmt.Errorf("ファクト抽出失敗: %w", err)
 	}
 
 	log.Println("ファクト抽出完了")
 	log.Println()
 	log.Println("--- 抽出された事実 (JSON) ---")
-	log.Println(response)
+	log.Println(string(response))
 	log.Println("----------------------------")
 	return nil
 }
@@ -114,7 +114,7 @@ func runAutoPost(cfg *config.Config, client *llm.Client) error {
 	log.Println()
 
 	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
-	response, err := generateInCharacter(cfg, client, messages, int64(cfg.MaxPostChars))
+	response, err := generateInCharacter(cfg, client, messages, int64(cfg.MaxPostChars), "自動投稿文生成")
 	if err != nil {
 		return err
 	}
@@ -144,7 +144,7 @@ func runErrorMessageGeneration(cfg *config.Config, client *llm.Client, errorDeta
 	}
 
 	messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
-	response, err := generateInCharacter(cfg, client, messages, cfg.MaxResponseTokens)
+	response, err := generateInCharacter(cfg, client, messages, cfg.MaxResponseTokens, "エラーメッセージ生成")
 	if err != nil {
 		return err
 	}
@@ -157,9 +157,9 @@ func runErrorMessageGeneration(cfg *config.Config, client *llm.Client, errorDeta
 	return nil
 }
 
-func generateInCharacter(cfg *config.Config, client *llm.Client, messages []model.Message, maxTokens int64) (string, error) {
+func generateInCharacter(cfg *config.Config, client *llm.Client, messages []model.Message, maxTokens int64, operation string) (string, error) {
 	systemPrompt := prompts.BuildSystemPrompt(cfg, "", "", "", true, cfg.CharacterPriority)
-	response := client.GenerateText(context.Background(), messages, systemPrompt, maxTokens, nil, cfg.LLMTemperature)
+	response := client.GenerateText(context.Background(), messages, systemPrompt, maxTokens, nil, cfg.LLMTemperature, operation)
 	if response == "" {
 		return "", errEmptyReply
 	}

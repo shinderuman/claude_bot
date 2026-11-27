@@ -2,7 +2,6 @@ package facts
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/fnv"
@@ -11,7 +10,6 @@ import (
 	"time"
 
 	"claude_bot/internal/discovery"
-	"claude_bot/internal/llm"
 	"claude_bot/internal/model"
 	"claude_bot/internal/prompts"
 )
@@ -184,23 +182,17 @@ func (s *FactService) generateArchiveFacts(ctx context.Context, target string, f
 		prompt := prompts.BuildFactArchivingPrompt(batch)
 		messages := []model.Message{{Role: model.RoleUser, Content: prompt}}
 
-		systemPrompt := prompts.Messages.System.FactExtraction
-
-		response := s.llmClient.GenerateText(ctx, messages, systemPrompt, s.config.MaxSummaryTokens, nil, llm.TemperatureSystem)
-		if response == "" {
-			return nil, fmt.Errorf("バッチ %d-%d のLLM応答が空です", i+1, end)
-		}
-
 		var chunkArchives []model.Fact
-		if err := json.Unmarshal([]byte(response), &chunkArchives); err != nil {
-			return nil, fmt.Errorf("バッチ %d-%d のJSONパースエラー: %w", i+1, end, err)
+		batchLabel := fmt.Sprintf("バッチ %d-%d", i+1, end)
+		if err := s.llmClient.GenerateJSON(ctx, messages, prompts.Messages.System.FactExtraction, s.config.MaxSummaryTokens, "ファクトアーカイブ "+batchLabel, &chunkArchives); err != nil {
+			return nil, fmt.Errorf("%s: %w", batchLabel, err)
 		}
 		if len(chunkArchives) == 0 {
-			return nil, fmt.Errorf("バッチ %d-%d のアーカイブ結果が空です", i+1, end)
+			return nil, fmt.Errorf("%s のアーカイブ結果が空です", batchLabel)
 		}
 		for _, archive := range chunkArchives {
 			if !hasFactKeyAndValue(archive) {
-				return nil, fmt.Errorf("バッチ %d-%d のアーカイブ結果にキーや値がありません", i+1, end)
+				return nil, fmt.Errorf("%s のアーカイブ結果にキーや値がありません", batchLabel)
 			}
 		}
 

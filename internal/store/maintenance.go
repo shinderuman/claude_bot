@@ -37,20 +37,19 @@ func (s *FactStore) Cleanup(ctx context.Context, retention time.Duration) (int, 
 	return deletedTotal, errors.Join(failures...)
 }
 
-func (s *FactStore) PerformMaintenance(ctx context.Context, retentionDays, maxFacts int) (int, error) {
-	deleted, err := s.Cleanup(ctx, time.Duration(retentionDays)*24*time.Hour)
+func (s *FactStore) PerformMaintenance(ctx context.Context, retentionDays, maxFacts int) (expired, overLimit int, err error) {
+	expired, err = s.Cleanup(ctx, time.Duration(retentionDays)*24*time.Hour)
 	if err == nil && maxFacts > 0 {
-		var removedCount int
-		removedCount, err = s.storage.EnforceMaxFacts(ctx, maxFacts)
-		if err == nil {
-			deleted += removedCount
+		overLimit, err = s.storage.EnforceMaxFacts(ctx, maxFacts)
+		if err != nil {
+			err = fmt.Errorf("ファクトの件数上限による削除: %w", err)
 		}
 	}
 
-	if deleted > 0 {
+	if expired > 0 || overLimit > 0 {
 		s.requestBackup()
 	}
-	return deleted, err
+	return expired, overLimit, err
 }
 
 func (s *FactStore) ReplaceFacts(ctx context.Context, target string, factsToRemove, factsToAdd []model.Fact) error {

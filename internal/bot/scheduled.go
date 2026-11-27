@@ -52,6 +52,7 @@ func (b *Bot) runInWindowedLoop(ctx context.Context, interval time.Duration, tas
 	if interval <= 0 {
 		return
 	}
+	log.Printf("%s実行間隔: %s", taskName, interval)
 	b.scheduleDelayedTask(ctx, interval, taskName, task, getJitter, notifySlack)
 
 	go func() {
@@ -122,7 +123,7 @@ func (b *Bot) executeAutoPost(ctx context.Context) {
 	prompt := prompts.BuildAutoPostPrompt(facts)
 	systemPrompt := prompts.BuildSystemPrompt(b.config, "", "", "", true, b.config.CharacterPriority)
 
-	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: model.RoleUser, Content: prompt}}, systemPrompt, int64(b.config.MaxPostChars), nil, b.config.LLMTemperature)
+	response := b.llmClient.GenerateText(ctx, []model.Message{{Role: model.RoleUser, Content: prompt}}, systemPrompt, int64(b.config.MaxPostChars), nil, b.config.LLMTemperature, "自動投稿文生成")
 
 	if response != "" {
 		status, err := b.mastodonClient.PostStatus(ctx, response, b.config.AutoPostVisibility)
