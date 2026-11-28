@@ -14,8 +14,6 @@ import (
 
 const structuredResultToolName = "submit_json_result"
 
-const zAIAnthropicBaseURL = "https://api.z.ai/api/anthropic"
-
 func (c *Client) SupportsStructuredOutput() bool {
 	return c.config.AnthropicBaseURL != zAIAnthropicBaseURL
 }

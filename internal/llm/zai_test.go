@@ -1,12 +1,83 @@
 package llm
 
 import (
+	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"claude_bot/internal/config"
+	"claude_bot/internal/model"
+	"claude_bot/internal/prompts"
 )
+
+func TestZAIErrorNotificationTitle(t *testing.T) {
+	const zaiURL = "https://api.z.ai/api/anthropic"
+	for _, tt := range []struct {
+		name, baseURL, code, wantTitle string
+		status                         int
+	}{
+		{name: "content restriction", baseURL: zaiURL, code: "1301", status: http.StatusBadRequest, wantTitle: "GLM 1301 入力または生成内容がコンテンツ制限に抵触"},
+		{name: "temporary rate limit", baseURL: zaiURL, code: "1302", status: http.StatusTooManyRequests, wantTitle: "GLM 1302 リクエスト頻度の上限に到達"},
+		{name: "five-hour quota", baseURL: zaiURL, code: "1320", status: http.StatusTooManyRequests, wantTitle: "GLM 1320 5時間枠超過"},
+		{name: "unknown code", baseURL: zaiURL, code: "9999", status: http.StatusBadRequest, wantTitle: "LLM生成エラー"},
+		{name: "no code", baseURL: zaiURL, status: http.StatusInternalServerError, wantTitle: "LLM生成エラー"},
+		{name: "other endpoint", baseURL: "https://other.test", code: "1301", status: http.StatusBadRequest, wantTitle: "LLM生成エラー"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			type alert struct{ title, details string }
+			alerts := make(chan alert, 1)
+			previousNotifier := errorNotifier
+			SetErrorNotifier(func(title, details string) { alerts <- alert{title, details} })
+			t.Cleanup(func() { SetErrorNotifier(previousNotifier) })
+
+			body := `{"type":"error","error":{"message":"request failed"}}`
+			if tt.code != "" {
+				body = `{"type":"error","error":{"code":"` + tt.code + `","message":"request failed"}}`
+			}
+			var payload []byte
+			stubDefaultTransport(t, func(req *http.Request) (*http.Response, error) {
+				var err error
+				payload, err = io.ReadAll(req.Body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				response := stubResponse(req, tt.status, "application/json", body)
+				response.Header.Set("Request-Id", "request-123")
+				return response, nil
+			})
+			client, err := NewClient(&config.Config{
+				LLMProvider: config.LLMProviderClaude, LLMMaxConcurrency: 1,
+				AnthropicBaseURL: tt.baseURL, AnthropicAuthToken: "test-token", AnthropicModel: "test-model",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			const operation = "URL https://example.com/article のファクト抽出"
+			var result []model.Fact
+			err = client.GenerateJSON(t.Context(), []model.Message{{Role: model.RoleUser, Content: "page content"}},
+				prompts.Messages.System.FactExtraction, 100, operation, &result)
+			if err == nil || !strings.Contains(err.Error(), body) {
+				t.Fatalf("error = %v, want original response %s", err, body)
+			}
+			wantDetails := fmt.Sprintf("%s失敗: POST %q: %d %s (Request-ID: request-123) %s",
+				operation, tt.baseURL+"/v1/messages", tt.status, http.StatusText(tt.status), body)
+			if tt.status == http.StatusBadRequest {
+				wantDetails += "\n\n[Request Payload]\n" + string(payload)
+			}
+			select {
+			case got := <-alerts:
+				if got.title != tt.wantTitle || got.details != wantDetails {
+					t.Fatalf("alert = %q, %q, want %q, %q", got.title, got.details, tt.wantTitle, wantDetails)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("error notification was not sent")
+			}
+		})
+	}
+}
 
 func TestZAIRateLimitRetry(t *testing.T) {
 	for _, tt := range []struct {

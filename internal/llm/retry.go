@@ -30,7 +30,12 @@ func (c *Client) notifyGenerationError(operation string, err error, payload stri
 
 	if errorNotifier != nil {
 		if c.shouldNotifyRateLimit(err) {
-			go errorNotifier("LLM生成エラー", details)
+			title := "LLM生成エラー"
+			var titled interface{ NotificationTitle() string }
+			if errors.As(err, &titled) {
+				title = titled.NotificationTitle()
+			}
+			go errorNotifier(title, details)
 		} else {
 			log.Printf("LLM 429通知省略: 通知間隔内")
 		}
